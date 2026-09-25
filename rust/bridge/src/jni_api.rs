@@ -1,11 +1,14 @@
 //! JNI entry points for `dev.airgestures.Bridge` (static natives). A connection
-//! is a boxed `Connection` behind a `long` handle; errors become IOException.
+//! is a boxed `Connection` behind a `long` handle, a claim a boxed `Claim`;
+//! errors become IOException.
 
 use jni::JNIEnv;
 use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jdouble, jint, jlong, jstring};
 
 use crate::Connection;
+use crate::claim::Claim;
+use crate::metaauth;
 
 fn throw(env: &mut JNIEnv, message: &str) {
     let _ = env.throw_new("java/io/IOException", message);
@@ -193,5 +196,212 @@ pub extern "system" fn Java_dev_airgestures_Bridge_close<'local>(
 ) {
     if handle != 0 {
         drop(unsafe { Box::from_raw(handle as *mut Connection) });
+    }
+}
+
+// ---- Meta sign-in (blocking HTTP: call off the main thread) ----
+
+fn get_string(env: &mut JNIEnv, string: &JString) -> Result<String, String> {
+    env.get_string(string)
+        .map(String::from)
+        .map_err(|e| e.to_string())
+}
+
+fn json_out(env: &mut JNIEnv, result: Result<String, String>) -> jstring {
+    match result {
+        Ok(text) => string_out(env, text),
+        Err(message) => {
+            throw(env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// `{"url": Meta's sign-in page, "native": the token that checks and finishes the callback}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_signinStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let result = metaauth::tokens_query().map(|tokens| {
+        serde_json::json!({
+            "url": metaauth::auth_entry_url(&tokens),
+            "native": tokens.native_sso_token,
+        })
+        .to_string()
+    });
+    json_out(&mut env, result)
+}
+
+/// A navigation the web view must cancel: the sign-in callback's shape.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_signinIsCallback<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    url: JString<'local>,
+) -> jboolean {
+    match get_string(&mut env, &url) {
+        Ok(url) => metaauth::is_callback(&url) as jboolean,
+        Err(message) => {
+            throw(&mut env, &message);
+            0
+        }
+    }
+}
+
+/// The callback is the real one: the token digest of `native` and a non-empty blob.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_signinAccepts<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    url: JString<'local>,
+    native: JString<'local>,
+) -> jboolean {
+    let strings = get_string(&mut env, &url)
+        .and_then(|url| get_string(&mut env, &native).map(|native| (url, native)));
+    match strings {
+        Ok((url, native)) => metaauth::accepts_callback(&url, &native) as jboolean,
+        Err(message) => {
+            throw(&mut env, &message);
+            0
+        }
+    }
+}
+
+/// Decrypt the callback and log in: the session JSON to keep (secret; never log it).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_signinFinish<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    url: JString<'local>,
+    native: JString<'local>,
+) -> jstring {
+    let result = get_string(&mut env, &url)
+        .and_then(|url| get_string(&mut env, &native).map(|native| (url, native)))
+        .and_then(|(url, native)| metaauth::finish(&url, &native))
+        .and_then(|session| serde_json::to_string(&session).map_err(|e| e.to_string()));
+    json_out(&mut env, result)
+}
+
+// ---- The ownership claim: a boxed `Claim` behind a `long` handle ----
+
+/// # Safety
+/// `handle` must come from `claimOpen` and not have been passed to `claimClose`.
+unsafe fn claim<'a>(handle: jlong) -> &'a mut Claim {
+    unsafe { &mut *(handle as *mut Claim) }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimOpen<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session_json: JString<'local>,
+    files_dir: JString<'local>,
+    scheme_guess: jint,
+) -> jlong {
+    let opened = get_string(&mut env, &session_json)
+        .and_then(|json| get_string(&mut env, &files_dir).map(|dir| (json, dir)))
+        .and_then(|(json, dir)| Claim::new(&json, dir, scheme_guess.max(0) as usize));
+    match opened {
+        Ok(claim) => Box::into_raw(Box::new(claim)) as jlong,
+        Err(message) => {
+            throw(&mut env, &message);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimRequest<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    let bytes = unsafe { claim(handle) }.request();
+    bytes_out(&mut env, Ok(bytes))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimFeed<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    bytes: JByteArray<'local>,
+    now: jdouble,
+) -> jbyteArray {
+    let result = env
+        .convert_byte_array(&bytes)
+        .map_err(|e| e.to_string())
+        .map(|bytes| unsafe { claim(handle) }.feed(&bytes, now));
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimTick<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jbyteArray {
+    let bytes = unsafe { claim(handle) }.tick(now);
+    bytes_out(&mut env, Ok(bytes))
+}
+
+/// The channel closed or failed while the claim was running (`message`: why, or empty).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimClosed<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    message: JString<'local>,
+) {
+    match get_string(&mut env, &message) {
+        Ok(message) => unsafe { claim(handle) }.closed(&message),
+        Err(message) => throw(&mut env, &message),
+    }
+}
+
+/// Progress lines since the last call, joined with '\n' (empty: none).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimLog<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let lines = unsafe { claim(handle) }.take_log().join("\n");
+    string_out(&mut env, lines)
+}
+
+/// "running", "done", "failed: …" or "expired: …" (the Meta sign-in must be redone).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimState<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let state = unsafe { claim(handle) }.state().to_string();
+    string_out(&mut env, state)
+}
+
+/// After a failure: the next encryption guess worth a fresh channel, or -1.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimNextGuess<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jint {
+    unsafe { claim(handle) }
+        .next_guess()
+        .map_or(-1, |guess| guess as jint)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_claimClose<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    if handle != 0 {
+        drop(unsafe { Box::from_raw(handle as *mut Claim) });
     }
 }

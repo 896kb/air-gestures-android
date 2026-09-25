@@ -3,15 +3,20 @@
 //! and the clock; this owns the band-core session, the keepalive timing (as the
 //! desktop daemon's link loop does) and the gesture controller (copied from
 //! air-gestures: held taps, the double-tap wait, the toggle hold, the dial).
+//! Also the Meta sign-in and the ownership claim (`metaauth`, `meta`, `claim`),
+//! ported from the Linux app.
 
 use band_core::events::Event;
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
 use serde::Serialize;
 
+pub mod claim;
 pub mod config;
 pub mod controller;
 mod jni_api;
+pub mod meta;
+pub mod metaauth;
 pub mod status;
 
 use config::{Config, DIAL_TOGGLE, DialTarget};
