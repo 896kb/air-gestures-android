@@ -168,6 +168,8 @@ class BandService : Service(), BandLink.Listener {
         val lastGesture: String? = null,
         val gestures: Long = 0,
         val log: List<String> = emptyList(),
+        /** A claim ([BandClaim]) is running; the service is off meanwhile. */
+        val claiming: Boolean = false,
     )
 
     /** A tiny main-thread observable (no AndroidX in this app). */

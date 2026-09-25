@@ -33,6 +33,8 @@ import java.io.File
 
 /** The file picker's request code for importing the owner key. */
 private const val IMPORT = 3
+/** The Meta sign-in's request code (then the claim). */
+private const val SIGN_IN = 4
 
 /** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
 class MainActivity : Activity() {
@@ -57,6 +59,8 @@ class MainActivity : Activity() {
     private var heroView: View? = null
     /** Whether the hero shows the band as live (full speed and opacity); null = not set yet. */
     private var heroLive: Boolean? = null
+    /** The claim state Setup was last drawn for. */
+    private var setupClaiming = false
 
     private fun dp(value: Float) = Cb.dp(this, value)
     private fun dpi(value: Float) = dp(value).toInt()
@@ -443,6 +447,12 @@ class MainActivity : Activity() {
     // ---- state ----
 
     private fun toggleService() {
+        if (BandClaim.current != null) {
+            confirm("Stop claiming?", "The claim stops here. If the band already accepted this phone, its key is kept.", "Stop") {
+                BandClaim.cancel()
+            }
+            return
+        }
         if (!granted()) {
             requestPermissions(permissions(), 1)
             return
@@ -450,10 +460,51 @@ class MainActivity : Activity() {
         if (BandService.instance != null) BandService.stop(this) else BandService.start(this)
     }
 
+    /**
+     * Claim a band from this phone: explain, sign in to Meta if there's no session yet,
+     * then (the band gives up pairing mode while the sign-in page is open) ask for pairing
+     * mode and run [BandClaim].
+     */
+    private fun claim() {
+        if (!granted()) {
+            requestPermissions(permissions(), 1)
+            return
+        }
+        val signedIn = SessionStore.present(this)
+        confirm(
+            "Claim a band?",
+            "Sign in to Meta on Meta's own page; the app keeps only the resulting session. " +
+                "Hold the band's button for 3 seconds until it flashes (pairing mode)" +
+                (if (signedIn) ", then tap Claim. " else " once you're signed in. ") +
+                "Claiming makes this phone the band's owner: it unlinks the band from Meta's glasses and app, " +
+                "and a key from a computer that claimed it before stops working.",
+            if (signedIn) "Claim" else "Sign in",
+        ) {
+            if (signedIn) runClaim() else startActivityForResult(Intent(this, MetaSignIn::class.java), SIGN_IN)
+        }
+    }
+
+    private fun runClaim() {
+        val session = SessionStore.load(this)
+        if (session == null) {
+            SessionStore.delete(this)
+            log("the Meta sign-in couldn't be read; sign in again")
+            startActivityForResult(Intent(this, MetaSignIn::class.java), SIGN_IN)
+            return
+        }
+        BandClaim.start(this, session)
+    }
+
     private fun render(state: BandService.State) {
         val running = BandService.instance != null
+        val claiming = state.claiming
+        if (claiming != setupClaiming) {
+            setupClaiming = claiming
+            renderSetup()
+        }
         val paused = if (running) state.paused else Prefs(this).paused
         val (signal, label) = when {
+            claiming -> Cb.Signal.INFO to "Claiming"
             !running || state.phase == Phase.STOPPED -> Cb.Signal.MUTE to "Off"
             state.phase == Phase.CONNECTED && paused -> Cb.Signal.WARN to "Controls off"
             state.phase == Phase.CONNECTED -> Cb.Signal.LIVE to "Connected"
@@ -466,8 +517,9 @@ class MainActivity : Activity() {
             state.hand?.let { "${it} wrist" },
         ).joinToString(" · ")
 
-        if ((power.pressed > .5f) != running) power.press(running)
+        if ((power.pressed > .5f) != (running || claiming)) power.press(running || claiming)
         powerState.text = when {
+            claiming -> "Claiming a band"
             !running -> "Off"
             state.phase == Phase.CONNECTED -> "On"
             else -> "Waiting for the band"
@@ -524,9 +576,28 @@ class MainActivity : Activity() {
     private fun renderSetup() {
         setup.removeAllViews()
         val ownerKey = Identity.present(this)
+        val claiming = BandClaim.current != null
+        // Claiming is offered until a confirmed key is here (an unconfirmed one may be retried).
+        if (!Identity.keyFile(this).exists()) {
+            setupRow(
+                "Claim a band",
+                if (claiming) "Claiming; progress is under Activity" else "Sign in to Meta, then claim a band in pairing mode",
+                false,
+                if (claiming) "Stop" else "Claim",
+                always = true,
+                icon = R.drawable.ic_link,
+            ) {
+                if (claiming) toggleService() else claim()
+            }
+        }
+        val band = Identity.bandName(this)?.let { " for $it" } ?: ""
         setupRow(
             "Owner key",
-            if (ownerKey) "Loaded" + (Identity.bandName(this)?.let { " for $it" } ?: "") else "Import owner.key and band.json from the computer",
+            when {
+                Identity.unconfirmed(this) -> "Claimed$band, not confirmed yet; connecting confirms it"
+                ownerKey -> "Loaded$band"
+                else -> "Or import owner.key and band.json from a computer"
+            },
             ownerKey,
             if (ownerKey) "Replace" else "Import",
             always = true,
@@ -556,6 +627,13 @@ class MainActivity : Activity() {
                     renderSetup()
                     render(BandService.state.value)
                 }
+            }
+        }
+        if (SessionStore.present(this)) {
+            setupRow("Meta sign-in", "Signed in; used only to claim a band", true, "Sign out", always = true) {
+                SessionStore.delete(this)
+                log("signed out of Meta on this phone")
+                renderSetup()
             }
         }
         setupRow("Bluetooth and notifications", if (granted()) "Allowed" else "Needed to connect", granted(), "Allow") {
@@ -627,6 +705,20 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SIGN_IN) {
+            if (resultCode == RESULT_OK) {
+                log("signed in to Meta")
+                renderSetup()
+                confirm(
+                    "Put the band in pairing mode",
+                    "Hold the band's button for 3 seconds until it flashes, then tap Claim.",
+                    "Claim",
+                ) { runClaim() }
+            } else {
+                data?.getStringExtra(MetaSignIn.EXTRA_ERROR)?.let(::log)
+            }
+            return
+        }
         if (requestCode == IMPORT && resultCode == RESULT_OK && data != null) {
             val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } }
                 ?: listOfNotNull(data.data)

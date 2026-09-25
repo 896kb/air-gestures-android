@@ -12,12 +12,18 @@ import java.io.File
  * The band's owner key and record in the app's private storage: `owner.key` (the
  * private key, 32 bytes, or 97 with the band's key) and `band.json` (address, name,
  * scheme guess) — the same files the Linux app keeps in ~/.local/state/air-gestures.
+ * `owner.pending.key` is a claim from this phone the band may have committed whose
+ * confirmation never arrived ([BandClaim]); [BandLink] tries it first and confirms it.
  */
 object Identity {
     fun keyFile(context: Context) = File(context.filesDir, "owner.key")
+    fun pendingFile(context: Context) = File(context.filesDir, "owner.pending.key")
     fun bandFile(context: Context) = File(context.filesDir, "band.json")
 
-    fun present(context: Context) = keyFile(context).exists()
+    fun present(context: Context) = keyFile(context).exists() || pendingFile(context).exists()
+
+    /** Only an unconfirmed claim's key is there. */
+    fun unconfirmed(context: Context) = !keyFile(context).exists() && pendingFile(context).exists()
 
     /** The band's name from band.json, if there is one. */
     fun bandName(context: Context): String? = runCatching {
@@ -46,6 +52,8 @@ object Identity {
             return "that isn't a usable owner key: ${e.message}"
         }
         keyFile(context).writeBytes(key)
+        // The imported key is the newer one.
+        pendingFile(context).delete()
         if (band != null) bandFile(context).writeText(band)
         return if (band != null) "imported the owner key and band.json" else "imported the owner key"
     }
@@ -60,6 +68,7 @@ object Identity {
     fun forget(context: Context): Boolean {
         BandService.stop(context)
         keyFile(context).delete()
+        pendingFile(context).delete()
         bandFile(context).delete()
         val prefs = Prefs(context)
         if (prefs.associationId >= 0) {

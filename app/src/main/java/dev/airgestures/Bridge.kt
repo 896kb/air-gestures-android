@@ -25,4 +25,32 @@ object Bridge {
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)
     @JvmStatic external fun close(handle: Long)
+
+    // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.
+
+    /** `{"url": Meta's sign-in page, "native": the token that checks and finishes its callback}`. */
+    @JvmStatic external fun signinStart(): String
+    /** The navigation has the sign-in callback's shape (`fb-viewapp:`/`frl_login`): cancel it. */
+    @JvmStatic external fun signinIsCallback(url: String): Boolean
+    /** The callback is the real one (token digest of `native`, a blob). */
+    @JvmStatic external fun signinAccepts(url: String, native: String): Boolean
+    /** Decrypt the callback and log in; returns the session JSON to keep. Blocking. */
+    @JvmStatic external fun signinFinish(url: String, native: String): String
+
+    // The ownership claim of a band in pairing mode. Feed and tick may block on Meta's HTTP steps.
+
+    /** A claim with the stored session, writing owner.pending.key / owner.key into `filesDir`. */
+    @JvmStatic external fun claimOpen(sessionJson: String, filesDir: String, schemeGuess: Int): Long
+    @JvmStatic external fun claimRequest(handle: Long): ByteArray
+    @JvmStatic external fun claimFeed(handle: Long, bytes: ByteArray, now: Double): ByteArray
+    @JvmStatic external fun claimTick(handle: Long, now: Double): ByteArray
+    /** The channel closed or failed while the claim ran (`message`: why, or empty). */
+    @JvmStatic external fun claimClosed(handle: Long, message: String)
+    /** Progress lines since the last call, '\n'-joined. */
+    @JvmStatic external fun claimLog(handle: Long): String
+    /** "running", "done", "failed: …" or "expired: …" (sign in to Meta again). */
+    @JvmStatic external fun claimState(handle: Long): String
+    /** After a failure: the next encryption guess worth a fresh channel, or -1. */
+    @JvmStatic external fun claimNextGuess(handle: Long): Int
+    @JvmStatic external fun claimClose(handle: Long)
 }

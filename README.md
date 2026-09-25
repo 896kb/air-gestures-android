@@ -18,8 +18,13 @@ saver to **No restrictions**, or the system stops it in the background.
 
 ## Set up
 
-The app uses a band that was claimed with the Linux app; claiming from the phone isn't
-supported yet.
+The band can be claimed right on the phone: tap **Claim** under Setup, sign in to Meta on
+Meta's own page in the app, then hold the band's button for 3 seconds until it flashes
+(pairing mode). Claiming makes the phone the band's owner: it unlinks the band from Meta's
+glasses and app, and a key from a computer that claimed it before stops working. The app
+keeps the Meta sign-in encrypted on the phone; **Sign out** under Setup deletes it.
+
+Or use a band that was claimed with the Linux app:
 
 1. On the computer, claim the band with `air-gestures pair`.
 2. Open the app once, then copy the band's key from the computer to the phone with USB

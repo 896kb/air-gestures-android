@@ -50,6 +50,8 @@ class BandLink(
     private var socket: BluetoothSocket? = null
     private var handle = 0L
     private var lastStatus = ""
+    /** This connection uses owner.pending.key: confirm it once the band accepts it. */
+    @Volatile private var pending = false
     @Volatile private var wanted = false
     @Volatile private var generation = 0
 
@@ -187,11 +189,14 @@ class BandLink(
 
     private fun openSession(): Boolean {
         val dir = context.filesDir
-        val key = File(dir, "owner.key")
+        // A pending key is always newer: the band may have committed a claim whose
+        // confirmation was lost (the desktop's rule).
+        val key = Identity.pendingFile(context).takeIf { it.exists() } ?: Identity.keyFile(context)
         if (!key.exists()) {
-            log("no owner key yet (scripts/push-identity.sh)")
+            log("no owner key yet: claim the band or import its key")
             return false
         }
+        pending = key == Identity.pendingFile(context)
         val guess = File(dir, "band.json").takeIf { it.exists() }
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
@@ -258,6 +263,10 @@ class BandLink(
             Bridge.actions(handle) to Bridge.log(handle)
         }
         if (lines.isNotEmpty()) lines.lines().forEach(::log)
+        if (pending && "connected" in lines.lines()) {
+            pending = false
+            if (Identity.pendingFile(context).renameTo(Identity.keyFile(context))) log("the band accepted the claimed key")
+        }
         if (actions.isNotEmpty()) listener.onActions(actions.lines())
         synchronized(lock) { publishStatus() }
     }
