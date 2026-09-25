@@ -421,7 +421,8 @@ class MainActivity : Activity() {
         val prefs = Prefs(this)
         for (gesture in Gesture.entries) {
             val action = prefs.action(gesture)
-            gestureRows.addView(gestureRow(action.icon, gesture.label, action.label, action == Action.NONE) {
+            val label = if (action == Action.OPEN_APP) "Open ${appName(prefs.actionId(gesture).removePrefix(APP_PREFIX))}" else action.label
+            gestureRows.addView(gestureRow(action.icon, gesture.label, label, action == Action.NONE) {
                 pick(gesture)
             })
         }
@@ -448,22 +449,47 @@ class MainActivity : Activity() {
 
     private fun pick(gesture: Gesture) {
         val prefs = Prefs(this)
-        choose(gesture.label, Action.entries.map { Triple(it.icon, it.label, it == prefs.action(gesture)) }) { index ->
+        choose(gesture.label, Action.entries.map { Option(it.label, it == prefs.action(gesture), it.icon) }) { index ->
             val action = Action.entries[index]
-            BandService.instance?.setAction(gesture, action) ?: prefs.setAction(gesture, action)
+            if (action == Action.OPEN_APP) pickApp(gesture) else setAction(gesture, action.id)
         }
     }
 
+    private fun setAction(gesture: Gesture, id: String) =
+        BandService.instance?.setAction(gesture, id) ?: Prefs(this).setAction(gesture, id)
+
+    /** The apps with a launcher icon, by name, each with its own icon. */
+    private fun pickApp(gesture: Gesture) {
+        val current = Prefs(this).actionId(gesture).removePrefix(APP_PREFIX)
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = packageManager.queryIntentActivities(launcher, 0)
+            .distinctBy { it.activityInfo.packageName }
+            .filter { it.activityInfo.packageName != packageName }
+            .map { it.activityInfo.packageName to it }
+            .sortedBy { (_, info) -> info.loadLabel(packageManager).toString().lowercase() }
+        choose("Open an app", apps.map { (pkg, info) ->
+            Option(info.loadLabel(packageManager).toString(), pkg == current, image = info.loadIcon(packageManager))
+        }) { index -> setAction(gesture, APP_PREFIX + apps[index].first) }
+    }
+
+    /** An app's name, or its package if it's gone. */
+    private fun appName(pkg: String) = runCatching {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault(pkg)
+
+    /** One line in the picker: a Lucide icon (tinted) or an app's own icon (as is). */
+    private class Option(val label: String, val selected: Boolean, val iconRes: Int = 0, val image: android.graphics.drawable.Drawable? = null)
+
     private fun pickDial() {
         val prefs = Prefs(this)
-        choose("Pinch and turn", DialChoice.entries.map { Triple(it.icon, it.label, it == prefs.dial) }) { index ->
+        choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == prefs.dial, it.icon) }) { index ->
             val dial = DialChoice.entries[index]
             BandService.instance?.setDial(dial) ?: run { prefs.dial = dial }
         }
     }
 
     /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
-    private fun choose(title: String, options: List<Triple<Int, String, Boolean>>, onChoice: (Int) -> Unit) {
+    private fun choose(title: String, options: List<Option>, onChoice: (Int) -> Unit) {
         val dialog = android.app.Dialog(this)
         val list = column(gap = 2f)
         val sheet = column(gap = 12f).apply {
@@ -475,14 +501,33 @@ class MainActivity : Activity() {
             elevation = dp(24f)
             addView(Cb.label(context, "Gesture"))
             addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
-            addView(list)
+            // Long lists (the actions, the apps) scroll inside the sheet.
+            addView(object : ScrollView(context) {
+                override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+                    val most = (resources.displayMetrics.heightPixels * .6f).toInt()
+                    super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(most, MeasureSpec.AT_MOST))
+                }
+            }.apply {
+                isVerticalScrollBarEnabled = false
+                addView(list)
+            })
         }
-        options.forEachIndexed { index, (iconRes, label, selected) ->
+        options.forEachIndexed { index, option ->
+            val selected = option.selected
             list.addView(row(gap = 12f).apply {
                 setPadding(dpi(10f), dpi(11f), dpi(10f), dpi(11f))
-                addView(icon(iconRes, 16f))
+                if (option.image != null) {
+                    addView(ImageView(context).apply {
+                        setImageDrawable(option.image)
+                        layoutParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
+                    })
+                } else {
+                    addView(icon(option.iconRes, 16f))
+                }
                 addView(Cb.text(context, 15f, if (selected) R.font.geist_semibold else R.font.geist_regular, Cb.INK_900).apply {
-                    text = label
+                    text = option.label
+                    isSingleLine = true
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 }, weighted())
                 if (selected) addView(icon(R.drawable.ic_check, 16f))
                 background = if (selected) GradientDrawable().apply {

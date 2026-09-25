@@ -1,5 +1,8 @@
 package dev.airgestures
 
+/** An "open this app" action: the prefix, then the app's package name. */
+const val APP_PREFIX = "app:"
+
 /** What a gesture can do, as the bridge names it (see Actions.kt). */
 enum class Action(val id: String, val label: String, val icon: Int) {
     NONE("", "Nothing", R.drawable.ic_minus),
@@ -13,12 +16,18 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     BRIGHTNESS_DOWN("brightness.down", "Brightness down", R.drawable.ic_sun_dim),
     SCREEN_UP("screen.swipe_up", "Swipe up on screen", R.drawable.ic_arrow_up),
     SCREEN_DOWN("screen.swipe_down", "Swipe down on screen", R.drawable.ic_arrow_down),
-    BACK("screen.back", "Back", R.drawable.ic_arrow_left),
+    SCREEN_LEFT("screen.swipe_left", "Swipe left on screen", R.drawable.ic_arrow_left),
+    SCREEN_RIGHT("screen.swipe_right", "Swipe right on screen", R.drawable.ic_arrow_right),
+    BACK("screen.back", "Back", R.drawable.ic_undo_2),
     HOME("screen.home", "Home", R.drawable.ic_house),
-    RECENTS("screen.recents", "Recent apps", R.drawable.ic_layers);
+    RECENTS("screen.recents", "Recent apps", R.drawable.ic_layers),
+    FLASHLIGHT("torch.toggle", "Flashlight on or off", R.drawable.ic_flashlight),
+
+    /** Stored as `app:<package>`; the picker asks which app. */
+    OPEN_APP(APP_PREFIX, "Open an app", R.drawable.ic_app_open);
 
     companion object {
-        fun of(id: String) = entries.firstOrNull { it.id == id } ?: NONE
+        fun of(id: String) = if (id.startsWith(APP_PREFIX)) OPEN_APP else entries.firstOrNull { it.id == id } ?: NONE
     }
 }
 

@@ -25,19 +25,25 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("running", false)
         set(value) = prefs.edit().putBoolean("running", value).apply()
 
-    fun action(gesture: Gesture): Action =
-        Action.of(prefs.getString("map.${gesture.key}", gesture.default.id) ?: gesture.default.id)
+    /** The stored action id: an [Action]'s id, or `app:<package>`. */
+    fun actionId(gesture: Gesture): String =
+        prefs.getString("map.${gesture.key}", gesture.default.id) ?: gesture.default.id
 
-    fun setAction(gesture: Gesture, action: Action) =
-        prefs.edit().putString("map.${gesture.key}", action.id).apply()
+    fun action(gesture: Gesture): Action = Action.of(actionId(gesture))
+
+    fun setAction(gesture: Gesture, id: String) =
+        prefs.edit().putString("map.${gesture.key}", id).apply()
 
     /** `gesture=action;…` plus `dial_up`/`dial_down` for the bridge. */
     fun mapping(): String =
-        Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" } +
+        Gesture.entries.joinToString(";") { "${it.key}=${actionId(it)}" } +
             ";dial_up=${dial.up};dial_down=${dial.down};hand=$hand"
 
-    /** A screen gesture is mapped somewhere (it needs the accessibility service). */
-    fun usesScreen() = Gesture.entries.any { action(it).id.startsWith("screen.") }
+    /**
+     * A screen gesture or an app is mapped somewhere: both need the accessibility
+     * service (Android lets it open apps from the background).
+     */
+    fun usesScreen() = Gesture.entries.any { actionId(it).let { id -> id.startsWith("screen.") || id.startsWith(APP_PREFIX) } }
 
     /** Brightness is mapped somewhere (it needs Modify system settings). */
     fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||

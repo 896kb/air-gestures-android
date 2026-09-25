@@ -55,6 +55,7 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onDestroy() {
         link.stop()
+        actions.close()
         instance = null
         state.update { copy(phase = Phase.STOPPED) }
         super.onDestroy()
@@ -74,8 +75,8 @@ class BandService : Service(), BandLink.Listener {
         refreshNotification()
     }
 
-    fun setAction(gesture: Gesture, action: Action) {
-        prefs.setAction(gesture, action)
+    fun setAction(gesture: Gesture, id: String) {
+        prefs.setAction(gesture, id)
         link.setMapping(prefs.mapping())
     }
 
