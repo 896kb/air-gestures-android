@@ -31,6 +31,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.io.File
 
+/** The file picker's request code for importing the owner key. */
+private const val IMPORT = 3
+
 /** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
 class MainActivity : Activity() {
     private val watch: (BandService.State) -> Unit = ::render
@@ -520,8 +523,41 @@ class MainActivity : Activity() {
 
     private fun renderSetup() {
         setup.removeAllViews()
-        val ownerKey = File(filesDir, "owner.key").exists()
-        setupRow("Owner key", if (ownerKey) "Loaded from the desktop" else "Run scripts/push-identity.sh", ownerKey, null)
+        val ownerKey = Identity.present(this)
+        setupRow(
+            "Owner key",
+            if (ownerKey) "Loaded" + (Identity.bandName(this)?.let { " for $it" } ?: "") else "Import owner.key and band.json from the computer",
+            ownerKey,
+            if (ownerKey) "Replace" else "Import",
+            always = true,
+        ) {
+            startActivityForResult(
+                Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
+                IMPORT,
+            )
+        }
+        if (ownerKey) {
+            setupRow("Forget the band", "Removes the key, the pairing and the link from this phone", false, "Forget", always = true, icon = R.drawable.ic_link) {
+                confirm(
+                    "Forget the band?",
+                    "The key, the Bluetooth pairing and the companion link are removed from this phone. " +
+                        "The band keeps its owner: to use it with Meta's apps again, hold its button for about 16 seconds to factory reset it.",
+                    "Forget",
+                ) {
+                    val openSettings = Identity.forget(this)
+                    log("forgot the band on this phone")
+                    if (openSettings) {
+                        log("tap Forget on the band in Bluetooth settings to remove the pairing")
+                        startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                    }
+                    renderSetup()
+                    render(BandService.state.value)
+                }
+            }
+        }
         setupRow("Bluetooth and notifications", if (granted()) "Allowed" else "Needed to connect", granted(), "Allow") {
             requestPermissions(permissions(), 1)
         }
@@ -556,14 +592,22 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun setupRow(title: String, detail: String, ok: Boolean, button: String?, onClick: (() -> Unit)? = null) {
+    private fun setupRow(
+        title: String,
+        detail: String,
+        ok: Boolean,
+        button: String?,
+        always: Boolean = false,
+        icon: Int? = null,
+        onClick: (() -> Unit)? = null,
+    ) {
         setup.addView(row(gap = 12f).apply {
-            addView(icon(if (ok) R.drawable.ic_shield_check else R.drawable.ic_circle_alert, 16f, if (ok) Cb.INK_900 else Cb.INK_500))
+            addView(icon(icon ?: if (ok) R.drawable.ic_shield_check else R.drawable.ic_circle_alert, 16f, if (ok) Cb.INK_900 else Cb.INK_500))
             addView(column(gap = 3f).apply {
                 addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = title })
                 addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = detail })
             }, weighted())
-            if (!ok && button != null && onClick != null) addView(pill(button, null, onClick).first)
+            if ((always || !ok) && button != null && onClick != null) addView(pill(button, null, onClick).first)
         })
     }
 
@@ -583,6 +627,44 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == IMPORT && resultCode == RESULT_OK && data != null) {
+            val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } }
+                ?: listOfNotNull(data.data)
+            log(Identity.import(this, uris))
+        }
         renderSetup()
     }
+
+    private fun log(line: String) = BandService.state.update { copy(log = (log + line).takeLast(60)) }
+
+    /** A confirmation in the picker's style: title, body, Cancel and the action. */
+    private fun confirm(title: String, body: String, action: String, onConfirm: () -> Unit) {
+        val dialog = android.app.Dialog(this)
+        val sheet = column(gap = 14f).apply {
+            setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(18f))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(20f)
+                setColor(Cb.PAGE)
+            }
+            elevation = dp(24f)
+            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
+            addView(Cb.text(context, 14f, color = Cb.INK_500).apply { text = body; setLineSpacing(0f, 1.3f) })
+            addView(row(gap = 12f).apply {
+                gravity = Gravity.END
+                addView(pill("Cancel") { dialog.dismiss() }.first)
+                addView(pill(action) { dialog.dismiss(); onConfirm() }.first)
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        dialog.setContentView(FrameLayout(this).apply {
+            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
+            addView(sheet)
+        })
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+            setDimAmount(.55f)
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        dialog.show()
+    }
+
 }
