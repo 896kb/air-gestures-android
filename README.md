@@ -27,11 +27,15 @@ keeps the Meta sign-in encrypted on the phone; **Sign out** under Setup deletes 
 
 Or use a band that was claimed with the Linux app:
 
-1. On the computer, claim the band with `air-gestures pair`.
-2. Copy `owner.key` and `band.json` from `~/.local/state/air-gestures/` to the phone and
-   pick them under **Setup → Owner key → Import**.
+1. On the computer, claim the band with `air-gestures pair`, then run `air-gestures export`;
+   it writes `air-gestures-band.json` (the owner key and the band's address).
+2. Copy that file to the phone and pick it under **Setup → Owner key → Import**.
 3. Run `air-gestures disconnect` on the computer (the band talks to one device at a time)
    and tap the power button in the app.
+
+It works the other way too: **Setup → Export the key** saves the same file from the phone, and
+`air-gestures import air-gestures-band.json` uses it on the computer. Keep the file private and
+delete it once imported: anyone holding it can control the band.
 
 The first connection may need the band in pairing mode (hold its button 3 s); after that the
 phone reconnects on its own.

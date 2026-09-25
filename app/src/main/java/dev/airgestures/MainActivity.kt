@@ -35,6 +35,8 @@ import java.io.File
 private const val IMPORT = 3
 /** The Meta sign-in's request code (then the claim). */
 private const val SIGN_IN = 4
+/** The file picker's request code for exporting the owner key. */
+private const val EXPORT = 5
 
 /** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
 class MainActivity : Activity() {
@@ -610,7 +612,7 @@ class MainActivity : Activity() {
             when {
                 Identity.unconfirmed(this) -> "Claimed$band, not confirmed yet; connecting confirms it"
                 ownerKey -> "Loaded$band"
-                else -> "Or import owner.key and band.json from a computer"
+                else -> "Or import air-gestures-band.json from a computer"
             },
             ownerKey,
             if (ownerKey) "Replace" else "Import",
@@ -632,10 +634,29 @@ class MainActivity : Activity() {
                 confirm(
                     "Replace the owner key?",
                     "The key on this phone is overwritten by the one you pick. If this phone claimed the band, " +
-                        "its key is the only one the band trusts: keep a copy, or the band has to be claimed again.",
+                        "its key is the only one the band trusts: export it first, or the band has to be claimed again.",
                     "Choose file",
                     pick,
                 )
+            }
+        }
+        // Only a confirmed key is exported: the band may never have committed a pending one.
+        if (Identity.keyFile(this).exists()) {
+            setupRow("Export the key", "Save it for a computer (air-gestures import) or another phone", true, "Export", always = true, icon = R.drawable.ic_arrow_down) {
+                confirm(
+                    "Export the owner key?",
+                    "The file lets anyone who has it control the band. Keep it private, and delete it once " +
+                        "it's imported on the other device. The band talks to one device at a time.",
+                    "Choose where",
+                ) {
+                    startActivityForResult(
+                        Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/json")
+                            .putExtra(Intent.EXTRA_TITLE, "air-gestures-band.json"),
+                        EXPORT,
+                    )
+                }
             }
         }
         if (ownerKey) {
@@ -758,6 +779,19 @@ class MainActivity : Activity() {
             val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } }
                 ?: listOfNotNull(data.data)
             log(Identity.import(this, uris))
+        }
+        if (requestCode == EXPORT && resultCode == RESULT_OK) {
+            val uri = data?.data
+            log(
+                try {
+                    val bytes = Identity.exportBundle(this)
+                    contentResolver.openOutputStream(uri ?: throw IllegalStateException("no file chosen"), "wt")
+                        ?.use { it.write(bytes) } ?: throw IllegalStateException("couldn't open the file")
+                    "exported the owner key; keep the file private"
+                } catch (e: Exception) {
+                    "export failed: ${e.message}"
+                },
+            )
         }
         renderSetup()
     }

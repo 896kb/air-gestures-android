@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.companion.CompanionDeviceManager
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import org.json.JSONObject
 import java.io.File
 
@@ -16,6 +17,9 @@ import java.io.File
  * confirmation never arrived ([BandClaim]); [BandLink] tries it first and confirms it.
  */
 object Identity {
+    private const val BUNDLE_FORMAT = "air-gestures-band"
+    private const val BUNDLE_VERSION = 1
+
     fun keyFile(context: Context) = File(context.filesDir, "owner.key")
     fun pendingFile(context: Context) = File(context.filesDir, "owner.pending.key")
     fun bandFile(context: Context) = File(context.filesDir, "band.json")
@@ -31,31 +35,61 @@ object Identity {
     }.getOrNull()
 
     /**
-     * Import the picked files, told apart by content, not name: 32 or 97 bytes is the
-     * key (checked by opening it in the bridge), JSON with an address is band.json.
-     * Returns what happened, for the activity log.
+     * `air-gestures-band.json`, the file the Linux app's `air-gestures export`/`import`
+     * share: the confirmed owner key (base64) and band.json. Anyone holding it controls
+     * the band. Throws when there's no confirmed key (an unconfirmed claim isn't exported).
+     */
+    fun exportBundle(context: Context): ByteArray {
+        val key = keyFile(context).takeIf { it.exists() }?.readBytes()
+            ?: throw IllegalStateException("no confirmed owner key on this phone")
+        val bundle = JSONObject()
+            .put("format", BUNDLE_FORMAT)
+            .put("version", BUNDLE_VERSION)
+            .put("owner_key", Base64.encodeToString(key, Base64.NO_WRAP))
+        runCatching { JSONObject(bandFile(context).readText()) }.getOrNull()?.let { bundle.put("band", it) }
+        return (bundle.toString(2) + "\n").toByteArray()
+    }
+
+    /**
+     * Import the picked files, told apart by content, not name: JSON with
+     * `"format": "air-gestures-band"` is an exported bundle (the key and maybe the band),
+     * 32 or 97 bytes is the key (checked by opening it in the bridge), other JSON with an
+     * address is band.json. Returns what happened, for the activity log.
      */
     fun import(context: Context, uris: List<Uri>): String {
         var key: ByteArray? = null
         var band: String? = null
         for (uri in uris) {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: continue
+            val json = runCatching { JSONObject(String(bytes)) }.getOrNull()
             when {
+                json?.has("format") == true -> {
+                    if (json.optString("format") != BUNDLE_FORMAT) return "that isn't an air-gestures band file"
+                    val version = json.optInt("version", 0)
+                    if (version > BUNDLE_VERSION) {
+                        return "that band file is version $version, newer than this app understands; update the app"
+                    }
+                    if (version < 1) return "that band file has no usable version"
+                    key = runCatching { Base64.decode(json.getString("owner_key"), Base64.DEFAULT) }.getOrNull()
+                        ?: return "that band file's owner key isn't readable"
+                    json.optJSONObject("band")?.let { band = it.toString(2) }
+                }
                 bytes.size == 32 || bytes.size == 97 -> key = bytes
-                runCatching { JSONObject(String(bytes)).has("address") }.getOrDefault(false) -> band = String(bytes)
+                json?.has("address") == true -> band = String(bytes)
             }
         }
-        if (key == null) return "no owner key among the picked files (it's owner.key, 32 or 97 bytes)"
+        val owner = key ?: return "no owner key among the picked files (air-gestures-band.json, or owner.key)"
+        if (owner.size != 32 && owner.size != 97) return "that isn't a usable owner key (${owner.size} bytes)"
         try {
-            Bridge.close(Bridge.open(key, 0, false, "", ""))
+            Bridge.close(Bridge.open(owner, 0, false, "", ""))
         } catch (e: Exception) {
             return "that isn't a usable owner key: ${e.message}"
         }
-        keyFile(context).writeBytes(key)
+        keyFile(context).writeBytes(owner)
         // The imported key is the newer one.
         pendingFile(context).delete()
-        if (band != null) bandFile(context).writeText(band)
-        return if (band != null) "imported the owner key and band.json" else "imported the owner key"
+        band?.let { bandFile(context).writeText(it) }
+        return if (band != null) "imported the owner key and band" else "imported the owner key"
     }
 
     /**
