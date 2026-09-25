@@ -34,6 +34,12 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
 
     fun start() {
         if (running) return
+        // Null while Bluetooth is off (or still turning on).
+        val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner
+        if (scanner == null) {
+            log("Bluetooth is off: turn it on and tap Connect again")
+            return
+        }
         val dir = context.filesDir
         val key = File(dir, "owner.key")
         if (!key.exists()) {
@@ -50,7 +56,7 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
         }
         running = true
         log("scanning for a Meta Band… (scheme guess $guess)")
-        adapter.bluetoothLeScanner.startScan(
+        scanner.startScan(
             null,
             ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
             scan,
@@ -59,7 +65,7 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
 
     fun stop() {
         running = false
-        runCatching { adapter.bluetoothLeScanner.stopScan(scan) }
+        runCatching { adapter?.bluetoothLeScanner?.stopScan(scan) }
         runCatching { socket?.close() }
         runCatching { gatt?.close() }
         socket = null
@@ -75,7 +81,7 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val name = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!name.lowercase().startsWith("meta band") || gatt != null) return
-            adapter.bluetoothLeScanner.stopScan(this)
+            adapter?.bluetoothLeScanner?.stopScan(this)
             log("found $name at ${result.device.address} (rssi ${result.rssi}); connecting GATT")
             gatt = result.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         }

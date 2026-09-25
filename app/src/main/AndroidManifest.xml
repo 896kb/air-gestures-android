@@ -12,6 +12,7 @@
 
     <application
         android:label="Air Gestures"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:allowBackup="false">
         <activity
             android:name=".MainActivity"

@@ -9,6 +9,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.view.WindowInsets
 
 /** Spike UI: connect/disconnect and a live log (also in logcat, tag AirGestures). */
 class MainActivity : Activity() {
@@ -24,7 +25,12 @@ class MainActivity : Activity() {
         val disconnect = Button(this).apply { text = "Disconnect"; setOnClickListener { link?.stop() } }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 96, 32, 32)
+            // Edge-to-edge is enforced from API 35: keep clear of the system bars.
+            setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(bars.left + 32, bars.top + 16, bars.right + 32, bars.bottom + 16)
+                insets
+            }
             addView(LinearLayout(context).apply { addView(connect); addView(disconnect) })
             addView(scroll, LinearLayout.LayoutParams(-1, -1))
         })
