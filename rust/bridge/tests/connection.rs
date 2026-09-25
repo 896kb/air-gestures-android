@@ -23,7 +23,8 @@ fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>,
 
 fn connected(paused: bool) -> (Connection, Responder) {
     let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
-    let mut connection = Connection::new(&identity.private_bytes(), 0, paused, "volume").unwrap();
+    let mut connection =
+        Connection::new(&identity.private_bytes(), 0, paused, "volume", "").unwrap();
     // An enrolled band with no owner recorded adopts the first key that proves trust.
     let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
     let request = connection.request().unwrap();
@@ -107,5 +108,26 @@ fn quiet_links_send_keepalive_queries() {
 
 #[test]
 fn a_malformed_owner_key_is_refused() {
-    assert!(Connection::new(&[0u8; 10], 0, false, "volume").is_err());
+    assert!(Connection::new(&[0u8; 10], 0, false, "volume", "").is_err());
+}
+
+#[test]
+fn a_remapped_swipe_runs_its_new_action_and_the_hold_stays_the_toggle() {
+    let (mut connection, mut band) = connected(false);
+    connection.set_mapping("swipe_down=volume.up;swipe_left=media.next;middle_hold=media.next");
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    assert_eq!(connection.take_actions(), vec!["volume.up".to_owned()]);
+    gesture(&mut connection, &mut band, 8, THUMB, 0, 4.0);
+    assert_eq!(connection.take_actions(), vec!["media.next".to_owned()]);
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 5.0);
+    assert!(connection.take_actions().is_empty());
+    assert!(connection.status_json().contains(r#""paused":true"#));
+}
+
+#[test]
+fn an_unmapped_gesture_does_nothing() {
+    let (mut connection, mut band) = connected(false);
+    connection.set_mapping("swipe_down=");
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    assert!(connection.take_actions().is_empty());
 }

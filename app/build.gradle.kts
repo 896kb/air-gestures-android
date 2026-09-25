@@ -17,4 +17,8 @@ android {
         versionName = "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
+
+    // Media that isn't ours to publish (the band's product video) lives in the
+    // git-ignored local-assets/; the app works without it.
+    sourceSets["main"].assets.directories += "local-assets"
 }

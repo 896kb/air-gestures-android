@@ -20,6 +20,15 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("running", false)
         set(value) = prefs.edit().putBoolean("running", value).apply()
 
+    fun action(gesture: Gesture): Action =
+        Action.of(prefs.getString("map.${gesture.key}", gesture.default.id) ?: gesture.default.id)
+
+    fun setAction(gesture: Gesture, action: Action) =
+        prefs.edit().putString("map.${gesture.key}", action.id).apply()
+
+    /** `gesture=action;…` for the bridge. */
+    fun mapping(): String = Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" }
+
     var associationId: Int
         get() = prefs.getInt("association", -1)
         set(value) = prefs.edit().putInt("association", value).apply()

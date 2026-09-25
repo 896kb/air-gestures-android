@@ -115,6 +115,28 @@ impl Default for GestureConfig {
 }
 
 impl GestureConfig {
+    /// Apply `gesture=action` pairs separated by `;` (e.g. `swipe_up=media.next`).
+    /// The middle hold stays the controls toggle; unknown gestures are ignored.
+    pub fn apply_mapping(&mut self, mapping: &str) {
+        for pair in mapping.split(';') {
+            let Some((gesture, action)) = pair.split_once('=') else {
+                continue;
+            };
+            let slot = match gesture.trim() {
+                "swipe_left" => &mut self.swipe_left,
+                "swipe_right" => &mut self.swipe_right,
+                "swipe_up" => &mut self.swipe_up,
+                "swipe_down" => &mut self.swipe_down,
+                "index_tap" => &mut self.index_tap,
+                "index_double" => &mut self.index_double,
+                "middle_tap" => &mut self.middle_tap,
+                "middle_double" => &mut self.middle_double,
+                _ => continue,
+            };
+            *slot = action.trim().to_owned();
+        }
+    }
+
     /// The configured action, or `""` when it's unassigned (including whitespace-only).
     pub fn command(&self, gesture: Recognized) -> &str {
         let command = match gesture {

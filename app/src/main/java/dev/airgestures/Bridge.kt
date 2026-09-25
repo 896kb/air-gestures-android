@@ -7,7 +7,7 @@ object Bridge {
     }
 
     /** A connection for the desktop's owner.key and band.json scheme guess, with the app's settings. */
-    @JvmStatic external fun open(ownerKey: ByteArray, schemeGuess: Int, paused: Boolean, dial: String): Long
+    @JvmStatic external fun open(ownerKey: ByteArray, schemeGuess: Int, paused: Boolean, dial: String, mapping: String): Long
     /** The first bytes to write once the L2CAP channel is open. */
     @JvmStatic external fun request(handle: Long): ByteArray
     /** Bytes read from the band; returns bytes to write. */
@@ -22,5 +22,7 @@ object Bridge {
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
     @JvmStatic external fun setDial(handle: Long, dial: String)
+    /** `gesture=action;…` (see Prefs.mapping). */
+    @JvmStatic external fun setMapping(handle: Long, mapping: String)
     @JvmStatic external fun close(handle: Long)
 }

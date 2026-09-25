@@ -66,6 +66,11 @@ class BandService : Service(), BandLink.Listener {
         refreshNotification()
     }
 
+    fun setAction(gesture: Gesture, action: Action) {
+        prefs.setAction(gesture, action)
+        link.setMapping(prefs.mapping())
+    }
+
     fun setDial(dial: String) {
         prefs.dial = dial
         link.setDial(dial)
@@ -101,6 +106,7 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onLog(line: String) = main.post {
+        android.util.Log.i("AirGestures", line)
         state.update { copy(log = (log + line).takeLast(LOG_LINES)) }
     }.let {}
 

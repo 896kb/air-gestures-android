@@ -78,6 +78,10 @@ class BandLink(
         publishStatus()
     }
 
+    fun setMapping(mapping: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setMapping(handle, mapping)
+    }
+
     private fun connect() {
         if (!wanted) return
         val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner
@@ -196,7 +200,7 @@ class BandLink(
         val guess = File(dir, "band.json").takeIf { it.exists() }
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
-            synchronized(lock) { handle = Bridge.open(key.readBytes(), guess, prefs.paused, prefs.dial) }
+            synchronized(lock) { handle = Bridge.open(key.readBytes(), guess, prefs.paused, prefs.dial, prefs.mapping()) }
             true
         } catch (e: Exception) {
             log("owner key: ${e.message}")

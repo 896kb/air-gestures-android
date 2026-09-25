@@ -31,7 +31,13 @@ object Cb {
     const val INK_500 = 0xFF5C5E63.toInt()
     const val INK_400 = 0xFF7C7F85.toInt()
     const val INK_300 = 0xFFA3A5AA.toInt()
-    const val PAGE = 0xFFCDCED0.toInt() // --surface-page (ink-100)
+    /**
+     * The page: CargoBolt's lightest tone (ink-25 #f0f0f2) instead of ink-100, so
+     * the band's product video (its white regraded to exactly this) sits on the
+     * page with no frame (#f1f1f3 is what the phone's decoder makes of it).
+     * Still the light source: highlights are pure white.
+     */
+    const val PAGE = 0xFFF1F1F3.toInt()
     const val HAIRLINE = 0x21111214 // rgba(17,18,20,.13)
     const val NEU_LIGHT = 0xC7FFFFFF.toInt() // rgba(255,255,255,.78)
     const val NEU_DARK = 0x33111214 // rgba(17,18,20,.20)
@@ -49,6 +55,18 @@ object Cb {
     // tokens/motion.css: 140 ms controls, cubic-bezier(.2,0,0,1)
     const val DURATION = 140L
     val EASE = PathInterpolator(.2f, 0f, 0f, 1f)
+
+    /**
+     * A damped spring (overshoots about 10%, settles by the end) for the hero band.
+     * CargoBolt's controls never spring; this is the one exception, on request.
+     */
+    val SPRING = android.animation.TimeInterpolator { t ->
+        val zeta = .6f
+        val omega = 12f
+        val decay = kotlin.math.exp(-zeta * omega * t)
+        val damped = omega * kotlin.math.sqrt(1 - zeta * zeta)
+        1 - decay * (kotlin.math.cos(damped * t) + zeta * omega / damped * kotlin.math.sin(damped * t))
+    }
 
     fun dp(context: Context, value: Float) =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, context.resources.displayMetrics)

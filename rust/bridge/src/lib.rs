@@ -18,6 +18,12 @@ use config::{Config, DIAL_TOGGLE, DialTarget};
 use controller::{Command, Controller};
 use status::Status;
 
+fn config_with(mapping: &str) -> Config {
+    let mut config = Config::default();
+    config.gestures.apply_mapping(mapping);
+    config
+}
+
 /// Battery query period and the quiet time before a stream-state query.
 const BATTERY_EVERY: f64 = 5.0;
 const QUIET_QUERY: f64 = 2.0;
@@ -49,6 +55,7 @@ impl Connection {
         scheme_guess: usize,
         paused: bool,
         dial: &str,
+        mapping: &str,
     ) -> Result<Self, String> {
         let (private, band) = match owner_key.len() {
             32 => (owner_key, None),
@@ -56,7 +63,7 @@ impl Connection {
             length => return Err(format!("owner.key must be 32 or 97 bytes, not {length}")),
         };
         let identity = EnrollmentIdentity::from_bytes(private, band).map_err(|e| e.to_string())?;
-        let mut controller = Controller::new(Config::default());
+        let mut controller = Controller::new(config_with(mapping));
         if paused {
             controller.pause();
         }
@@ -137,6 +144,22 @@ impl Connection {
             self.controller.pause();
         } else {
             self.controller.resume(now);
+        }
+    }
+
+    /// Replace the gesture mapping (see `GestureConfig::apply_mapping`).
+    pub fn set_mapping(&mut self, mapping: &str) {
+        let dial = self.controller.status().dial;
+        let paused = self.controller.status().paused;
+        for command in self.controller.set_config(config_with(mapping)) {
+            if let Command::Run(action) = command {
+                self.actions.push(action);
+            }
+        }
+        // A new config resets the controller's view of these; keep the app's.
+        self.controller.set_dial_target(dial);
+        if paused {
+            self.controller.pause();
         }
     }
 

@@ -35,9 +35,14 @@ pub extern "system" fn Java_dev_airgestures_Bridge_open<'local>(
     scheme_guess: jint,
     paused: jboolean,
     dial: JString<'local>,
+    mapping: JString<'local>,
 ) -> jlong {
-    let dial: String = match env.get_string(&dial) {
-        Ok(dial) => dial.into(),
+    let strings = env.get_string(&dial).map(String::from).and_then(|dial| {
+        env.get_string(&mapping)
+            .map(|mapping| (dial, String::from(mapping)))
+    });
+    let (dial, mapping) = match strings {
+        Ok(strings) => strings,
         Err(error) => {
             throw(&mut env, &error.to_string());
             return 0;
@@ -46,7 +51,15 @@ pub extern "system" fn Java_dev_airgestures_Bridge_open<'local>(
     let opened = env
         .convert_byte_array(&owner_key)
         .map_err(|e| e.to_string())
-        .and_then(|key| Connection::new(&key, scheme_guess.max(0) as usize, paused != 0, &dial));
+        .and_then(|key| {
+            Connection::new(
+                &key,
+                scheme_guess.max(0) as usize,
+                paused != 0,
+                &dial,
+                &mapping,
+            )
+        });
     match opened {
         Ok(connection) => Box::into_raw(Box::new(connection)) as jlong,
         Err(message) => {
@@ -155,6 +168,19 @@ pub extern "system" fn Java_dev_airgestures_Bridge_setDial<'local>(
 ) {
     match env.get_string(&dial) {
         Ok(dial) => unsafe { connection(handle) }.set_dial(&String::from(dial)),
+        Err(error) => throw(&mut env, &error.to_string()),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_setMapping<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    mapping: JString<'local>,
+) {
+    match env.get_string(&mapping) {
+        Ok(mapping) => unsafe { connection(handle) }.set_mapping(&String::from(mapping)),
         Err(error) => throw(&mut env, &error.to_string()),
     }
 }

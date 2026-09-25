@@ -6,6 +6,11 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.SurfaceTexture
+import android.media.MediaPlayer
+import android.view.Surface
+import android.view.TextureView
+
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -43,6 +48,10 @@ class MainActivity : Activity() {
     private lateinit var dialBrightness: TextView
     private lateinit var setup: LinearLayout
     private lateinit var activity: TextView
+    private var player: MediaPlayer? = null
+    private var heroView: View? = null
+    /** Whether the hero shows the band as live (full speed and opacity); null = not set yet. */
+    private var heroLive: Boolean? = null
 
     private fun dp(value: Float) = Cb.dp(this, value)
     private fun dpi(value: Float) = dp(value).toInt()
@@ -55,13 +64,9 @@ class MainActivity : Activity() {
             WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
         )
         val page = column(gap = 20f).apply {
-            // Edge-to-edge is enforced from API 35: keep clear of the system bars.
-            setOnApplyWindowInsetsListener { view, insets ->
-                val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                view.setPadding(bars.left + dpi(20f), bars.top + dpi(16f), bars.right + dpi(20f), bars.bottom + dpi(24f))
-                insets
-            }
+            setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(24f))
             addView(header())
+            hero()?.let(::addView)
             addView(powerBlock())
             addView(statusCard())
             addView(togglesBlock())
@@ -69,7 +74,16 @@ class MainActivity : Activity() {
             addView(setupCard())
             addView(activityCard())
         }
-        setContentView(ScrollView(this).apply { addView(page) })
+        setContentView(ScrollView(this).apply {
+            addView(page)
+            // Edge-to-edge is enforced from API 35: scroll inside the system bars, not under them.
+            clipToPadding = true
+            setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
+        })
         requestPermissions(permissions(), 1)
     }
 
@@ -81,7 +95,61 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         BandService.state.remove(watch)
+        player?.pause()
+        heroLive = null
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        player?.release()
+        player = null
+        super.onDestroy()
+    }
+
+    /**
+     * The band turning on its own, straight on the page: the file's background
+     * is regraded to the page tone (grayscale and contrast baked in too).
+     * Absent from public builds.
+     */
+    private fun hero(): View? {
+        val video = runCatching { assets.openFd("meta-band.mp4") }.getOrNull() ?: return null
+        val texture = TextureView(this).apply {
+            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                    player = MediaPlayer().apply {
+                        setDataSource(video.fileDescriptor, video.startOffset, video.length)
+                        setSurface(Surface(surface))
+                        isLooping = true
+                        setVolume(0f, 0f)
+                        setOnPreparedListener {
+                            start()
+                            heroLive = null
+                            render(BandService.state.value)
+                        }
+                        prepareAsync()
+                    }
+                }
+                override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
+                override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    player?.release()
+                    player = null
+                    heroLive = null
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+            }
+        }
+        heroView = texture
+        return FrameLayout(this).apply {
+            addView(texture)
+            // 3:2, like the file.
+            addOnLayoutChangeListener { view, left, _, right, _, _, _, _, _ ->
+                val height = (right - left) * 2 / 3
+                if (view.layoutParams.height != height) view.post {
+                    view.layoutParams = view.layoutParams.apply { this.height = height }
+                }
+            }
+        }
     }
 
     // ---- layout pieces ----
@@ -134,14 +202,13 @@ class MainActivity : Activity() {
 
     /** The connection switch: raised while off, pushed while the band is kept connected. */
     @SuppressLint("ClickableViewAccessibility")
-    private fun powerBlock() = column(gap = 10f).apply {
-        gravity = Gravity.CENTER_HORIZONTAL
+    private fun powerBlock() = row(gap = 16f).apply {
         power = NeuDrawable(context, 999f, soft = true)
         val button = FrameLayout(context).apply {
             background = power
-            val size = dpi(128f) + 2 * power.margin
+            val size = dpi(76f) + 2 * power.margin
             layoutParams = LinearLayout.LayoutParams(size, size)
-            addView(icon(R.drawable.ic_power, 30f), FrameLayout.LayoutParams(dpi(30f), dpi(30f), Gravity.CENTER))
+            addView(icon(R.drawable.ic_power, 24f), FrameLayout.LayoutParams(dpi(24f), dpi(24f), Gravity.CENTER))
             contentDescription = "Band connection"
             setOnTouchListener { view, event ->
                 when (event.action) {
@@ -155,8 +222,6 @@ class MainActivity : Activity() {
         }
         addView(button)
         addView(column(gap = 4f).apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
             addView(Cb.label(context, "Band connection"))
             powerState = Cb.text(context, 16f, R.font.geist_medium, Cb.INK_900, -.01f)
             addView(powerState)
@@ -188,6 +253,7 @@ class MainActivity : Activity() {
         val shape = NeuDrawable(this, 999f, soft = false)
         val view = Cb.text(this, 14f, R.font.geist_medium, Cb.INK_900, -.005f).apply {
             this.text = text
+            isSingleLine = true
             gravity = Gravity.CENTER
             background = shape
             val m = shape.margin
@@ -221,28 +287,31 @@ class MainActivity : Activity() {
         setOnClickListener { onClick() }
     }
 
-    private fun togglesBlock() = row(gap = 16f).apply {
+    /** A setting: its label and a line of detail on the left, the control on the right. */
+    private fun settingRow(label: String, detail: String, control: View) = row(gap = 12f).apply {
+        addView(column(gap = 4f).apply {
+            addView(Cb.label(context, label))
+            addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = detail })
+        }, weighted())
+        addView(control)
+    }
+
+    private fun togglesBlock() = column(gap = 16f).apply {
         controls = pill("Controls on", R.drawable.ic_hand) {
             BandService.instance?.setPaused(!BandService.state.value.paused)
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
-        addView(column(gap = 8f).apply {
-            addView(Cb.label(context, "Controls"))
-            addView(controls.first)
-        }, weighted())
+        addView(settingRow("Controls", "Or hold the middle finger", controls.first))
         dialVolume = segment("Volume") { setDial("volume") }
         dialBrightness = segment("Brightness") { setDial("brightness") }
         val track = NeuDrawable(context, 999f, soft = false).apply { pressed = 1f }
-        addView(column(gap = 8f).apply {
-            addView(Cb.label(context, "Dial"))
-            addView(row().apply {
-                background = track
-                val m = track.margin
-                setPadding(m + dpi(4f), m + dpi(4f), m + dpi(4f), m + dpi(4f))
-                addView(dialVolume)
-                addView(dialBrightness)
-            })
-        })
+        addView(settingRow("Dial", "Pinch and turn", row().apply {
+            background = track
+            val m = track.margin
+            setPadding(m + dpi(4f), m + dpi(4f), m + dpi(4f), m + dpi(4f))
+            addView(dialVolume)
+            addView(dialBrightness)
+        }))
     }
 
     private fun setDial(dial: String) {
@@ -252,25 +321,91 @@ class MainActivity : Activity() {
         }
     }
 
+    private lateinit var gestureRows: LinearLayout
+
     private fun gestureCard(): View {
-        val rows = listOf(
-            Triple(R.drawable.ic_skip_back, "Swipe up", "Previous track"),
-            Triple(R.drawable.ic_skip_forward, "Swipe down", "Next track"),
-            Triple(R.drawable.ic_play, "Index tap", "Play or pause"),
-            Triple(R.drawable.ic_rotate_cw, "Index double tap", "Switch the dial"),
-            Triple(R.drawable.ic_volume_2, "Pinch and turn", "Volume or brightness"),
-            Triple(R.drawable.ic_volume_x, "Middle double tap", "Mute"),
-            Triple(R.drawable.ic_power, "Middle hold", "Controls on or off"),
-        )
-        return card("Gestures", column(gap = 12f).apply {
-            for ((iconRes, gesture, action) in rows) {
-                addView(row(gap = 12f).apply {
-                    addView(icon(iconRes))
-                    addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
-                    addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = action })
-                })
+        gestureRows = column(gap = 4f)
+        renderGestures()
+        return card("Gestures", gestureRows)
+    }
+
+    /** One row per gesture: tap to choose its action. The pinch and the middle hold are fixed. */
+    private fun renderGestures() {
+        gestureRows.removeAllViews()
+        val prefs = Prefs(this)
+        for (gesture in Gesture.entries) {
+            val action = prefs.action(gesture)
+            gestureRows.addView(gestureRow(action.icon, gesture.label, action.label, action == Action.NONE) {
+                pick(gesture)
+            })
+        }
+        gestureRows.addView(gestureRow(R.drawable.ic_volume_2, "Pinch and turn", "The dial", false, null))
+        gestureRows.addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, null))
+    }
+
+    private fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, onClick: (() -> Unit)?) =
+        row(gap = 12f).apply {
+            setPadding(0, dpi(8f), 0, dpi(8f))
+            addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
+            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
+            addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
+            addView(icon(if (onClick != null) R.drawable.ic_chevron_right else R.drawable.ic_lock, 14f, Cb.INK_400))
+            if (onClick != null) {
+                isClickable = true
+                background = android.graphics.drawable.RippleDrawable(
+                    ColorStateList.valueOf(0x14111214), null, GradientDrawable().apply { setColor(-1); cornerRadius = dp(10f) },
+                )
+                setOnClickListener { onClick() }
             }
+        }
+
+    /** The action picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
+    private fun pick(gesture: Gesture) {
+        val prefs = Prefs(this)
+        val current = prefs.action(gesture)
+        val dialog = android.app.Dialog(this)
+        val list = column(gap = 2f)
+        val sheet = column(gap = 12f).apply {
+            setPadding(dpi(20f), dpi(18f), dpi(20f), dpi(14f))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(20f)
+                setColor(Cb.PAGE)
+            }
+            elevation = dp(24f)
+            addView(Cb.label(context, "Gesture"))
+            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = gesture.label })
+            addView(list)
+        }
+        for (action in Action.entries) {
+            val selected = action == current
+            list.addView(row(gap = 12f).apply {
+                setPadding(dpi(10f), dpi(11f), dpi(10f), dpi(11f))
+                addView(icon(action.icon, 16f))
+                addView(Cb.text(context, 15f, if (selected) R.font.geist_semibold else R.font.geist_regular, Cb.INK_900).apply {
+                    text = action.label
+                }, weighted())
+                if (selected) addView(icon(R.drawable.ic_check, 16f))
+                background = if (selected) GradientDrawable().apply {
+                    cornerRadius = dp(10f)
+                    setColor(0x14111214) // --action-quiet
+                } else null
+                setOnClickListener {
+                    BandService.instance?.setAction(gesture, action) ?: prefs.setAction(gesture, action)
+                    renderGestures()
+                    dialog.dismiss()
+                }
+            })
+        }
+        dialog.setContentView(android.widget.FrameLayout(this).apply {
+            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
+            addView(sheet)
         })
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+            setDimAmount(.55f)
+            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        dialog.show()
     }
 
     private fun setupCard(): View {
@@ -333,6 +468,28 @@ class MainActivity : Activity() {
             } else null
         }
         activity.text = state.log.takeLast(8).joinToString("\n").ifEmpty { "Nothing yet." }
+        // The band is full size while it's connected with controls on;
+        // otherwise smaller and faded to 30%.
+        val live = running && state.phase == Phase.CONNECTED && !paused
+        val hero = heroView
+        if (hero != null && heroLive != live) {
+            val first = heroLive == null
+            heroLive = live
+            player?.let { if (!it.isPlaying) it.start() }
+            val scale = if (live) 1f else .8f
+            val alpha = if (live) 1f else .3f
+            if (first) {
+                hero.scaleX = scale; hero.scaleY = scale; hero.alpha = alpha
+            } else {
+                // The band springs back to full size when it comes on, and settles small when it goes off.
+                hero.animate().scaleX(scale).scaleY(scale).setDuration(720).setInterpolator(Cb.SPRING).start()
+                android.animation.ObjectAnimator.ofFloat(hero, View.ALPHA, alpha).apply {
+                    duration = 320
+                    interpolator = Cb.EASE
+                    start()
+                }
+            }
+        }
     }
 
     private fun renderSetup() {
