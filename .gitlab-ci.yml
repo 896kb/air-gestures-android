@@ -10,21 +10,8 @@
 #
 #   https://gitlab.com/896kb/air-gestures-android/-/releases/permalink/latest/downloads/air-gestures.apk
 #
-# Required CI/CD variables (Settings → CI/CD → Variables), all masked and protected:
-#
-#   KEYSTORE_BASE64     base64 of your release keystore   (type: variable, masked)
-#   KEYSTORE_PASSWORD   its password                      (masked)
-#   KEY_ALIAS           the key alias inside it           (masked)
-#   KEY_PASSWORD        that key's password               (masked)
-#
-# Create the keystore once, and keep it somewhere you will not lose it — losing it means
-# never being able to update this app on a device that has it installed:
-#
-#   keytool -genkey -v -keystore release.jks -alias release \
-#           -keyalg RSA -keysize 4096 -validity 10000
-#   base64 -w0 release.jks | wl-copy      # paste into KEYSTORE_BASE64
-#
-# NEVER commit release.jks.
+# Signing comes from masked, protected CI/CD variables: KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+# KEY_ALIAS, KEY_PASSWORD. Tags without them fail rather than publish an unsigned APK.
 #
 # The app needs the Rust JNI bridge (rust/bridge → libairgestures_bridge.so), so the
 # build jobs install the NDK, Rust and cargo-ndk into the image and run ./build-rust.sh
