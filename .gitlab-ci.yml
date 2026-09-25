@@ -66,7 +66,9 @@ default:
 .bridge:
   before_script:
     - !reference [.rust, before_script]
-    - yes | sdkmanager "ndk;$NDK_VERSION" > /dev/null
+    # `yes` dies of SIGPIPE once sdkmanager stops reading; under the runner's
+    # pipefail that alone would fail the job, so its status doesn't count.
+    - '{ yes || true; } | sdkmanager --install "ndk;$NDK_VERSION" | tail -n 3'
     - export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
     - rustup target add aarch64-linux-android
     - cargo install --locked cargo-ndk --root "$CI_PROJECT_DIR/.cargo-tools"
