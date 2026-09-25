@@ -81,6 +81,8 @@ class MainActivity : Activity() {
             // The bottom room keeps the last card clear of the Ko-fi pill.
             setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(88f))
             addView(header())
+            update = column(gap = 0f)
+            addView(update)
             hero()?.let(::addView)
             addView(powerBlock())
             addView(statusCard())
@@ -88,6 +90,10 @@ class MainActivity : Activity() {
             addView(gestureCard())
             addView(setupCard())
             addView(activityCard())
+            // The installed version, quietly, bottom left.
+            addView(Cb.text(context, 12f, color = Cb.INK_400).apply {
+                text = "v" + UpdateCheck.version(context)
+            })
         }
         val scroll = ScrollView(this).apply {
             addView(page)
@@ -116,7 +122,33 @@ class MainActivity : Activity() {
         BandService.state.observe(watch)
         registerReceiver(bluetoothChanged, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
         renderSetup()
+        renderUpdate()
+        UpdateCheck.maybe(this) { runOnUiThread(::renderUpdate) }
     }
+
+    private lateinit var update: LinearLayout
+
+    /** A newer release than this build: say so at the top, with its first note line and the download. */
+    private fun renderUpdate() {
+        update.removeAllViews()
+        val release = UpdateCheck.available(this)
+        // Gone while there's nothing to say, so the page keeps its spacing.
+        update.visibility = if (release == null) View.GONE else View.VISIBLE
+        if (release == null) return
+        val version = release.tag.removePrefix("v")
+        val notes = UpdateCheck.plain(release.notes).lineSequence().map { it.removePrefix("• ") }.firstOrNull { it.isNotBlank() }
+        update.addView(card("Air Gestures $version is out", column(gap = 12f).apply {
+            addView(Cb.text(context, 14f, color = Cb.INK_500).apply {
+                text = listOfNotNull("You have ${UpdateCheck.version(context)}.", notes).joinToString(" ")
+            })
+            addView(row(gap = 10f).apply {
+                addView(pill("Download APK", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first)
+                addView(pill("All releases") { openUrl(UpdateCheck.RELEASES) }.first)
+            })
+        }))
+    }
+
+    private fun openUrl(url: String) = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
     /** Bluetooth switched on or off: the chip, the power button and Setup follow. */
     private val bluetoothChanged = object : android.content.BroadcastReceiver() {

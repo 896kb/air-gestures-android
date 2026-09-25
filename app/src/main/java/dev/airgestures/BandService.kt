@@ -38,6 +38,15 @@ class BandService : Service(), BandLink.Listener {
         // The status notification says when controls are off; no separate alerts.
         notifications.deleteNotificationChannel(OLD_ALERTS)
         instance = this
+        main.post(updateCheck)
+    }
+
+    /** Look for a newer release now and then while the band is kept connected. */
+    private val updateCheck: Runnable = object : Runnable {
+        override fun run() {
+            UpdateCheck.maybe(this@BandService)
+            main.postDelayed(this, UpdateCheck.EVERY_MS)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -54,6 +63,7 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(updateCheck)
         link.stop()
         actions.close()
         instance = null

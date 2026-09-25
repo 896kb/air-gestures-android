@@ -18,7 +18,8 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
-        versionName = "0.3.8"
+        // Release builds take the tag (v0.3.9 → 0.3.9); a local build is the work after the last release.
+        versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.3.9-dev"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
