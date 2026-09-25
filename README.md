@@ -4,9 +4,11 @@ Use a **Meta Neural Band** with an Android phone — the Android side of
 [air-gestures](https://gitlab.com/896kb/air-gestures) (Linux desktop), which is a Rust port
 of [callbacked/kinesis](https://github.com/callbacked/kinesis) (macOS, MIT).
 
-> **Status: spike — works.** On a Xiaomi 17 Pro (HyperOS, Android 16) it connects to a band
-> the desktop app claimed (sharing the desktop's owner key) and logs every gesture, the pinch
-> dial, hand and battery. No gesture actions, background service or claiming yet.
+> **Status: 0.3.6, working.** On a Xiaomi 17 Pro (HyperOS, Android 16) it keeps a band
+> connected in the background (a foreground service that reconnects on its own) and runs its
+> gestures: media, volume, brightness, screen swipes, Back, Home and Recent apps, each gesture
+> mappable. It uses the owner key of a band claimed with the desktop app; claiming from the
+> phone isn't supported yet.
 >
 > Findings: the owned band only advertises its name in pairing mode (hold 3 s), which the
 > phone needs to find it the first time; Android bonds during the PSM read; the insecure
