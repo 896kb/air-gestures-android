@@ -28,10 +28,19 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this)
         link = BandLink(this, this)
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
+        val notifications = getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(
             NotificationChannel(CHANNEL, "Band connection", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Shows while the band is kept connected."
                 setShowBadge(false)
+            },
+        )
+        notifications.createNotificationChannel(
+            NotificationChannel(ALERTS, "Controls on or off", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "A brief notice when the band's controls are switched on or off."
+                setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             },
         )
         instance = this
@@ -62,8 +71,27 @@ class BandService : Service(), BandLink.Listener {
     fun setPaused(paused: Boolean) {
         prefs.paused = paused
         link.setPaused(paused)
+        pausedChanged(paused)
+    }
+
+    /** Record the controls' state; a change gets a brief heads-up notice. */
+    private fun pausedChanged(paused: Boolean) {
+        val changed = state.value.paused != paused
         state.update { copy(paused = paused) }
         refreshNotification()
+        if (changed) alert(paused)
+    }
+
+    private fun alert(paused: Boolean) {
+        val notification = Notification.Builder(this, ALERTS)
+            .setSmallIcon(if (paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
+            .setContentTitle(if (paused) "Controls off" else "Controls on")
+            .setContentText(if (paused) "Gestures do nothing until you hold the middle finger again." else "Gestures are live.")
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setTimeoutAfter(2500)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(ALERT_NOTIFICATION, notification)
     }
 
     fun setAction(gesture: Gesture, action: Action) {
@@ -71,10 +99,9 @@ class BandService : Service(), BandLink.Listener {
         link.setMapping(prefs.mapping())
     }
 
-    fun setDial(dial: String) {
+    fun setDial(dial: DialChoice) {
         prefs.dial = dial
-        link.setDial(dial)
-        state.update { copy(dial = dial) }
+        link.setMapping(prefs.mapping())
     }
 
     // BandLink.Listener: called from Bluetooth and link threads.
@@ -87,6 +114,7 @@ class BandService : Service(), BandLink.Listener {
     override fun onStatus(status: JSONObject) = main.post {
         val paused = status.optBoolean("paused")
         if (paused != prefs.paused) prefs.paused = paused
+        if (paused != state.value.paused) pausedChanged(paused)
         state.update {
             copy(
                 paused = paused,
@@ -180,6 +208,8 @@ class BandService : Service(), BandLink.Listener {
     companion object {
         private const val CHANNEL = "band"
         private const val NOTIFICATION = 1
+        private const val ALERTS = "alerts"
+        private const val ALERT_NOTIFICATION = 2
         private const val LOG_LINES = 60
         const val ACTION_TOGGLE_CONTROLS = "dev.airgestures.TOGGLE_CONTROLS"
         const val ACTION_STOP = "dev.airgestures.STOP"

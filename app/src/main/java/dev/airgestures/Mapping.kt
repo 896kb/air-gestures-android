@@ -10,8 +10,7 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     VOLUME_DOWN("volume.down", "Volume down", R.drawable.ic_volume_1),
     MUTE("volume.mute", "Mute", R.drawable.ic_volume_x),
     BRIGHTNESS_UP("brightness.up", "Brightness up", R.drawable.ic_sun),
-    BRIGHTNESS_DOWN("brightness.down", "Brightness down", R.drawable.ic_sun_dim),
-    DIAL("dial.toggle", "Switch the dial", R.drawable.ic_rotate_cw);
+    BRIGHTNESS_DOWN("brightness.down", "Brightness down", R.drawable.ic_sun_dim);
 
     companion object {
         fun of(id: String) = entries.firstOrNull { it.id == id } ?: NONE
@@ -28,7 +27,19 @@ enum class Gesture(val key: String, val label: String, val default: Action) {
     SWIPE_LEFT("swipe_left", "Swipe left", Action.NONE),
     SWIPE_RIGHT("swipe_right", "Swipe right", Action.NONE),
     INDEX_TAP("index_tap", "Index tap", Action.PLAY_PAUSE),
-    INDEX_DOUBLE("index_double", "Index double tap", Action.DIAL),
+    INDEX_DOUBLE("index_double", "Index double tap", Action.NONE),
     MIDDLE_TAP("middle_tap", "Middle tap", Action.NONE),
     MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE),
+}
+
+/** What pinch and turn does: one action per step each way. */
+enum class DialChoice(val key: String, val label: String, val up: String, val down: String, val icon: Int) {
+    VOLUME("volume", "Volume", "volume.up", "volume.down", R.drawable.ic_volume_2),
+    TRACKS("tracks", "Next or previous track", "dial.track_next", "dial.track_previous", R.drawable.ic_skip_forward),
+    BRIGHTNESS("brightness", "Brightness", "brightness.up", "brightness.down", R.drawable.ic_sun),
+    NONE("none", "Nothing", "", "", R.drawable.ic_minus);
+
+    companion object {
+        fun of(key: String?) = entries.firstOrNull { it.key == key } ?: VOLUME
+    }
 }

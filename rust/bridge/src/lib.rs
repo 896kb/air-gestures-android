@@ -20,7 +20,7 @@ use status::Status;
 
 fn config_with(mapping: &str) -> Config {
     let mut config = Config::default();
-    config.gestures.apply_mapping(mapping);
+    config.apply_mapping(mapping);
     config
 }
 
@@ -67,7 +67,10 @@ impl Connection {
         if paused {
             controller.pause();
         }
-        controller.set_dial_target(DialTarget::from_name(dial));
+        // An empty `dial` keeps what the mapping chose.
+        if !dial.is_empty() {
+            controller.set_dial_target(DialTarget::from_name(dial));
+        }
         Ok(Self {
             session: BandSession::new(Some(identity), None, false).with_scheme_guess(scheme_guess),
             controller,
@@ -147,17 +150,15 @@ impl Connection {
         }
     }
 
-    /// Replace the gesture mapping (see `GestureConfig::apply_mapping`).
+    /// Replace the gesture and dial mapping (see `Config::apply_mapping`).
     pub fn set_mapping(&mut self, mapping: &str) {
-        let dial = self.controller.status().dial;
         let paused = self.controller.status().paused;
         for command in self.controller.set_config(config_with(mapping)) {
             if let Command::Run(action) = command {
                 self.actions.push(action);
             }
         }
-        // A new config resets the controller's view of these; keep the app's.
-        self.controller.set_dial_target(dial);
+        // A new config resets the controller's pause state; keep the app's.
         if paused {
             self.controller.pause();
         }

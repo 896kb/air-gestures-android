@@ -44,8 +44,6 @@ class MainActivity : Activity() {
     private lateinit var gestures: TextView
     private lateinit var lastGesture: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
-    private lateinit var dialVolume: TextView
-    private lateinit var dialBrightness: TextView
     private lateinit var setup: LinearLayout
     private lateinit var activity: TextView
     private var player: MediaPlayer? = null
@@ -284,14 +282,6 @@ class MainActivity : Activity() {
         return view to shape
     }
 
-    /** Segmented control: an ink-filled active pill on a pushed track. */
-    private fun segment(text: String, onClick: () -> Unit) = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_700).apply {
-        this.text = text
-        gravity = Gravity.CENTER
-        setPadding(dpi(16f), dpi(8f), dpi(16f), dpi(8f))
-        setOnClickListener { onClick() }
-    }
-
     /** A setting: its label and a line of detail on the left, the control on the right. */
     private fun settingRow(label: String, detail: String, control: View) = row(gap = 12f).apply {
         addView(column(gap = 4f).apply {
@@ -307,23 +297,6 @@ class MainActivity : Activity() {
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
         addView(settingRow("Controls", "Or hold the middle finger", controls.first))
-        dialVolume = segment("Volume") { setDial("volume") }
-        dialBrightness = segment("Brightness") { setDial("brightness") }
-        val track = NeuDrawable(context, 999f, soft = false).apply { pressed = 1f }
-        addView(settingRow("Dial", "Pinch and turn", row().apply {
-            background = track
-            val m = track.margin
-            setPadding(m + dpi(4f), m + dpi(4f), m + dpi(4f), m + dpi(4f))
-            addView(dialVolume)
-            addView(dialBrightness)
-        }))
-    }
-
-    private fun setDial(dial: String) {
-        BandService.instance?.setDial(dial) ?: run {
-            Prefs(this).dial = dial
-            render(BandService.state.value)
-        }
     }
 
     private lateinit var gestureRows: LinearLayout
@@ -344,7 +317,8 @@ class MainActivity : Activity() {
                 pick(gesture)
             })
         }
-        gestureRows.addView(gestureRow(R.drawable.ic_volume_2, "Pinch and turn", "The dial", false, null))
+        val dial = prefs.dial
+        gestureRows.addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE) { pickDial() })
         gestureRows.addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, null))
     }
 
@@ -364,10 +338,24 @@ class MainActivity : Activity() {
             }
         }
 
-    /** The action picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
     private fun pick(gesture: Gesture) {
         val prefs = Prefs(this)
-        val current = prefs.action(gesture)
+        choose(gesture.label, Action.entries.map { Triple(it.icon, it.label, it == prefs.action(gesture)) }) { index ->
+            val action = Action.entries[index]
+            BandService.instance?.setAction(gesture, action) ?: prefs.setAction(gesture, action)
+        }
+    }
+
+    private fun pickDial() {
+        val prefs = Prefs(this)
+        choose("Pinch and turn", DialChoice.entries.map { Triple(it.icon, it.label, it == prefs.dial) }) { index ->
+            val dial = DialChoice.entries[index]
+            BandService.instance?.setDial(dial) ?: run { prefs.dial = dial }
+        }
+    }
+
+    /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
+    private fun choose(title: String, options: List<Triple<Int, String, Boolean>>, onChoice: (Int) -> Unit) {
         val dialog = android.app.Dialog(this)
         val list = column(gap = 2f)
         val sheet = column(gap = 12f).apply {
@@ -378,16 +366,15 @@ class MainActivity : Activity() {
             }
             elevation = dp(24f)
             addView(Cb.label(context, "Gesture"))
-            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = gesture.label })
+            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
             addView(list)
         }
-        for (action in Action.entries) {
-            val selected = action == current
+        options.forEachIndexed { index, (iconRes, label, selected) ->
             list.addView(row(gap = 12f).apply {
                 setPadding(dpi(10f), dpi(11f), dpi(10f), dpi(11f))
-                addView(icon(action.icon, 16f))
+                addView(icon(iconRes, 16f))
                 addView(Cb.text(context, 15f, if (selected) R.font.geist_semibold else R.font.geist_regular, Cb.INK_900).apply {
-                    text = action.label
+                    text = label
                 }, weighted())
                 if (selected) addView(icon(R.drawable.ic_check, 16f))
                 background = if (selected) GradientDrawable().apply {
@@ -395,13 +382,14 @@ class MainActivity : Activity() {
                     setColor(0x14111214) // --action-quiet
                 } else null
                 setOnClickListener {
-                    BandService.instance?.setAction(gesture, action) ?: prefs.setAction(gesture, action)
+                    onChoice(index)
                     renderGestures()
+                    renderSetup()
                     dialog.dismiss()
                 }
             })
         }
-        dialog.setContentView(android.widget.FrameLayout(this).apply {
+        dialog.setContentView(FrameLayout(this).apply {
             setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
             addView(sheet)
         })
@@ -436,7 +424,6 @@ class MainActivity : Activity() {
     private fun render(state: BandService.State) {
         val running = BandService.instance != null
         val paused = if (running) state.paused else Prefs(this).paused
-        val dial = if (running) state.dial else Prefs(this).dial
         val (signal, label) = when {
             !running || state.phase == Phase.STOPPED -> Cb.Signal.MUTE to "Off"
             state.phase == Phase.CONNECTED && paused -> Cb.Signal.WARN to "Controls off"
@@ -464,14 +451,12 @@ class MainActivity : Activity() {
         // Toggled-on states are pushed, toggled-off states raised.
         controls.first.text = if (paused) "Controls off" else "Controls on"
         if ((controls.second.pressed > .5f) == paused) controls.second.press(!paused)
-        for ((view, name) in listOf(dialVolume to "volume", dialBrightness to "brightness")) {
-            val active = dial == name
-            view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
-            view.background = if (active) GradientDrawable().apply {
-                cornerRadius = dp(999f)
-                setColor(Cb.INK_900)
-            } else null
-        }
+        controls.first.setCompoundDrawablesRelative(
+            getDrawable(if (paused) R.drawable.ic_hand_off else R.drawable.ic_hand)!!.mutate().apply {
+                setBounds(0, 0, dpi(16f), dpi(16f))
+                setTint(Cb.INK_900)
+            }, null, null, null,
+        )
         activity.text = state.log.takeLast(8).joinToString("\n").ifEmpty { "Nothing yet." }
         // The band is full size while it's connected with controls on;
         // otherwise smaller and faded to 30%.
@@ -508,9 +493,12 @@ class MainActivity : Activity() {
         setupRow("Companion link", if (linked) "Linked; the system wakes the app" else "Hold the band's button 3 s, then link", linked, "Link") {
             Companion.link(this, 2) { line -> BandService.state.update { copy(log = log + line) }; renderSetup() }
         }
-        val brightness = Settings.System.canWrite(this)
-        setupRow("Brightness access", if (brightness) "Allowed" else "Needed for the brightness dial", brightness, "Allow") {
-            startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
+        // Only asked for when brightness is mapped somewhere.
+        if (Prefs(this).usesBrightness()) {
+            val brightness = Settings.System.canWrite(this)
+            setupRow("Brightness access", if (brightness) "Allowed" else "Needed for brightness", brightness, "Allow") {
+                startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
+            }
         }
         val unrestricted = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
         setupRow("Battery", if (unrestricted) "Unrestricted" else "Set to no restrictions", unrestricted, "Open") {

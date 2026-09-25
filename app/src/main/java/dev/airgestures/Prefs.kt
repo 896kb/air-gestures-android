@@ -10,10 +10,10 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
 
-    /** "volume" or "brightness". */
-    var dial: String
-        get() = prefs.getString("dial", "volume") ?: "volume"
-        set(value) = prefs.edit().putString("dial", value).apply()
+    /** What pinch and turn does. */
+    var dial: DialChoice
+        get() = DialChoice.of(prefs.getString("dial.choice", null))
+        set(value) = prefs.edit().putString("dial.choice", value.key).apply()
 
     /** The service should keep the band connected. */
     var running: Boolean
@@ -26,8 +26,14 @@ class Prefs(context: Context) {
     fun setAction(gesture: Gesture, action: Action) =
         prefs.edit().putString("map.${gesture.key}", action.id).apply()
 
-    /** `gesture=action;…` for the bridge. */
-    fun mapping(): String = Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" }
+    /** `gesture=action;…` plus `dial_up`/`dial_down` for the bridge. */
+    fun mapping(): String =
+        Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" } +
+            ";dial_up=${dial.up};dial_down=${dial.down}"
+
+    /** Brightness is mapped somewhere (it needs Modify system settings). */
+    fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||
+        Gesture.entries.any { action(it).id.startsWith("brightness.") }
 
     var associationId: Int
         get() = prefs.getInt("association", -1)

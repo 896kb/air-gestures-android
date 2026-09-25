@@ -5,12 +5,11 @@ import android.media.AudioManager
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.KeyEvent
-import android.widget.Toast
 
 /** Runs the bridge's action names on the phone. */
 class Actions(private val context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
-    private val prefs = Prefs(context)
+    private var lastTrackSkip = 0L
 
     /** Returns a line for the activity log when the action couldn't run. */
     fun run(action: String): String? {
@@ -23,10 +22,12 @@ class Actions(private val context: Context) {
             "volume.mute" -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
             "brightness.up" -> return brightness(+1)
             "brightness.down" -> return brightness(-1)
-            "dial.changed.volume", "dial.changed.brightness" -> {
-                val dial = action.removePrefix("dial.changed.")
-                prefs.dial = dial
-                Toast.makeText(context, "Dial: $dial", Toast.LENGTH_SHORT).show()
+            // A wrist turn makes many dial steps: skip at most one track per 0.7 s.
+            "dial.track_next", "dial.track_previous" -> {
+                val now = SystemClock.uptimeMillis()
+                if (now - lastTrackSkip < 700) return null
+                lastTrackSkip = now
+                mediaKey(if (action == "dial.track_next") KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS)
             }
             else -> return "unknown action $action"
         }

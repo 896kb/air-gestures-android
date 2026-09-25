@@ -203,3 +203,65 @@ pub struct Config {
     pub gestures: GestureConfig,
     pub dial: DialConfig,
 }
+
+impl Config {
+    /// Apply `key=action` pairs separated by `;`: the gesture keys of
+    /// [`GestureConfig::apply_mapping`], plus `dial_up`/`dial_down` for one
+    /// pinch-and-turn step each way (both empty: the dial does nothing).
+    pub fn apply_mapping(&mut self, mapping: &str) {
+        self.gestures.apply_mapping(mapping);
+        let mut up = None;
+        let mut down = None;
+        for pair in mapping.split(';') {
+            match pair.split_once('=') {
+                Some(("dial_up", action)) => up = Some(action.trim().to_owned()),
+                Some(("dial_down", action)) => down = Some(action.trim().to_owned()),
+                _ => {}
+            }
+        }
+        if up.is_none() && down.is_none() {
+            return;
+        }
+        let (up, down) = (up.unwrap_or_default(), down.unwrap_or_default());
+        self.dial.target = if up.is_empty() && down.is_empty() {
+            DialTarget::Off
+        } else {
+            DialTarget::Volume
+        };
+        // The dial's "volume" slot carries whatever the app mapped it to.
+        self.dial.volume_up = up;
+        self.dial.volume_down = down;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_dial_can_be_remapped_or_turned_off() {
+        let mut config = Config::default();
+        config.apply_mapping("dial_up=media.next;dial_down=media.previous");
+        assert_eq!(
+            config.dial.command(config.dial.target, true),
+            Some("media.next")
+        );
+        assert_eq!(
+            config.dial.command(config.dial.target, false),
+            Some("media.previous")
+        );
+        config.apply_mapping("dial_up=;dial_down=");
+        assert_eq!(config.dial.target, DialTarget::Off);
+        assert_eq!(config.dial.command(config.dial.target, true), None);
+    }
+
+    #[test]
+    fn a_mapping_without_dial_keys_keeps_the_volume_dial() {
+        let mut config = Config::default();
+        config.apply_mapping("swipe_up=media.next");
+        assert_eq!(
+            config.dial.command(config.dial.target, true),
+            Some("volume.up")
+        );
+    }
+}
