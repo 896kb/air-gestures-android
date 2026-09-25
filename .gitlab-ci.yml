@@ -17,6 +17,8 @@
 # build jobs install the NDK, Rust and cargo-ndk into the image and run ./build-rust.sh
 # before Gradle.
 
+# Pipes into grep read the whole input (no `grep -q`): under the runner's pipefail, a
+# writer killed by SIGPIPE when grep stops early would fail the step.
 stages: [test, build, release]
 
 variables:
@@ -106,8 +108,8 @@ package:
     - APK=app/build/outputs/apk/release/app-release.apk
     - test -f "$APK" || { echo "no signed APK produced — check the signing variables"; exit 1; }
     - $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs "$APK"
-    - $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | grep -q "application-debuggable" && { echo "APK is debuggable — refusing to publish"; exit 1; } || true
-    - unzip -l "$APK" | grep -q "lib/arm64-v8a/libairgestures_bridge.so" || { echo "APK has no Rust bridge — refusing to publish"; exit 1; }
+    - $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | grep "application-debuggable" > /dev/null && { echo "APK is debuggable — refusing to publish"; exit 1; } || true
+    - unzip -l "$APK" | grep "lib/arm64-v8a/libairgestures_bridge.so" > /dev/null || { echo "APK has no Rust bridge — refusing to publish"; exit 1; }
     - cp "$APK" "air-gestures-$CI_COMMIT_TAG.apk"
     - |
       curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" \
