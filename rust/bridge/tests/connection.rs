@@ -22,9 +22,13 @@ fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>,
 }
 
 fn connected(paused: bool) -> (Connection, Responder) {
+    connected_with(paused, "")
+}
+
+fn connected_with(paused: bool, mapping: &str) -> (Connection, Responder) {
     let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
     let mut connection =
-        Connection::new(&identity.private_bytes(), 0, paused, "volume", "").unwrap();
+        Connection::new(&identity.private_bytes(), 0, paused, "volume", mapping).unwrap();
     // An enrolled band with no owner recorded adopts the first key that proves trust.
     let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
     let request = connection.request().unwrap();
@@ -130,4 +134,25 @@ fn an_unmapped_gesture_does_nothing() {
     connection.set_mapping("swipe_down=");
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
     assert!(connection.take_actions().is_empty());
+}
+
+#[test]
+fn a_band_on_the_other_wrist_is_set_to_the_chosen_hand_after_connecting() {
+    // The simulated band starts as right-handed.
+    let (mut connection, mut band) = connected_with(false, "hand=left");
+    for step in 0..20 {
+        let out = connection.tick(2.0 + f64::from(step) * 0.05).unwrap();
+        pump(
+            &mut connection,
+            &mut band,
+            out,
+            2.0 + f64::from(step) * 0.05,
+        );
+    }
+    assert_eq!(band.hand, 1, "the band stores left");
+    assert!(
+        connection.status_json().contains(r#""hand":"left""#),
+        "{}",
+        connection.status_json()
+    );
 }

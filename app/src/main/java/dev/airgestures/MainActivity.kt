@@ -45,6 +45,8 @@ class MainActivity : Activity() {
     private lateinit var lastGesture: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
     private lateinit var setup: LinearLayout
+    private lateinit var wristLeft: TextView
+    private lateinit var wristRight: TextView
     private lateinit var activity: TextView
     private var player: MediaPlayer? = null
     /** `start`/`pause` are only legal once the player is prepared (else it drops into its error state). */
@@ -282,6 +284,27 @@ class MainActivity : Activity() {
         return view to shape
     }
 
+    /** Segmented control: an ink-filled active pill on a pushed track. */
+    private fun segment(text: String, onClick: () -> Unit) = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_700).apply {
+        this.text = text
+        gravity = Gravity.CENTER
+        setPadding(dpi(18f), dpi(8f), dpi(18f), dpi(8f))
+        setOnClickListener { onClick() }
+    }
+
+    private fun segmented(vararg segments: TextView) = row().apply {
+        val track = NeuDrawable(context, 999f, soft = false).apply { pressed = 1f }
+        background = track
+        val m = track.margin
+        setPadding(m + dpi(4f), m + dpi(4f), m + dpi(4f), m + dpi(4f))
+        segments.forEach(::addView)
+    }
+
+    private fun setHand(hand: String) {
+        BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
+        render(BandService.state.value)
+    }
+
     /** A setting: its label and a line of detail on the left, the control on the right. */
     private fun settingRow(label: String, detail: String, control: View) = row(gap = 12f).apply {
         addView(column(gap = 4f).apply {
@@ -297,6 +320,9 @@ class MainActivity : Activity() {
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
         addView(settingRow("Controls", "Or hold the middle finger", controls.first))
+        wristLeft = segment("Left") { setHand("left") }
+        wristRight = segment("Right") { setHand("right") }
+        addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
     }
 
     private lateinit var gestureRows: LinearLayout
@@ -457,6 +483,16 @@ class MainActivity : Activity() {
                 setTint(Cb.INK_900)
             }, null, null, null,
         )
+        // The wrist chosen here, else what the band reports.
+        val wrist = Prefs(this).hand.takeIf { it != "band" } ?: state.hand
+        for ((view, name) in listOf(wristLeft to "left", wristRight to "right")) {
+            val active = wrist == name
+            view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
+            view.background = if (active) GradientDrawable().apply {
+                cornerRadius = dp(999f)
+                setColor(Cb.INK_900)
+            } else null
+        }
         activity.text = state.log.takeLast(8).joinToString("\n").ifEmpty { "Nothing yet." }
         // The band is full size while it's connected with controls on;
         // otherwise smaller and faded to 30%.

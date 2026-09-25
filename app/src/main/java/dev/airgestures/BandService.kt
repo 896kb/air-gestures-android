@@ -99,6 +99,12 @@ class BandService : Service(), BandLink.Listener {
         link.setMapping(prefs.mapping())
     }
 
+    /** Set the band to this wrist now and on every later connection. */
+    fun setHand(hand: String) {
+        prefs.hand = hand
+        link.setMapping(prefs.mapping())
+    }
+
     fun setDial(dial: DialChoice) {
         prefs.dial = dial
         link.setMapping(prefs.mapping())

@@ -10,6 +10,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
 
+    /** "left" or "right" once chosen in the app (the band is set to it on every connection), else "band". */
+    var hand: String
+        get() = prefs.getString("hand", "band") ?: "band"
+        set(value) = prefs.edit().putString("hand", value).apply()
+
     /** What pinch and turn does. */
     var dial: DialChoice
         get() = DialChoice.of(prefs.getString("dial.choice", null))
@@ -29,7 +34,7 @@ class Prefs(context: Context) {
     /** `gesture=action;…` plus `dial_up`/`dial_down` for the bridge. */
     fun mapping(): String =
         Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" } +
-            ";dial_up=${dial.up};dial_down=${dial.down}"
+            ";dial_up=${dial.up};dial_down=${dial.down};hand=$hand"
 
     /** A screen gesture is mapped somewhere (it needs the accessibility service). */
     fun usesScreen() = Gesture.entries.any { action(it).id.startsWith("screen.") }
