@@ -616,13 +616,27 @@ class MainActivity : Activity() {
             if (ownerKey) "Replace" else "Import",
             always = true,
         ) {
-            startActivityForResult(
-                Intent(Intent.ACTION_OPEN_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType("*/*")
-                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
-                IMPORT,
-            )
+            val pick = {
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE)
+                        .setType("*/*")
+                        .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
+                    IMPORT,
+                )
+            }
+            // Replacing drops the key this phone owns the band with; importing into an empty slot doesn't.
+            if (!ownerKey) {
+                pick()
+            } else {
+                confirm(
+                    "Replace the owner key?",
+                    "The key on this phone is overwritten by the one you pick. If this phone claimed the band, " +
+                        "its key is the only one the band trusts: keep a copy, or the band has to be claimed again.",
+                    "Choose file",
+                    pick,
+                )
+            }
         }
         if (ownerKey) {
             setupRow("Forget the band", "Removes the key, the pairing and the link from this phone", false, "Forget", always = true, icon = R.drawable.ic_link) {
@@ -645,9 +659,16 @@ class MainActivity : Activity() {
         }
         if (SessionStore.present(this)) {
             setupRow("Meta sign-in", "Signed in; used only to claim a band", true, "Sign out", always = true) {
-                SessionStore.delete(this)
-                log("signed out of Meta on this phone")
-                renderSetup()
+                confirm(
+                    "Sign out of Meta?",
+                    "The Meta sign-in is deleted from this phone. The band keeps working; you'd sign in again " +
+                        "only to claim a band.",
+                    "Sign out",
+                ) {
+                    SessionStore.delete(this)
+                    log("signed out of Meta on this phone")
+                    renderSetup()
+                }
             }
         }
         setupRow("Bluetooth and notifications", if (granted()) "Allowed" else "Needed to connect", granted(), "Allow") {
