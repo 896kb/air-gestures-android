@@ -492,7 +492,21 @@ class MainActivity : Activity() {
             startActivityForResult(Intent(this, MetaSignIn::class.java), SIGN_IN)
             return
         }
-        BandClaim.start(this, session)
+        // The companion picker doubles as the claim's device picker: the band is in
+        // pairing mode for the claim anyway, so one choice links it and says which band
+        // to claim. Without a picked device (cancelled, or before Android 14) it scans.
+        if (Companion.linked(this)) {
+            BandClaim.start(this, session)
+            return
+        }
+        log("choose the band in the system's list to link and claim it")
+        Companion.link(
+            this,
+            2,
+            ::log,
+            onLinked = { device -> BandClaim.start(this, session, device); renderSetup() },
+            onFailed = { BandClaim.start(this, session) },
+        )
     }
 
     private fun render(state: BandService.State) {
@@ -641,7 +655,7 @@ class MainActivity : Activity() {
         }
         val linked = Companion.linked(this)
         setupRow("Companion link", if (linked) "Linked; the system wakes the app" else "Hold the band's button 3 s, then link", linked, "Link") {
-            Companion.link(this, 2) { line -> BandService.state.update { copy(log = log + line) }; renderSetup() }
+            Companion.link(this, 2, log = { line -> log(line); renderSetup() })
         }
         // Only asked for when a screen gesture is mapped somewhere.
         if (Prefs(this).usesScreen()) {

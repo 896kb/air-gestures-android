@@ -59,7 +59,14 @@ class BandClaim private constructor(context: Context, private val session: Strin
     private var handle = 0L
     private var guess = 0
 
-    private fun start() {
+    /** Claim [picked] directly (chosen in the companion picker), or scan for a band in pairing mode. */
+    private fun start(picked: BluetoothDevice?) {
+        if (picked != null) {
+            device = picked
+            name = runCatching { picked.name }.getOrNull() ?: "the band"
+            line("claiming $name")
+            return bond(picked)
+        }
         val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner
             ?: return finish("failed: Bluetooth is off")
         line("looking for a band in pairing mode")
@@ -318,12 +325,12 @@ class BandClaim private constructor(context: Context, private val session: Strin
             private set
 
         /** Start a claim with the stored Meta session (the caller checked there is one). */
-        fun start(context: Context, sessionJson: String) {
+        fun start(context: Context, sessionJson: String, picked: BluetoothDevice? = null) {
             if (current != null) return
             // One Bluetooth link at a time: the service must not hold the band.
             BandService.stop(context)
             BandService.state.update { copy(claiming = true) }
-            current = BandClaim(context, sessionJson).also { it.start() }
+            current = BandClaim(context, sessionJson).also { it.start(picked) }
         }
 
         fun cancel() = current?.cancel()

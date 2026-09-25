@@ -20,15 +20,16 @@ saver to **No restrictions**, or the system stops it in the background.
 
 The band can be claimed right on the phone: tap **Claim** under Setup, sign in to Meta on
 Meta's own page in the app, then hold the band's button for 3 seconds until it flashes
-(pairing mode). Claiming makes the phone the band's owner: it unlinks the band from Meta's
+(pairing mode) and pick it in the system's list, which also links it so Android can wake
+the app when the band comes into range. Claiming makes the phone the band's owner: it unlinks the band from Meta's
 glasses and app, and a key from a computer that claimed it before stops working. The app
 keeps the Meta sign-in encrypted on the phone; **Sign out** under Setup deletes it.
 
 Or use a band that was claimed with the Linux app:
 
 1. On the computer, claim the band with `air-gestures pair`.
-2. Open the app once, then copy the band's key from the computer to the phone with USB
-   debugging on: `scripts/push-identity.sh`.
+2. Copy `owner.key` and `band.json` from `~/.local/state/air-gestures/` to the phone and
+   pick them under **Setup → Owner key → Import**.
 3. Run `air-gestures disconnect` on the computer (the band talks to one device at a time)
    and tap the power button in the app.
 

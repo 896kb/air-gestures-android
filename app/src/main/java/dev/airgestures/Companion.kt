@@ -21,8 +21,18 @@ object Companion {
         activity.getSystemService(CompanionDeviceManager::class.java).myAssociations
             .any { it.id == Prefs(activity).associationId }
 
-    /** Shows the system's device picker; the band must be advertising (pairing mode). */
-    fun link(activity: Activity, requestCode: Int, log: (String) -> Unit) {
+    /**
+     * Shows the system's device picker; the band must be advertising (pairing mode).
+     * [onLinked] gets the picked band (Android 14+ reports it; null before), so a claim
+     * can use the same choice; [onFailed] runs when the picker is cancelled or finds nothing.
+     */
+    fun link(
+        activity: Activity,
+        requestCode: Int,
+        log: (String) -> Unit,
+        onLinked: (android.bluetooth.BluetoothDevice?) -> Unit = {},
+        onFailed: () -> Unit = {},
+    ) {
         val request = AssociationRequest.Builder()
             .addDeviceFilter(
                 BluetoothLeDeviceFilter.Builder()
@@ -44,10 +54,17 @@ object Companion {
                     ObservingDevicePresenceRequest.Builder().setAssociationId(association.id).build(),
                 )
                 log("linked ${association.displayName ?: "the band"} as a companion device")
+                val device = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    association.associatedDevice?.bleDevice?.device
+                } else {
+                    null
+                }
+                onLinked(device)
             }
 
             override fun onFailure(error: CharSequence?) {
                 log("companion link failed: ${error ?: "no band found (hold its button 3 s)"}")
+                onFailed()
             }
         })
     }
