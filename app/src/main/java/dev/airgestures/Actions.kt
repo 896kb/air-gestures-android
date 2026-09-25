@@ -22,6 +22,8 @@ class Actions(private val context: Context) {
             "volume.mute" -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
             "brightness.up" -> return brightness(+1)
             "brightness.down" -> return brightness(-1)
+            "screen.swipe_up", "screen.swipe_down", "screen.back", "screen.home", "screen.recents" ->
+                return screen(action)
             // A wrist turn makes many dial steps: skip at most one track per 0.7 s.
             "dial.track_next", "dial.track_previous" -> {
                 val now = SystemClock.uptimeMillis()
@@ -39,6 +41,19 @@ class Actions(private val context: Context) {
         val time = SystemClock.uptimeMillis()
         audio.dispatchMediaKeyEvent(KeyEvent(time, time, KeyEvent.ACTION_DOWN, code, 0))
         audio.dispatchMediaKeyEvent(KeyEvent(time, time, KeyEvent.ACTION_UP, code, 0))
+    }
+
+    /** Screen gestures through the accessibility service, when it's switched on. */
+    private fun screen(action: String): String? {
+        val touch = TouchService.instance ?: return "screen gestures are off (Setup)"
+        when (action) {
+            "screen.swipe_up" -> touch.swipe(up = true)
+            "screen.swipe_down" -> touch.swipe(up = false)
+            "screen.back" -> touch.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            "screen.home" -> touch.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
+            "screen.recents" -> touch.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS)
+        }
+        return null
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */

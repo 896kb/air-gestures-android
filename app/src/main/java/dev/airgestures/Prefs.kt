@@ -31,6 +31,9 @@ class Prefs(context: Context) {
         Gesture.entries.joinToString(";") { "${it.key}=${action(it).id}" } +
             ";dial_up=${dial.up};dial_down=${dial.down}"
 
+    /** A screen gesture is mapped somewhere (it needs the accessibility service). */
+    fun usesScreen() = Gesture.entries.any { action(it).id.startsWith("screen.") }
+
     /** Brightness is mapped somewhere (it needs Modify system settings). */
     fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||
         Gesture.entries.any { action(it).id.startsWith("brightness.") }

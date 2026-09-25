@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="touch_service_description">Lets band gestures swipe the screen up or down and press Back, Home or Recent apps. Air Gestures reads nothing on screen.</string>
+</resources>

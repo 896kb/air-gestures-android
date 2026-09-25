@@ -44,6 +44,19 @@
             android:foregroundServiceType="connectedDevice" />
 
         <service
+            android:name=".TouchService"
+            android:exported="false"
+            android:label="Air Gestures screen gestures"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/touch_service" />
+        </service>
+
+        <service
             android:name=".BandPresenceService"
             android:exported="true"
             android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">

@@ -493,6 +493,18 @@ class MainActivity : Activity() {
         setupRow("Companion link", if (linked) "Linked; the system wakes the app" else "Hold the band's button 3 s, then link", linked, "Link") {
             Companion.link(this, 2) { line -> BandService.state.update { copy(log = log + line) }; renderSetup() }
         }
+        // Only asked for when a screen gesture is mapped somewhere.
+        if (Prefs(this).usesScreen()) {
+            val on = TouchService.instance != null
+            setupRow(
+                "Screen gestures",
+                if (on) "On" else "Settings, Accessibility, Air Gestures. If it's greyed out: App info, then Allow restricted settings",
+                on,
+                "Turn on",
+            ) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        }
         // Only asked for when brightness is mapped somewhere.
         if (Prefs(this).usesBrightness()) {
             val brightness = Settings.System.canWrite(this)

@@ -10,7 +10,12 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     VOLUME_DOWN("volume.down", "Volume down", R.drawable.ic_volume_1),
     MUTE("volume.mute", "Mute", R.drawable.ic_volume_x),
     BRIGHTNESS_UP("brightness.up", "Brightness up", R.drawable.ic_sun),
-    BRIGHTNESS_DOWN("brightness.down", "Brightness down", R.drawable.ic_sun_dim);
+    BRIGHTNESS_DOWN("brightness.down", "Brightness down", R.drawable.ic_sun_dim),
+    SCREEN_UP("screen.swipe_up", "Swipe up on screen", R.drawable.ic_arrow_up),
+    SCREEN_DOWN("screen.swipe_down", "Swipe down on screen", R.drawable.ic_arrow_down),
+    BACK("screen.back", "Back", R.drawable.ic_arrow_left),
+    HOME("screen.home", "Home", R.drawable.ic_house),
+    RECENTS("screen.recents", "Recent apps", R.drawable.ic_layers);
 
     companion object {
         fun of(id: String) = entries.firstOrNull { it.id == id } ?: NONE
