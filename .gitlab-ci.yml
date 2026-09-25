@@ -37,7 +37,10 @@ variables:
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
   RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
 
+# Every job runs on the homelab's docker runner (brigadahq-docker), not GitLab's
+# metered shared runners.
 default:
+  tags: [docker]
   image: ghcr.io/cirruslabs/android-sdk:36
   before_script:
     - export GRADLE_USER_HOME="$CI_PROJECT_DIR/.gradle"
