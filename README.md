@@ -12,6 +12,19 @@ of [callbacked/kinesis](https://github.com/callbacked/kinesis) (macOS, MIT).
 > phone needs to find it the first time; Android bonds during the PSM read; the insecure
 > L2CAP channel works; the band gave the phone PSM 129 (the desktop saw 255).
 
+## Install
+
+Download the latest APK and install it on an Android 10+ phone:
+
+<https://gitlab.com/896kb/air-gestures-android/-/releases/permalink/latest/downloads/air-gestures.apk>
+
+The app uses the owner key of a band claimed with the Linux app — see
+[Try it with a band claimed on the desktop](#try-it-with-a-band-claimed-on-the-desktop).
+Claiming a band from the phone is not supported yet.
+
+Tested on a Xiaomi 17 Pro. On HyperOS, turn on **Autostart** for the app and set its
+battery saver to **No restrictions**, or the background service gets stopped.
+
 ## How it's built
 
 - `rust/band-core` — the sans-IO band protocol core, copied from air-gestures (see its `ORIGIN.md`).
@@ -19,6 +32,7 @@ of [callbacked/kinesis](https://github.com/callbacked/kinesis) (macOS, MIT).
   and gesture de-duplication; Kotlin passes socket bytes in and gets bytes + event lines out.
 - `app` — a plain Android app (Kotlin, no AndroidX): finds the band by name, reads its
   input-channel PSM over GATT, opens an L2CAP channel (API 29+) and runs the session.
+  The band video on the main screen is `app/src/main/assets/meta-band.mp4`.
 
 ## Build
 
@@ -40,6 +54,32 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 2. `air-gestures disconnect` on the desktop — the band talks to one host at a time.
 3. Tap **Connect**. The log (also `adb logcat -s AirGestures`) shows each step, then
    `connected` and one line per gesture.
+
+## Releasing
+
+Tags build, sign and publish an APK through GitLab CI (`.gitlab-ci.yml`); the release links
+it as `air-gestures.apk`, which is what the permanent link above serves.
+
+1. Create the release keystore once and keep it safe — without it the app can't be updated
+   on phones that have it installed. Never commit it.
+
+   ```sh
+   keytool -genkey -v -keystore release.jks -alias release \
+           -keyalg RSA -keysize 4096 -validity 10000
+   ```
+
+2. Set four masked, protected CI/CD variables (Settings → CI/CD → Variables):
+   `KEYSTORE_BASE64` (`base64 -w0 release.jks`), `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
+   `KEY_PASSWORD`.
+3. Bump `versionName` in `app/build.gradle.kts`, then tag and push:
+
+   ```sh
+   git tag v0.3.6 && git push origin v0.3.6
+   ```
+
+The version code is the pipeline's IID. Locally, `./gradlew assembleRelease` signs when
+`KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` are set, and otherwise
+builds an unsigned APK.
 
 ## License
 

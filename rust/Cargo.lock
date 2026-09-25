@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "band-core"
-version = "0.1.0"
+version = "0.3.6"
 dependencies = [
  "aes",
  "cbc",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "bridge"
-version = "0.1.0"
+version = "0.3.6"
 dependencies = [
  "band-core",
  "jni",

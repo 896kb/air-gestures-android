@@ -1,0 +1,154 @@
+# Build, sign and publish an APK when a version tag is pushed.
+#
+#     git tag v0.3.6 && git push origin v0.3.6
+#
+# GitLab Releases do not host binaries the way GitHub's do — a release carries *links*.
+# So the APK goes to the project's Generic Package Registry first, and the release then
+# points at it. Both live under the same project; nothing leaves GitLab.
+#
+# The release link has filepath /air-gestures.apk, so this always serves the newest one:
+#
+#   https://gitlab.com/896kb/air-gestures-android/-/releases/permalink/latest/downloads/air-gestures.apk
+#
+# Required CI/CD variables (Settings → CI/CD → Variables), all masked and protected:
+#
+#   KEYSTORE_BASE64     base64 of your release keystore   (type: variable, masked)
+#   KEYSTORE_PASSWORD   its password                      (masked)
+#   KEY_ALIAS           the key alias inside it           (masked)
+#   KEY_PASSWORD        that key's password               (masked)
+#
+# Create the keystore once, and keep it somewhere you will not lose it — losing it means
+# never being able to update this app on a device that has it installed:
+#
+#   keytool -genkey -v -keystore release.jks -alias release \
+#           -keyalg RSA -keysize 4096 -validity 10000
+#   base64 -w0 release.jks | wl-copy      # paste into KEYSTORE_BASE64
+#
+# NEVER commit release.jks.
+#
+# The app needs the Rust JNI bridge (rust/bridge → libairgestures_bridge.so), so the
+# build jobs install the NDK, Rust and cargo-ndk into the image and run ./build-rust.sh
+# before Gradle.
+
+stages: [test, build, release]
+
+variables:
+  NDK_VERSION: "30.0.16248370"
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
+
+default:
+  image: ghcr.io/cirruslabs/android-sdk:36
+  before_script:
+    - export GRADLE_USER_HOME="$CI_PROJECT_DIR/.gradle"
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .gradle/wrapper
+      - .gradle/caches
+      - .cargo/registry
+      - .cargo/git
+      - .cargo-tools
+      - rust/target
+
+# Rust (host toolchain + the phone's target). The image is Ubuntu 24.04 with curl and
+# build-essential; sdkmanager is on PATH and ANDROID_HOME=/opt/android-sdk-linux.
+.rust:
+  before_script:
+    - export GRADLE_USER_HOME="$CI_PROJECT_DIR/.gradle"
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+    - export PATH="$CARGO_HOME/bin:$CI_PROJECT_DIR/.cargo-tools/bin:$PATH"
+
+# NDK + cargo-ndk, then the bridge into app/src/main/jniLibs/arm64-v8a.
+.bridge:
+  before_script:
+    - !reference [.rust, before_script]
+    - yes | sdkmanager "ndk;$NDK_VERSION" > /dev/null
+    - export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+    - rustup target add aarch64-linux-android
+    - cargo install --locked cargo-ndk --root "$CI_PROJECT_DIR/.cargo-tools"
+    - ./build-rust.sh
+    - test -f app/src/main/jniLibs/arm64-v8a/libairgestures_bridge.so
+
+test:
+  stage: test
+  extends: .rust
+  script:
+    - (cd rust && cargo test)
+    - ./gradlew --no-daemon :app:testDebugUnitTest
+  artifacts:
+    when: always
+    reports:
+      junit: app/build/test-results/testDebugUnitTest/TEST-*.xml
+    expire_in: 1 week
+
+build:
+  stage: build
+  extends: .bridge
+  script:
+    - ./gradlew --no-daemon :app:assembleRelease
+  artifacts:
+    paths: [app/build/outputs/apk/release/]
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - when: on_success
+
+package:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG
+  extends: .bridge
+  script:
+    - |
+      if [ -z "$KEYSTORE_BASE64" ]; then
+        echo "KEYSTORE_BASE64 is not set — refusing to publish an unsigned or debug-signed APK."
+        echo "See the header of .gitlab-ci.yml."
+        exit 1
+      fi
+    - echo "$KEYSTORE_BASE64" | base64 -d > "$CI_PROJECT_DIR/release.jks"
+    - export KEYSTORE_PATH="$CI_PROJECT_DIR/release.jks"
+    - export VERSION_CODE="$CI_PIPELINE_IID"
+    - ./gradlew --no-daemon :app:assembleRelease
+    - APK=app/build/outputs/apk/release/app-release.apk
+    - test -f "$APK" || { echo "no signed APK produced — check the signing variables"; exit 1; }
+    - $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs "$APK"
+    - $ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$APK" | grep -q "application-debuggable" && { echo "APK is debuggable — refusing to publish"; exit 1; } || true
+    - unzip -l "$APK" | grep -q "lib/arm64-v8a/libairgestures_bridge.so" || { echo "APK has no Rust bridge — refusing to publish"; exit 1; }
+    - cp "$APK" "air-gestures-$CI_COMMIT_TAG.apk"
+    - |
+      curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+           --upload-file "air-gestures-$CI_COMMIT_TAG.apk" \
+           "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/air-gestures/$CI_COMMIT_TAG/air-gestures-$CI_COMMIT_TAG.apk"
+  artifacts:
+    paths: ["air-gestures-*.apk"]
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs: [package]
+  before_script: []
+  cache: []
+  script:
+    - echo "Releasing $CI_COMMIT_TAG"
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "$CI_COMMIT_TAG"
+    description: |
+      Install `air-gestures-$CI_COMMIT_TAG.apk` on an Android 10+ phone.
+
+      The app uses the owner key of a band claimed with the Linux app
+      ([air-gestures](https://gitlab.com/896kb/air-gestures)): copy it over with
+      `scripts/push-identity.sh`. Claiming a band from the phone is not supported yet.
+
+      Tested on a Xiaomi 17 Pro. On HyperOS, turn on Autostart for the app and set its
+      battery saver to No restrictions, or the background service gets stopped.
+    assets:
+      links:
+        - name: "air-gestures-$CI_COMMIT_TAG.apk"
+          url: "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/air-gestures/$CI_COMMIT_TAG/air-gestures-$CI_COMMIT_TAG.apk"
+          link_type: package
+          filepath: "/air-gestures.apk"

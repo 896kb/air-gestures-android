@@ -111,7 +111,7 @@ class MainActivity : Activity() {
     /**
      * The band turning on its own, straight on the page: the file's background
      * is regraded to the page tone (grayscale and contrast baked in too).
-     * Absent from public builds.
+     * Shipped in assets/; the page still works if the file is missing.
      */
     private fun hero(): View? {
         val video = runCatching { assets.openFd("meta-band.mp4") }.getOrNull() ?: return null
