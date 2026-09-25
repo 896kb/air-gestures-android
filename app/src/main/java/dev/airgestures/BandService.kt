@@ -35,14 +35,8 @@ class BandService : Service(), BandLink.Listener {
                 setShowBadge(false)
             },
         )
-        notifications.createNotificationChannel(
-            NotificationChannel(ALERTS, "Controls on or off", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "A brief notice when the band's controls are switched on or off."
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-            },
-        )
+        // The status notification says when controls are off; no separate alerts.
+        notifications.deleteNotificationChannel(OLD_ALERTS)
         instance = this
     }
 
@@ -74,24 +68,10 @@ class BandService : Service(), BandLink.Listener {
         pausedChanged(paused)
     }
 
-    /** Record the controls' state; a change gets a brief heads-up notice. */
+    /** Record the controls' state; the status notification shows it. */
     private fun pausedChanged(paused: Boolean) {
-        val changed = state.value.paused != paused
         state.update { copy(paused = paused) }
         refreshNotification()
-        if (changed) alert(paused)
-    }
-
-    private fun alert(paused: Boolean) {
-        val notification = Notification.Builder(this, ALERTS)
-            .setSmallIcon(if (paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
-            .setContentTitle(if (paused) "Controls off" else "Controls on")
-            .setContentText(if (paused) "Gestures do nothing until you hold the middle finger again." else "Gestures are live.")
-            .setCategory(Notification.CATEGORY_STATUS)
-            .setTimeoutAfter(2500)
-            .setAutoCancel(true)
-            .build()
-        getSystemService(NotificationManager::class.java).notify(ALERT_NOTIFICATION, notification)
     }
 
     fun setAction(gesture: Gesture, action: Action) {
@@ -166,7 +146,7 @@ class BandService : Service(), BandLink.Listener {
             ),
         ).build()
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_hand)
+            .setSmallIcon(if (s.paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(open)
@@ -214,8 +194,8 @@ class BandService : Service(), BandLink.Listener {
     companion object {
         private const val CHANNEL = "band"
         private const val NOTIFICATION = 1
-        private const val ALERTS = "alerts"
-        private const val ALERT_NOTIFICATION = 2
+        /** The channel of the removed controls on/off pop-up. */
+        private const val OLD_ALERTS = "alerts"
         private const val LOG_LINES = 60
         const val ACTION_TOGGLE_CONTROLS = "dev.airgestures.TOGGLE_CONTROLS"
         const val ACTION_STOP = "dev.airgestures.STOP"
