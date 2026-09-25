@@ -1,0 +1,19 @@
+[package]
+name = "bridge"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "JNI bridge from the Android app to band-core"
+
+[lib]
+name = "airgestures_bridge"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+band-core = { path = "../band-core" }
+jni = "0.21"
+
+[dev-dependencies]
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
