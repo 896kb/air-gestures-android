@@ -12,69 +12,117 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 import kotlin.concurrent.thread
 
+/** Where the link is. */
+enum class Phase { STOPPED, SEARCHING, CONNECTING, CONNECTED }
+
 /**
- * One connection to the band, as the desktop daemon makes it: find the band by
- * name, read its input-channel PSM over GATT, open an L2CAP channel on it and
- * run the band-core session over that. Everything is reported through [log].
- * Permissions (BLUETOOTH_SCAN/CONNECT) are checked by the caller.
+ * Keeps one band connected, as the desktop daemon does: read the input-channel
+ * PSM over GATT, open an L2CAP channel on it and run the band-core session.
+ * Once the phone is bonded to the band it reconnects with `autoConnect`, so the
+ * Bluetooth stack waits for the band (no pairing mode); before that it scans for
+ * a band in pairing mode. Permissions are checked by the caller.
  */
 @SuppressLint("MissingPermission")
-class BandLink(private val context: Context, private val log: (String) -> Unit) {
+class BandLink(
+    private val context: Context,
+    private val listener: Listener,
+) {
+    interface Listener {
+        fun onPhase(phase: Phase, band: String?)
+        fun onStatus(status: JSONObject)
+        fun onActions(actions: List<String>)
+        fun onLog(line: String)
+    }
+
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
+    private val prefs = Prefs(context)
+    private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
     private var gatt: BluetoothGatt? = null
     private var socket: BluetoothSocket? = null
     private var handle = 0L
-    @Volatile private var running = false
+    private var lastStatus = ""
+    @Volatile private var wanted = false
+    @Volatile private var generation = 0
+
+    val bondedBand: BluetoothDevice?
+        get() = adapter?.bondedDevices?.firstOrNull { it.name?.lowercase()?.startsWith("meta band") == true }
 
     fun start() {
-        if (running) return
-        // Null while Bluetooth is off (or still turning on).
-        val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner
-        if (scanner == null) {
-            log("Bluetooth is off: turn it on and tap Connect again")
-            return
-        }
-        val dir = context.filesDir
-        val key = File(dir, "owner.key")
-        if (!key.exists()) {
-            log("no owner.key in ${dir.path}: run scripts/push-identity.sh")
-            return
-        }
-        val guess = File(dir, "band.json").takeIf { it.exists() }
-            ?.let { org.json.JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
-        handle = try {
-            Bridge.open(key.readBytes(), guess)
-        } catch (e: Exception) {
-            log("owner.key: ${e.message}")
-            return
-        }
-        running = true
-        log("scanning for a Meta Band… (scheme guess $guess)")
-        scanner.startScan(
-            null,
-            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
-            scan,
-        )
+        if (wanted) return
+        wanted = true
+        connect()
     }
 
     fun stop() {
-        running = false
+        wanted = false
+        teardown()
+        listener.onPhase(Phase.STOPPED, null)
+    }
+
+    fun setPaused(paused: Boolean) = synchronized(lock) {
+        if (handle != 0L) Bridge.setPaused(handle, paused, now())
+        publishStatus()
+    }
+
+    fun setDial(dial: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setDial(handle, dial)
+        publishStatus()
+    }
+
+    private fun connect() {
+        if (!wanted) return
+        val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner
+        if (scanner == null) {
+            log("Bluetooth is off. Retrying in 5 s.")
+            listener.onPhase(Phase.SEARCHING, null)
+            retry(5000)
+            return
+        }
+        val bonded = bondedBand
+        if (bonded != null) {
+            listener.onPhase(Phase.SEARCHING, bonded.name)
+            log("waiting for ${bonded.name}")
+            gatt = bonded.connectGatt(context, true, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        } else {
+            listener.onPhase(Phase.SEARCHING, null)
+            log("scanning for a band in pairing mode (hold its button 3 s)")
+            scanner.startScan(
+                null,
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(),
+                scan,
+            )
+        }
+    }
+
+    /** Drop everything from the current attempt; `connect` starts a fresh one. */
+    private fun teardown() {
+        generation++
+        main.removeCallbacksAndMessages(null)
         runCatching { adapter?.bluetoothLeScanner?.stopScan(scan) }
         runCatching { socket?.close() }
+        runCatching { gatt?.disconnect() }
         runCatching { gatt?.close() }
         socket = null
         gatt = null
         synchronized(lock) {
             if (handle != 0L) Bridge.close(handle)
             handle = 0L
+            lastStatus = ""
         }
-        log("stopped")
+    }
+
+    private fun retry(delayMs: Long) {
+        teardown()
+        if (wanted) main.postDelayed({ connect() }, delayMs)
     }
 
     private val scan = object : ScanCallback() {
@@ -82,28 +130,40 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
             val name = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!name.lowercase().startsWith("meta band") || gatt != null) return
             adapter?.bluetoothLeScanner?.stopScan(this)
-            log("found $name at ${result.device.address} (rssi ${result.rssi}); connecting GATT")
+            log("found $name; connecting")
+            listener.onPhase(Phase.CONNECTING, name)
             gatt = result.device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         }
 
-        override fun onScanFailed(errorCode: Int) = log("scan failed: $errorCode")
+        override fun onScanFailed(errorCode: Int) {
+            log("scan failed ($errorCode)")
+            retry(5000)
+        }
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            log("GATT state $newState (status $status), bond ${gatt.device.bondState}")
-            if (newState == BluetoothProfile.STATE_CONNECTED) gatt.discoverServices()
-            if (newState == BluetoothProfile.STATE_DISCONNECTED && running) stop()
+            if (gatt != this@BandLink.gatt) return
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    listener.onPhase(Phase.CONNECTING, gatt.device.name)
+                    gatt.discoverServices()
+                }
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    log("the band disconnected (status $status)")
+                    retry(2000)
+                }
+            }
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             val characteristic = gatt.getService(BAND_SERVICE)?.getCharacteristic(PSM_CHARACTERISTIC)
             if (characteristic == null) {
-                log("no Neural Band input service (status $status)")
+                log("this device has no Neural Band input service")
+                retry(5000)
                 return
             }
-            // May trigger Bluetooth pairing (a system dialog) the first time.
-            log("reading the input channel PSM")
+            // The first read may trigger Bluetooth pairing (a system prompt).
             gatt.readCharacteristic(characteristic)
         }
 
@@ -114,71 +174,107 @@ class BandLink(private val context: Context, private val log: (String) -> Unit) 
             status: Int,
         ) {
             if (status != BluetoothGatt.GATT_SUCCESS || value.size != 2) {
-                log("PSM read failed (status $status, ${value.size} bytes)")
+                log("reading the input channel failed (status $status)")
+                retry(5000)
                 return
             }
             val psm = (value[0].toInt() and 0xff) or ((value[1].toInt() and 0xff) shl 8)
-            log("PSM $psm; opening L2CAP")
-            thread(name = "band-l2cap") { runChannel(gatt.device, psm) }
+            val attempt = generation
+            thread(name = "band-l2cap") { runChannel(gatt.device, psm, attempt) }
         }
     }
 
     private fun now() = SystemClock.elapsedRealtimeNanos() / 1e9
 
-    private fun runChannel(device: BluetoothDevice, psm: Int) {
+    private fun openSession(): Boolean {
+        val dir = context.filesDir
+        val key = File(dir, "owner.key")
+        if (!key.exists()) {
+            log("no owner key yet (scripts/push-identity.sh)")
+            return false
+        }
+        val guess = File(dir, "band.json").takeIf { it.exists() }
+            ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
+        return try {
+            synchronized(lock) { handle = Bridge.open(key.readBytes(), guess, prefs.paused, prefs.dial) }
+            true
+        } catch (e: Exception) {
+            log("owner key: ${e.message}")
+            false
+        }
+    }
+
+    private fun runChannel(device: BluetoothDevice, psm: Int, attempt: Int) {
+        if (!openSession()) {
+            main.post { stop() }
+            return
+        }
         val channel = try {
             device.createInsecureL2capChannel(psm).also { it.connect() }
-        } catch (insecure: Exception) {
-            log("insecure L2CAP failed (${insecure.message}); trying secure")
-            try {
-                device.createL2capChannel(psm).also { it.connect() }
-            } catch (secure: Exception) {
-                log("L2CAP failed: ${secure.message}")
-                return
-            }
+        } catch (e: Exception) {
+            log("opening the input channel failed: ${e.message}")
+            main.post { if (attempt == generation) retry(3000) }
+            return
         }
         socket = channel
-        log("L2CAP open (max rx ${channel.maxReceivePacketSize}, tx ${channel.maxTransmitPacketSize})")
         val input = channel.inputStream
         val output = channel.outputStream
         val write = { bytes: ByteArray -> if (bytes.isNotEmpty()) synchronized(output) { output.write(bytes) } }
         try {
             write(synchronized(lock) { Bridge.request(handle) })
             thread(name = "band-tick") {
-                while (running) {
-                    SystemClock.sleep(250)
+                while (attempt == generation) {
+                    SystemClock.sleep(50)
                     try {
                         val out = synchronized(lock) { if (handle == 0L) null else Bridge.tick(handle, now()) }
                         out?.let(write)
-                        drainEvents()
+                        drain()
                     } catch (e: Exception) {
-                        log("tick: ${e.message}")
+                        if (attempt == generation) log("link: ${e.message}")
                         break
                     }
                 }
             }
             val buffer = ByteArray(8192)
-            while (running) {
+            while (attempt == generation) {
                 val count = input.read(buffer)
                 if (count < 0) break
                 val out = synchronized(lock) {
                     if (handle == 0L) null else Bridge.feed(handle, buffer.copyOf(count), now())
                 }
                 out?.let(write)
-                drainEvents()
+                drain()
             }
-            log("the band closed the channel")
+            if (attempt == generation) log("the band closed the input channel")
         } catch (e: Exception) {
-            if (running) log("link: ${e.message}")
-        } finally {
-            if (running) stop()
+            if (attempt == generation) log("link: ${e.message}")
         }
+        main.post { if (attempt == generation) retry(2000) }
     }
 
-    private fun drainEvents() {
-        val lines = synchronized(lock) { if (handle == 0L) "" else Bridge.events(handle) }
-        if (lines.isNotEmpty()) lines.lines().forEach(log)
+    /** Hand actions, log lines and a changed status to the listener. */
+    private fun drain() {
+        val (actions, lines) = synchronized(lock) {
+            if (handle == 0L) return
+            Bridge.actions(handle) to Bridge.log(handle)
+        }
+        if (lines.isNotEmpty()) lines.lines().forEach(::log)
+        if (actions.isNotEmpty()) listener.onActions(actions.lines())
+        synchronized(lock) { publishStatus() }
     }
+
+    /** Call with `lock` held. */
+    private fun publishStatus() {
+        if (handle == 0L) return
+        val json = Bridge.status(handle)
+        if (json == lastStatus) return
+        lastStatus = json
+        val status = JSONObject(json)
+        if (status.optBoolean("connected")) listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
+        listener.onStatus(status)
+    }
+
+    private fun log(line: String) = listener.onLog(line)
 
     companion object {
         val BAND_SERVICE: UUID = UUID.fromString("0000feb8-0000-1000-8000-00805f9b34fb")
