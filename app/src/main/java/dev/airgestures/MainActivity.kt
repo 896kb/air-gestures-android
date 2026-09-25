@@ -49,6 +49,8 @@ class MainActivity : Activity() {
     private lateinit var setup: LinearLayout
     private lateinit var activity: TextView
     private var player: MediaPlayer? = null
+    /** `start`/`pause` are only legal once the player is prepared (else it drops into its error state). */
+    private var prepared = false
     private var heroView: View? = null
     /** Whether the hero shows the band as live (full speed and opacity); null = not set yet. */
     private var heroLive: Boolean? = null
@@ -95,7 +97,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         BandService.state.remove(watch)
-        player?.pause()
+        if (prepared) player?.pause()
         heroLive = null
         super.onPause()
     }
@@ -116,12 +118,14 @@ class MainActivity : Activity() {
         val texture = TextureView(this).apply {
             surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                    prepared = false
                     player = MediaPlayer().apply {
                         setDataSource(video.fileDescriptor, video.startOffset, video.length)
                         setSurface(Surface(surface))
                         isLooping = true
                         setVolume(0f, 0f)
                         setOnPreparedListener {
+                            prepared = true
                             start()
                             heroLive = null
                             render(BandService.state.value)
@@ -131,6 +135,7 @@ class MainActivity : Activity() {
                 }
                 override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
                 override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                    prepared = false
                     player?.release()
                     player = null
                     heroLive = null
@@ -475,7 +480,7 @@ class MainActivity : Activity() {
         if (hero != null && heroLive != live) {
             val first = heroLive == null
             heroLive = live
-            player?.let { if (!it.isPlaying) it.start() }
+            if (prepared) player?.let { if (!it.isPlaying) it.start() }
             val scale = if (live) 1f else .8f
             val alpha = if (live) 1f else .3f
             if (first) {
