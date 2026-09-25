@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The icon artwork's coral, top to bottom, so the mask edge never shows a seam. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="270" android:startColor="#FC7E68" android:endColor="#EB5642" />
+</shape>

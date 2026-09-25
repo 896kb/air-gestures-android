@@ -225,7 +225,12 @@ class MainActivity : Activity() {
     }
 
     private fun header() = column(gap = 6f).apply {
-        addView(row().apply {
+        addView(row(gap = 10f).apply {
+            addView(ImageView(context).apply {
+                setImageResource(R.drawable.app_mark)
+                contentDescription = null
+                layoutParams = LinearLayout.LayoutParams(dpi(36f), dpi(36f))
+            })
             // The wordmark: Geist Bold at −0.03em with a faint full stop.
             val mark = SpannableString("Air Gestures.").apply {
                 setSpan(ForegroundColorSpan(Cb.INK_400), length - 1, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
