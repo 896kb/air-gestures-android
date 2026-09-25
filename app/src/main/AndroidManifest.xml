@@ -83,6 +83,17 @@
                 android:resource="@xml/touch_service" />
         </service>
 
+        <!-- Notification access, only to steer the playing app (the playback-position dial). -->
+        <service
+            android:name=".MediaAccess"
+            android:exported="true"
+            android:label="Air Gestures playback position"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".BandPresenceService"
             android:exported="true"

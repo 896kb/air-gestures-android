@@ -49,11 +49,12 @@ enum class Gesture(val key: String, val label: String, val default: Action) {
 /** What pinch and turn does: one action per step each way. */
 enum class DialChoice(val key: String, val label: String, val up: String, val down: String, val icon: Int) {
     VOLUME("volume", "Volume", "volume.up", "volume.down", R.drawable.ic_volume_2),
-    TRACKS("tracks", "Next or previous track", "dial.track_next", "dial.track_previous", R.drawable.ic_skip_forward),
+    SEEK("seek", "Playback position", "dial.seek_forward", "dial.seek_back", R.drawable.ic_fast_forward),
     BRIGHTNESS("brightness", "Brightness", "brightness.up", "brightness.down", R.drawable.ic_sun),
     NONE("none", "Nothing", "", "", R.drawable.ic_minus);
 
     companion object {
-        fun of(key: String?) = entries.firstOrNull { it.key == key } ?: VOLUME
+        /** "tracks" was the old next/previous choice; playback position replaced it. */
+        fun of(key: String?) = if (key == "tracks") SEEK else entries.firstOrNull { it.key == key } ?: VOLUME
     }
 }

@@ -49,6 +49,9 @@ class Prefs(context: Context) {
     fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||
         Gesture.entries.any { action(it).id.startsWith("brightness.") }
 
+    /** The dial seeks (it needs notification access to reach the playing app). */
+    fun usesMedia() = dial == DialChoice.SEEK
+
     var associationId: Int
         get() = prefs.getInt("association", -1)
         set(value) = prefs.edit().putInt("association", value).apply()

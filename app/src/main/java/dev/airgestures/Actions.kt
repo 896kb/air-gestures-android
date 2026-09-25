@@ -5,6 +5,9 @@ import android.content.Intent
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.MediaMetadata
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -14,7 +17,10 @@ import android.view.KeyEvent
 /** Runs the bridge's action names on the phone. */
 class Actions(private val context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
-    private var lastTrackSkip = 0L
+    /** Where the last seek aimed, so fast dial steps add up before the player reports back. */
+    private var seekTarget = 0L
+    private var seekAt = 0L
+    private var seekSession: android.media.session.MediaSession.Token? = null
     private val cameras = context.getSystemService(CameraManager::class.java)
 
     /** The back camera's flash, if the phone has one. */
@@ -56,13 +62,8 @@ class Actions(private val context: Context) {
             "screen.back", "screen.home", "screen.recents" ->
                 return screen(action)
             "torch.toggle" -> return torch()
-            // A wrist turn makes many dial steps: skip at most one track per 0.7 s.
-            "dial.track_next", "dial.track_previous" -> {
-                val now = SystemClock.uptimeMillis()
-                if (now - lastTrackSkip < 700) return null
-                lastTrackSkip = now
-                mediaKey(if (action == "dial.track_next") KeyEvent.KEYCODE_MEDIA_NEXT else KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            }
+            "dial.seek_forward" -> return seek(+SEEK_STEP)
+            "dial.seek_back" -> return seek(-SEEK_STEP)
             else -> return if (action.startsWith(APP_PREFIX)) open(action.removePrefix(APP_PREFIX)) else "unknown action $action"
         }
         return null
@@ -87,6 +88,32 @@ class Actions(private val context: Context) {
             "screen.home" -> touch.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
             "screen.recents" -> touch.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS)
         }
+        return null
+    }
+
+    /**
+     * Move the playing track by [delta] ms, through its media session (a key
+     * event can't seek). Prefers the session that's playing.
+     */
+    private fun seek(delta: Long): String? {
+        if (!MediaAccess.granted(context)) return "playback position needs notification access (Setup)"
+        val sessions = context.getSystemService(MediaSessionManager::class.java)
+            .getActiveSessions(MediaAccess.component(context))
+        val player = sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: sessions.firstOrNull() ?: return "nothing is playing"
+        val state = player.playbackState ?: return "nothing is playing"
+        if (state.actions and PlaybackState.ACTION_SEEK_TO == 0L) return "this player can't seek"
+        val now = SystemClock.elapsedRealtime()
+        val from = if (player.sessionToken == seekSession && now - seekAt < 1500) seekTarget else {
+            val running = state.state == PlaybackState.STATE_PLAYING
+            state.position + if (running) ((now - state.lastPositionUpdateTime) * state.playbackSpeed).toLong() else 0
+        }
+        val duration = player.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 } ?: Long.MAX_VALUE
+        val to = (from + delta).coerceIn(0, duration)
+        player.transportControls.seekTo(to)
+        seekSession = player.sessionToken
+        seekTarget = to
+        seekAt = now
         return null
     }
 
@@ -134,5 +161,8 @@ class Actions(private val context: Context) {
     companion object {
         /** 5% of the 0–255 range. */
         const val STEP = 13
+
+        /** One dial step of playback position. */
+        const val SEEK_STEP = 5_000L
     }
 }

@@ -851,6 +851,20 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
             }
         }
+        // Only asked for when the dial seeks.
+        if (Prefs(this).usesMedia()) {
+            val media = MediaAccess.granted(this)
+            setupRow(
+                "Notification access",
+                if (media) "Allowed" else "Needed for playback position. If it's greyed out: App info, then Allow restricted settings",
+                media,
+                "Allow",
+            ) {
+                val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MediaAccess.component(this).flattenToString())
+                runCatching { startActivity(detail) }.onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+            }
+        }
         val unrestricted = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
         setupRow("Battery", if (unrestricted) "Unrestricted" else "Set to no restrictions", unrestricted, "Open") {
             @SuppressLint("BatteryLife")

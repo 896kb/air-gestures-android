@@ -43,10 +43,13 @@ phone reconnects on its own.
 ## What it does
 
 Every gesture except the middle hold can be mapped: play or pause, next or previous track,
-volume, mute, brightness, swipe the screen up or down, Back, Home, Recent apps. Pinch and turn
-is a dial for volume, tracks or brightness. The middle hold turns the controls off and on.
-Screen actions need the app's accessibility service; brightness needs **Modify system
-settings**. The app shows both under Setup.
+volume, mute, brightness, swipe the screen up, down, left or right, Back, Home, Recent apps,
+the flashlight, or open an app you pick. Pinch and turn is a dial for volume, playback
+position (5 s per step) or brightness. The middle hold turns the controls off and on.
+Screen actions and opening apps need the app's accessibility service; brightness needs
+**Modify system settings**; playback position needs **notification access** (to reach the
+playing app's media session; no notifications are read). The app shows each under Setup
+when a gesture needs it.
 
 ## Build
 
