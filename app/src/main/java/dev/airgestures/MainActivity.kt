@@ -101,11 +101,35 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         BandService.state.observe(watch)
+        registerReceiver(bluetoothChanged, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
         renderSetup()
+    }
+
+    /** Bluetooth switched on or off: the chip, the power button and Setup follow. */
+    private val bluetoothChanged = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: Intent) {
+            render(BandService.state.value)
+            renderSetup()
+        }
+    }
+
+    private fun bluetoothOn() =
+        getSystemService(android.bluetooth.BluetoothManager::class.java).adapter?.isEnabled == true
+
+    /** The band needs Bluetooth: say so and offer Android's own prompt to switch it on. */
+    private fun askForBluetooth() = confirm(
+        "Bluetooth is off",
+        "The band connects over Bluetooth. Turn it on to use the band.",
+        "Turn on",
+    ) {
+        @SuppressLint("MissingPermission")
+        val request = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        runCatching { startActivity(request) }.onFailure { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
     }
 
     override fun onPause() {
         BandService.state.remove(watch)
+        runCatching { unregisterReceiver(bluetoothChanged) }
         if (prepared) player?.pause()
         heroLive = null
         super.onPause()
@@ -459,7 +483,13 @@ class MainActivity : Activity() {
             requestPermissions(permissions(), 1)
             return
         }
-        if (BandService.instance != null) BandService.stop(this) else BandService.start(this)
+        if (BandService.instance != null) {
+            BandService.stop(this)
+        } else if (!bluetoothOn()) {
+            askForBluetooth()
+        } else {
+            BandService.start(this)
+        }
     }
 
     /**
@@ -470,6 +500,10 @@ class MainActivity : Activity() {
     private fun claim() {
         if (!granted()) {
             requestPermissions(permissions(), 1)
+            return
+        }
+        if (!bluetoothOn()) {
+            askForBluetooth()
             return
         }
         val signedIn = SessionStore.present(this)
@@ -519,8 +553,10 @@ class MainActivity : Activity() {
             renderSetup()
         }
         val paused = if (running) state.paused else Prefs(this).paused
+        val bluetooth = bluetoothOn()
         val (signal, label) = when {
             claiming -> Cb.Signal.INFO to "Claiming"
+            !bluetooth -> Cb.Signal.STOP to "Bluetooth off"
             !running || state.phase == Phase.STOPPED -> Cb.Signal.MUTE to "Off"
             state.phase == Phase.CONNECTED && paused -> Cb.Signal.WARN to "Controls off"
             state.phase == Phase.CONNECTED -> Cb.Signal.LIVE to "Connected"
@@ -536,6 +572,7 @@ class MainActivity : Activity() {
         if ((power.pressed > .5f) != (running || claiming)) power.press(running || claiming)
         powerState.text = when {
             claiming -> "Claiming a band"
+            !bluetooth -> "Bluetooth is off"
             !running -> "Off"
             state.phase == Phase.CONNECTED -> "On"
             else -> "Waiting for the band"
@@ -692,6 +729,8 @@ class MainActivity : Activity() {
                 }
             }
         }
+        val bluetooth = bluetoothOn()
+        setupRow("Bluetooth", if (bluetooth) "On" else "Off: the band needs it", bluetooth, "Turn on") { askForBluetooth() }
         setupRow("Bluetooth and notifications", if (granted()) "Allowed" else "Needed to connect", granted(), "Allow") {
             requestPermissions(permissions(), 1)
         }

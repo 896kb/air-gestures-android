@@ -43,7 +43,9 @@ import kotlin.concurrent.thread
 @SuppressLint("MissingPermission")
 class BandClaim private constructor(context: Context, private val session: String) {
     private val context = context.applicationContext
-    private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
+    // Looked up on every use: after Bluetooth is switched off and on, an adapter held
+    // from before can keep reporting "off" (seen on HyperOS).
+    private val adapter get() = context.getSystemService(BluetoothManager::class.java).adapter
     private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
     private var gatt: BluetoothGatt? = null
