@@ -38,6 +38,9 @@ private const val SIGN_IN = 4
 /** The file picker's request code for exporting the owner key. */
 private const val EXPORT = 5
 
+/** Same Ko-fi page the website links. */
+private const val KOFI_URL = "https://ko-fi.com/88896kb"
+
 /** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
 class MainActivity : Activity() {
     private val watch: (BandService.State) -> Unit = ::render
@@ -75,7 +78,8 @@ class MainActivity : Activity() {
             WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
         )
         val page = column(gap = 20f).apply {
-            setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(24f))
+            // The bottom room keeps the last card clear of the Ko-fi pill.
+            setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(88f))
             addView(header())
             hero()?.let(::addView)
             addView(powerBlock())
@@ -85,13 +89,22 @@ class MainActivity : Activity() {
             addView(setupCard())
             addView(activityCard())
         }
-        setContentView(ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             addView(page)
-            // Edge-to-edge is enforced from API 35: scroll inside the system bars, not under them.
             clipToPadding = true
-            setOnApplyWindowInsetsListener { view, insets ->
+        }
+        val kofi = kofiPill()
+        setContentView(FrameLayout(this).apply {
+            addView(scroll)
+            addView(kofi, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END,
+            ))
+            // Edge-to-edge is enforced from API 35: scroll inside the system bars, not under them.
+            setOnApplyWindowInsetsListener { _, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                scroll.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                (kofi.layoutParams as FrameLayout.LayoutParams).setMargins(0, 0, bars.right + dpi(16f), bars.bottom + dpi(16f))
+                kofi.requestLayout()
                 insets
             }
         })
@@ -288,6 +301,37 @@ class MainActivity : Activity() {
             addView(row().apply { addView(b, weighted()); addView(h, weighted()) })
             addView(row().apply { addView(g, weighted()); addView(l, weighted()) })
         })
+    }
+
+    /** Support on Ko-fi: the site's coral pill, floating bottom-right over the page. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun kofiPill() = Cb.text(this, 14f, R.font.geist_semibold, Cb.Signal.STOP.label, -.005f).apply {
+        text = "Support on Ko-fi"
+        isSingleLine = true
+        gravity = Gravity.CENTER
+        background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = dpi(999f).toFloat()
+            setColor(Cb.Signal.STOP.fill)
+        }
+        setPadding(dpi(18f), dpi(12f), dpi(18f), dpi(12f))
+        val coffee = context.getDrawable(R.drawable.ic_coffee)!!.mutate().apply {
+            setBounds(0, 0, dpi(16f), dpi(16f))
+            setTint(Cb.Signal.STOP.label)
+        }
+        setCompoundDrawables(coffee, null, null, null)
+        compoundDrawablePadding = dpi(8f)
+        elevation = dpi(6f).toFloat()
+        outlineAmbientShadowColor = Cb.Signal.STOP.fill
+        outlineSpotShadowColor = Cb.Signal.STOP.fill
+        setOnTouchListener { view, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(.985f).scaleY(.985f).translationZ(-dpi(4f).toFloat()).setDuration(Cb.DURATION).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).translationZ(0f).setDuration(Cb.DURATION).start()
+            }
+            false
+        }
+        setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(KOFI_URL))) }
     }
 
     /** A pill that sits on the page and presses into it; `latched` keeps it pushed. */
