@@ -2,8 +2,8 @@
 //! is a boxed `Connection` behind a `long` handle; errors become IOException.
 
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass};
-use jni::sys::{jbyteArray, jdouble, jint, jlong, jstring};
+use jni::objects::{JByteArray, JClass, JString};
+use jni::sys::{jboolean, jbyteArray, jdouble, jint, jlong, jstring};
 
 use crate::Connection;
 
@@ -33,11 +33,20 @@ pub extern "system" fn Java_dev_airgestures_Bridge_open<'local>(
     _class: JClass<'local>,
     owner_key: JByteArray<'local>,
     scheme_guess: jint,
+    paused: jboolean,
+    dial: JString<'local>,
 ) -> jlong {
+    let dial: String = match env.get_string(&dial) {
+        Ok(dial) => dial.into(),
+        Err(error) => {
+            throw(&mut env, &error.to_string());
+            return 0;
+        }
+    };
     let opened = env
         .convert_byte_array(&owner_key)
         .map_err(|e| e.to_string())
-        .and_then(|key| Connection::new(&key, scheme_guess.max(0) as usize));
+        .and_then(|key| Connection::new(&key, scheme_guess.max(0) as usize, paused != 0, &dial));
     match opened {
         Ok(connection) => Box::into_raw(Box::new(connection)) as jlong,
         Err(message) => {
@@ -83,20 +92,70 @@ pub extern "system" fn Java_dev_airgestures_Bridge_tick<'local>(
     bytes_out(&mut env, result)
 }
 
-/// Event lines since the last call, joined with '\n' (empty: none).
+fn string_out(env: &mut JNIEnv, text: String) -> jstring {
+    match env.new_string(text) {
+        Ok(string) => string.into_raw(),
+        Err(error) => {
+            throw(env, &error.to_string());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Action names to run since the last call, joined with '\n' (empty: none).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_events<'local>(
+pub extern "system" fn Java_dev_airgestures_Bridge_actions<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
 ) -> jstring {
-    let lines = unsafe { connection(handle) }.take_events().join("\n");
-    match env.new_string(lines) {
-        Ok(string) => string.into_raw(),
-        Err(error) => {
-            throw(&mut env, &error.to_string());
-            std::ptr::null_mut()
-        }
+    let lines = unsafe { connection(handle) }.take_actions().join("\n");
+    string_out(&mut env, lines)
+}
+
+/// Log lines since the last call, joined with '\n' (empty: none).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_log<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let lines = unsafe { connection(handle) }.take_log().join("\n");
+    string_out(&mut env, lines)
+}
+
+/// The status snapshot as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_status<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let json = unsafe { connection(handle) }.status_json();
+    string_out(&mut env, json)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_setPaused<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    paused: jboolean,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.set_paused(paused != 0, now);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_airgestures_Bridge_setDial<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    dial: JString<'local>,
+) {
+    match env.get_string(&dial) {
+        Ok(dial) => unsafe { connection(handle) }.set_dial(&String::from(dial)),
+        Err(error) => throw(&mut env, &error.to_string()),
     }
 }
 

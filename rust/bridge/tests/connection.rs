@@ -4,6 +4,12 @@ use band_core::responder::{Responder, SimMode};
 use p256::ecdsa::SigningKey;
 use rand_core::OsRng;
 
+/// Band gesture codes: thumb=1 index=2 middle=3; actions tap=3 doubletap=4
+/// up=6 down=7 left=8 right=9; derived buttonHold=3.
+const THUMB: u64 = 1;
+const INDEX: u64 = 2;
+const MIDDLE: u64 = 3;
+
 /// Ping-pong until neither side has anything to say.
 fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>, now: f64) {
     for _ in 0..64 {
@@ -15,28 +21,91 @@ fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>,
     }
 }
 
-#[test]
-fn an_owner_key_connects_and_gestures_come_out_as_lines() {
+fn connected(paused: bool) -> (Connection, Responder) {
     let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
-    let mut connection = Connection::new(&identity.private_bytes(), 0).unwrap();
+    let mut connection = Connection::new(&identity.private_bytes(), 0, paused, "volume").unwrap();
     // An enrolled band with no owner recorded adopts the first key that proves trust.
     let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
     let request = connection.request().unwrap();
     pump(&mut connection, &mut band, request, 1.0);
-    assert!(connection.take_events().contains(&"connected".to_owned()));
+    assert!(connection.take_log().contains(&"connected".to_owned()));
+    assert!(connection.status_json().contains(r#""connected":true"#));
+    (connection, band)
+}
 
-    // Thumb (1) swipe left (8).
-    let bytes = band.gesture(8, 1, 0).unwrap();
-    let reply = connection.feed(&bytes, 2.0).unwrap();
-    assert!(reply.is_empty() || band.respond(&reply).is_ok());
-    assert_eq!(connection.take_events(), vec!["gesture swipe left".to_owned()]);
+fn gesture(
+    connection: &mut Connection,
+    band: &mut Responder,
+    action: u64,
+    finger: u64,
+    derived: u64,
+    now: f64,
+) {
+    let bytes = band.gesture(action, finger, derived).unwrap();
+    let reply = connection.feed(&bytes, now).unwrap();
+    pump(connection, band, reply, now);
+}
 
-    // Quiet link: tick sends keepalive queries the band answers.
-    let keepalive = connection.tick(10.0).unwrap();
-    assert!(!keepalive.is_empty());
+#[test]
+fn a_swipe_down_plays_the_next_track() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    assert_eq!(connection.take_actions(), vec!["media.next".to_owned()]);
+    assert!(
+        connection
+            .take_log()
+            .contains(&"gesture swipe down".to_owned())
+    );
+}
+
+#[test]
+fn an_index_tap_plays_or_pauses_once_its_double_tap_window_passes() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 3, INDEX, 0, 3.0);
+    assert!(
+        connection.take_actions().is_empty(),
+        "held for a possible double tap"
+    );
+    connection.tick(3.2).unwrap();
+    assert!(connection.take_actions().is_empty());
+    connection.tick(3.45).unwrap();
+    assert_eq!(
+        connection.take_actions(),
+        vec!["media.play_pause".to_owned()]
+    );
+}
+
+#[test]
+fn an_index_double_tap_swaps_the_dial_to_brightness() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 4, INDEX, 0, 3.0);
+    assert_eq!(
+        connection.take_actions(),
+        vec!["dial.changed.brightness".to_owned()]
+    );
+    assert!(connection.status_json().contains(r#""dial":"brightness""#));
+}
+
+#[test]
+fn a_middle_hold_turns_the_controls_off_and_on() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 3.0);
+    assert!(connection.status_json().contains(r#""paused":true"#));
+    // Off: gestures do nothing…
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 5.0);
+    assert!(connection.take_actions().is_empty());
+    // …except the hold, which turns them back on.
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 7.0);
+    assert!(connection.status_json().contains(r#""paused":false"#));
+}
+
+#[test]
+fn quiet_links_send_keepalive_queries() {
+    let (mut connection, _band) = connected(false);
+    assert!(!connection.tick(10.0).unwrap().is_empty());
 }
 
 #[test]
 fn a_malformed_owner_key_is_refused() {
-    assert!(Connection::new(&[0u8; 10], 0).is_err());
+    assert!(Connection::new(&[0u8; 10], 0, false, "volume").is_err());
 }
