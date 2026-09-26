@@ -76,7 +76,8 @@ object UpdateCheck {
         } ?: return null
         val first = org.json.JSONArray(body).optJSONObject(0) ?: return null
         val tag = first.optString("tag_name").ifEmpty { return null }
-        return Release(tag, first.optString("description"))
+        // The notes are the changelog, then an install section the app doesn't need.
+        return Release(tag, first.optString("description").substringBefore("## Install").trim())
     }
 
     /** "v0.3.9" against "0.3.8" or "0.3.9-dev": numerically, by the base version. */
