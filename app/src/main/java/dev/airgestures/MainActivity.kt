@@ -876,6 +876,20 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
         }
+        // HyperOS drops app launches from the background without its own permission.
+        if (Xiaomi.isXiaomi && Prefs(this).usesApps()) {
+            val allowed = Xiaomi.canOpenFromBackground(this)
+            setupRow(
+                "Open apps from gestures",
+                when (allowed) {
+                    true -> "Allowed"
+                    false -> "Other permissions: allow Open new windows while running in the background"
+                    null -> "Check Other permissions: Open new windows while running in the background"
+                },
+                allowed == true,
+                "Open",
+            ) { Xiaomi.openPermissions(this) }
+        }
         // Only asked for when brightness is mapped somewhere.
         if (Prefs(this).usesBrightness()) {
             val brightness = Settings.System.canWrite(this)

@@ -45,6 +45,9 @@ class Prefs(context: Context) {
      */
     fun usesScreen() = Gesture.entries.any { actionId(it).let { id -> id.startsWith("screen.") || id.startsWith(APP_PREFIX) } }
 
+    /** An app is mapped somewhere (on Xiaomi it needs the background-windows permission). */
+    fun usesApps() = Gesture.entries.any { actionId(it).startsWith(APP_PREFIX) }
+
     /** Brightness is mapped somewhere (it needs Modify system settings). */
     fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||
         Gesture.entries.any { action(it).id.startsWith("brightness.") }

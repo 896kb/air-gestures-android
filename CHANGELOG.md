@@ -8,7 +8,8 @@ fails without one.
 
 - A new app icon, also shown next to the name in the app.
 - New gesture actions: swipe the screen left or right, turn the flashlight on or off,
-  and open an app you pick.
+  and open an app you pick. On Xiaomi phones, Setup also asks for HyperOS's "Open new
+  windows while running in the background", which opening apps needs.
 - Pinch and turn can move the playback position of what's playing (5 s per step). It
   replaces next/previous track as a dial choice; needs notification access (Setup).
 - Shows when Bluetooth is off, and won't connect or claim the band until it's on.
