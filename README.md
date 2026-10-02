@@ -61,6 +61,10 @@ Needs the Android SDK (platform 36) and NDK, JDK 21, and Rust with the
 ./gradlew assembleDebug
 ```
 
+A debug build is its own app, `dev.kb896.airgestures.dev` ("Air Gestures (dev)", with a dev
+tab on its icon), so it installs beside the release instead of over it. Only one of them
+can hold the band at a time. `scripts/push-identity.sh` gives it the desktop's band key.
+
 `cd rust && cargo test` runs the protocol and bridge tests against a simulated band.
 
 ## License

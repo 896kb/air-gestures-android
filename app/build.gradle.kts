@@ -21,6 +21,7 @@ android {
         // Release builds take the tag (v0.3.9 → 0.3.9); a local build is the work after the last release.
         versionName = System.getenv("CI_COMMIT_TAG")?.removePrefix("v") ?: "0.3.9-dev"
         ndk { abiFilters += listOf("arm64-v8a") }
+        manifestPlaceholders["appLabel"] = "Air Gestures"
     }
 
     signingConfigs {
@@ -35,6 +36,12 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            // Debug builds are their own app (dev.kb896.<app>.dev, "(dev)", a "dev" tab on the
+            // icon from src/debug/res), so one installs beside the release instead of over it.
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "Air Gestures (dev)"
+        }
         getByName("release") {
             isDebuggable = false
             // No R8: the JNI class dev.kb896.airgestures.Bridge must keep its names.

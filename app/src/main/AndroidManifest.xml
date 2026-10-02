@@ -37,7 +37,7 @@
     </queries>
 
     <application
-        android:label="Air Gestures"
+        android:label="${appLabel}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
@@ -73,7 +73,7 @@
         <service
             android:name=".TouchService"
             android:exported="false"
-            android:label="Air Gestures screen gestures"
+            android:label="${appLabel} screen gestures"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -87,7 +87,7 @@
         <service
             android:name=".MediaAccess"
             android:exported="true"
-            android:label="Air Gestures playback position"
+            android:label="${appLabel} playback position"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />

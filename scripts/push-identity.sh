@@ -5,7 +5,7 @@
 # on the desktop before connecting from the phone.
 set -euo pipefail
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/air-gestures"
-APP=dev.kb896.airgestures
+APP=dev.kb896.airgestures.dev
 TMP=/data/local/tmp/air-gestures-identity
 [ -f "$STATE/owner.key" ] || { echo "no $STATE/owner.key (claim the band with air-gestures pair first)" >&2; exit 1; }
 adb shell "rm -rf $TMP && mkdir -p $TMP"
