@@ -9,6 +9,7 @@ import android.companion.CompanionDeviceManager
 import android.companion.CompanionDeviceService
 import android.companion.DevicePresenceEvent
 import android.companion.ObservingDevicePresenceRequest
+import android.content.Context
 import android.content.IntentSender
 import java.util.regex.Pattern
 
@@ -20,6 +21,21 @@ object Companion {
     fun linked(activity: Activity): Boolean = Prefs(activity).associationId >= 0 &&
         activity.getSystemService(CompanionDeviceManager::class.java).myAssociations
             .any { it.id == Prefs(activity).associationId }
+
+    /**
+     * Asks again to be woken when the linked band appears. Linking asks once, but a link
+     * made another way (restored, or moved over from the old package with adb) doesn't,
+     * so the service asks each time it starts; asking twice changes nothing.
+     */
+    fun observe(context: Context) {
+        val id = Prefs(context).associationId
+        if (id < 0) return
+        val manager = context.getSystemService(CompanionDeviceManager::class.java)
+        if (manager.myAssociations.none { it.id == id }) return
+        runCatching {
+            manager.startObservingDevicePresence(ObservingDevicePresenceRequest.Builder().setAssociationId(id).build())
+        }
+    }
 
     /**
      * Shows the system's device picker; the band must be advertising (pairing mode).

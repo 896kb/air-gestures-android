@@ -28,6 +28,8 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this)
         link = BandLink(this, this)
+        // The app's Companion (the CDM link), not this class's companion object.
+        dev.kb896.airgestures.Companion.observe(this)
         val notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL, "Band connection", NotificationManager.IMPORTANCE_LOW).apply {
