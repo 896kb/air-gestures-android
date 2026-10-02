@@ -12,6 +12,8 @@ fails without one.
 - Moving over: in the old app, Export the key; open this one, Import that file and run
   Setup again (Accessibility, notification access and the HyperOS permissions); then
   uninstall the old app. Until you do, both try to hold the band.
+- The band coming into range wakes the app again even when its companion link was
+  restored or moved over rather than made in the app.
 
 ## 0.3.9
 
