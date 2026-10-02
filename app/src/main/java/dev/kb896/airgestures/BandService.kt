@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -210,8 +210,8 @@ class BandService : Service(), BandLink.Listener {
         /** The channel of the removed controls on/off pop-up. */
         private const val OLD_ALERTS = "alerts"
         private const val LOG_LINES = 60
-        const val ACTION_TOGGLE_CONTROLS = "dev.airgestures.TOGGLE_CONTROLS"
-        const val ACTION_STOP = "dev.airgestures.STOP"
+        const val ACTION_TOGGLE_CONTROLS = "dev.kb896.airgestures.TOGGLE_CONTROLS"
+        const val ACTION_STOP = "dev.kb896.airgestures.STOP"
 
         val state = Observable(State())
         var instance: BandService? = null

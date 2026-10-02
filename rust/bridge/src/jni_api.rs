@@ -1,4 +1,4 @@
-//! JNI entry points for `dev.airgestures.Bridge` (static natives). A connection
+//! JNI entry points for `dev.kb896.airgestures.Bridge` (static natives). A connection
 //! is a boxed `Connection` behind a `long` handle, a claim a boxed `Claim`;
 //! errors become IOException.
 
@@ -31,7 +31,7 @@ fn bytes_out(env: &mut JNIEnv, result: Result<Vec<u8>, String>) -> jbyteArray {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_open<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_open<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     owner_key: JByteArray<'local>,
@@ -73,7 +73,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_open<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_request<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_request<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -83,7 +83,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_request<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_feed<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_feed<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -98,7 +98,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_feed<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_tick<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_tick<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -120,7 +120,7 @@ fn string_out(env: &mut JNIEnv, text: String) -> jstring {
 
 /// Action names to run since the last call, joined with '\n' (empty: none).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_actions<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_actions<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -131,7 +131,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_actions<'local>(
 
 /// Log lines since the last call, joined with '\n' (empty: none).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_log<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_log<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -142,7 +142,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_log<'local>(
 
 /// The status snapshot as JSON.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_status<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_status<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -152,7 +152,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_status<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_setPaused<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPaused<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -163,7 +163,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_setPaused<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_setDial<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setDial<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -176,7 +176,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_setDial<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_setMapping<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setMapping<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -189,7 +189,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_setMapping<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_close<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_close<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -219,7 +219,7 @@ fn json_out(env: &mut JNIEnv, result: Result<String, String>) -> jstring {
 
 /// `{"url": Meta's sign-in page, "native": the token that checks and finishes the callback}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_signinStart<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_signinStart<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
 ) -> jstring {
@@ -235,7 +235,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_signinStart<'local>(
 
 /// A navigation the web view must cancel: the sign-in callback's shape.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_signinIsCallback<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_signinIsCallback<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     url: JString<'local>,
@@ -251,7 +251,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_signinIsCallback<'local>(
 
 /// The callback is the real one: the token digest of `native` and a non-empty blob.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_signinAccepts<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_signinAccepts<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     url: JString<'local>,
@@ -270,7 +270,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_signinAccepts<'local>(
 
 /// Decrypt the callback and log in: the session JSON to keep (secret; never log it).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_signinFinish<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_signinFinish<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     url: JString<'local>,
@@ -292,7 +292,7 @@ unsafe fn claim<'a>(handle: jlong) -> &'a mut Claim {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimOpen<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimOpen<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     session_json: JString<'local>,
@@ -312,7 +312,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimOpen<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimRequest<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimRequest<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -322,7 +322,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimRequest<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimFeed<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimFeed<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -337,7 +337,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimFeed<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimTick<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimTick<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -349,7 +349,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimTick<'local>(
 
 /// The channel closed or failed while the claim was running (`message`: why, or empty).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimClosed<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimClosed<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -363,7 +363,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimClosed<'local>(
 
 /// Progress lines since the last call, joined with '\n' (empty: none).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimLog<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimLog<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -374,7 +374,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimLog<'local>(
 
 /// "running", "done", "failed: …" or "expired: …" (the Meta sign-in must be redone).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimState<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimState<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -385,7 +385,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimState<'local>(
 
 /// After a failure: the next encryption guess worth a fresh channel, or -1.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimNextGuess<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimNextGuess<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
@@ -396,7 +396,7 @@ pub extern "system" fn Java_dev_airgestures_Bridge_claimNextGuess<'local>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_airgestures_Bridge_claimClose<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_claimClose<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,

@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 import android.app.AppOpsManager
 import android.content.Context

@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription

@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 import android.app.NotificationManager
 import android.content.ComponentName

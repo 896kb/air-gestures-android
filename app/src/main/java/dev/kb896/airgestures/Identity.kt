@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager

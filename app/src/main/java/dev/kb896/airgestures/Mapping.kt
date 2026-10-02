@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 /** An "open this app" action: the prefix, then the app's package name. */
 const val APP_PREFIX = "app:"

@@ -9,11 +9,11 @@ plugins {
 val keystorePath: String? = System.getenv("KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
 
 android {
-    namespace = "dev.airgestures"
+    namespace = "dev.kb896.airgestures"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "dev.airgestures"
+        applicationId = "dev.kb896.airgestures"
         // L2CAP connection-oriented channels need API 29.
         minSdk = 29
         targetSdk = 36
@@ -37,7 +37,7 @@ android {
     buildTypes {
         getByName("release") {
             isDebuggable = false
-            // No R8: the JNI class dev.airgestures.Bridge must keep its names.
+            // No R8: the JNI class dev.kb896.airgestures.Bridge must keep its names.
             isMinifyEnabled = false
             if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
         }

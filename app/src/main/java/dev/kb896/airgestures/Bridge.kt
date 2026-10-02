@@ -1,4 +1,4 @@
-package dev.airgestures
+package dev.kb896.airgestures
 
 /** The Rust band-core session and gesture controller (rust/bridge). Not thread-safe: callers serialise. */
 object Bridge {
