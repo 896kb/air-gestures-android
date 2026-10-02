@@ -100,6 +100,9 @@ object UpdateCheck {
         .replace(Regex("^#+[ \\t]*", RegexOption.MULTILINE), "")
         .replace(Regex("^[ \\t]*[-*][ \\t]+", RegexOption.MULTILINE), "• ")
         .replace(Regex("\\[([^\\]]+)\\]\\([^)]*\\)"), "$1")
+        // A bullet's wrapped lines join back into one, so its first line is the whole bullet
+        // (the card and the collapsed notification show only that).
+        .replace(Regex("\\n[ \\t]{2,}"), " ")
         .trim()
 
     private fun notify(context: Context, release: Release) {
