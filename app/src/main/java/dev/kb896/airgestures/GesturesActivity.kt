@@ -112,7 +112,7 @@ class GesturesActivity : Screen() {
     }
 
     private fun store(gesture: Gesture, calls: Boolean, id: String) {
-        if (calls) BandService.setCallAction(applicationContext, gesture, id) else BandService.setAction(applicationContext, gesture, id)
+        if (calls) BandService.setCallAction(applicationContext, gesture, id) else BandService.setAction(applicationContext, Profiles.active(this).id, gesture, id)
     }
 
     /** The apps with a launcher icon, by name, each with its own icon. */
@@ -168,7 +168,7 @@ class GesturesActivity : Screen() {
         val prefs = Prefs(this)
         choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == prefs.dial, it.icon) }) { index ->
             val dial = DialChoice.entries[index]
-            BandService.instance?.setDial(dial) ?: run { prefs.dial = dial }
+            BandService.setDial(applicationContext, Profiles.active(this).id, dial)
             render()
         }
     }

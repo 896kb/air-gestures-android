@@ -91,15 +91,8 @@ class BandService : Service(), BandLink.Listener {
         refreshNotification()
     }
 
-    fun setAction(gesture: Gesture, id: String) {
-        prefs.setAction(gesture, id)
-        link.setMapping(prefs.mapping())
-    }
-
-    fun setCallAction(gesture: Gesture, id: String) {
-        prefs.setCallAction(gesture, id)
-        link.setMapping(prefs.mapping())
-    }
+    /** Send the mapping in force to the band again (a profile, call or setting changed). */
+    fun remap() = link.setMapping(prefs.mapping())
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
     fun watchCalls() = calls.start()
@@ -107,11 +100,6 @@ class BandService : Service(), BandLink.Listener {
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
         prefs.hand = hand
-        link.setMapping(prefs.mapping())
-    }
-
-    fun setDial(dial: DialChoice) {
-        prefs.dial = dial
         link.setMapping(prefs.mapping())
     }
 
@@ -244,12 +232,21 @@ class BandService : Service(), BandLink.Listener {
             context.stopService(Intent(context, BandService::class.java))
         }
 
-        /** Store a gesture's action, live on the band when the service runs. */
-        fun setAction(context: Context, gesture: Gesture, id: String) =
-            instance?.setAction(gesture, id) ?: Prefs(context).setAction(gesture, id)
+        /** Store a gesture's action in [profile], live on the band when the service runs. */
+        fun setAction(context: Context, profile: String, gesture: Gesture, id: String) {
+            Prefs(context).setAction(profile, gesture, id)
+            instance?.remap()
+        }
 
         /** Store what a gesture does during calls, live on the band when the service runs. */
-        fun setCallAction(context: Context, gesture: Gesture, id: String) =
-            instance?.setCallAction(gesture, id) ?: Prefs(context).setCallAction(gesture, id)
+        fun setCallAction(context: Context, gesture: Gesture, id: String) {
+            Prefs(context).setCallAction(gesture, id)
+            instance?.remap()
+        }
+
+        fun setDial(context: Context, profile: String, dial: DialChoice) {
+            Prefs(context).setDial(profile, dial)
+            instance?.remap()
+        }
     }
 }

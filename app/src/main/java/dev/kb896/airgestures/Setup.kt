@@ -130,7 +130,7 @@ object Setup {
         if (prefs.usesNotifications()) {
             val media = MediaAccess.granted(context)
             val needs = listOfNotNull(
-                "playback position".takeIf { prefs.dial == DialChoice.SEEK },
+                "playback position".takeIf { prefs.usesSeek() },
                 "notification gestures".takeIf { prefs.usesNotificationGestures() },
             ).joinToString(" and ")
             add(Step(
