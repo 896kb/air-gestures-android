@@ -44,7 +44,8 @@ object Setup {
     fun steps(context: Context): List<Step> = buildList {
         val prefs = Prefs(context)
         val ownerKey = Identity.present(context)
-        val claiming = BandClaim.current != null
+        // The state, not BandClaim.current: a claim marks the state before it's current.
+        val claiming = BandService.state.value.claiming
         // Claiming is offered until a confirmed key is here (an unconfirmed one may be retried).
         if (!Identity.keyFile(context).exists()) add(Step(
             "Claim a band",
@@ -111,6 +112,8 @@ object Setup {
                 },
                 allowed == true,
                 "Open",
+                // When HyperOS won't say, the row stays but isn't counted: nothing here could clear it.
+                required = allowed != null,
             ) { Xiaomi.openPermissions(it) })
         }
         // Only asked for when brightness is mapped somewhere.

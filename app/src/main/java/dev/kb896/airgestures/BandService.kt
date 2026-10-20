@@ -149,9 +149,12 @@ class BandService : Service(), BandLink.Listener {
             else -> "Looking for the band"
         }
         val text = listOfNotNull(s.band, s.battery?.let { "$it %" }).joinToString(" · ")
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
-        )
+        // The launcher's own intent, so the app comes back as it was (not a second Home on top).
+        val launch = Intent(this, MainActivity::class.java)
+            .setAction(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        val open = PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE)
         fun action(label: String, action: String, code: Int) = Notification.Action.Builder(
             null, label,
             PendingIntent.getService(
