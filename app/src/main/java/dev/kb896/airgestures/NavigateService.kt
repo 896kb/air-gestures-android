@@ -54,11 +54,19 @@ class NavigateService : AccessibilityService() {
     /** The screen changed: keep the outline on its item if it's still there, else let it go. */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (ring?.showing != true) return
+        // Wait for the screen to settle (120 ms), but never more than 400 ms: some screens
+        // change all the time (a seek bar, a loading shimmer).
+        val now = android.os.SystemClock.uptimeMillis()
+        if (followSince == 0L) followSince = now
         main.removeCallbacks(follow)
-        main.postDelayed(follow, 120)
+        if (now - followSince >= 400) main.post(follow) else main.postDelayed(follow, 120)
     }
 
+    /** When the first screen change since the outline last followed came in (0 = none waiting). */
+    private var followSince = 0L
+
     private val follow = Runnable {
+        followSince = 0L
         val items = items()
         val at = Navigation.find(items, mark)
         if (at < 0) ring?.hide() else ring?.show(items[at].bounds)

@@ -11,7 +11,8 @@ tagged until the user says so).
   item's list, else the main scrollable area). Back and Home exist already. Dial choice
   **Navigate**: each step is focus next / previous.
 - **New profile** offers **Empty** (the defaults) or **Navigate**: swipe right/left focus
-  next/previous, swipe up/down scroll back/forward, index tap select, middle double back,
+  next/previous, swipe up/down scroll forward/back (as a finger on the screen, like "Swipe up
+  on screen"), index tap select, middle double back,
   middle tap home, dial navigate.
 - A separate accessibility service, **Air Gestures navigation**, reads the screen's layout to
   find what can be focused; nothing is stored or leaves the phone. Setup lists it only when a
@@ -24,7 +25,8 @@ tagged until the user says so).
 
 - `Navigation` (pure, tested): `NavNode` (bounds, flags, children); `focusables(root)` — depth-first
   pre-order, visible + enabled + (clickable | editable | checkable), non-empty bounds; `step(list,
-  at, by)` wraps; `find(list, previous)` keeps focus by view id + text + bounds.
+  at, by)` wraps; `find(list, previous)` keeps focus: same id + text, else same id (pressed controls change their
+  text), else (no id) the same bounds; look-alikes by the nearest bounds.
 - `NavigateService` (AccessibilityService, window content on): wraps `AccessibilityNodeInfo`,
   keeps the focused item, draws the outline in a `TYPE_ACCESSIBILITY_OVERLAY` window that isn't
   touchable, performs `ACTION_CLICK` (or `ACTION_FOCUS` + click for text fields) and

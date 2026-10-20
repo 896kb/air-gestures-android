@@ -53,19 +53,23 @@ object Navigation {
     }
 
     /**
-     * Where [mark]'s item is in [items] now: the same id and text, nearest to where it was; an
-     * item with neither, by exactly where it was. −1 if it's gone.
+     * Where [mark]'s item is in [items] now, or −1 if it's gone: the same id and text; else the
+     * same id (a pressed Play now says Pause); else, for an item without an id, the very same
+     * place. Look-alikes (a grid of the same cell) are told apart by how close they are.
      */
     fun find(items: List<NavNode>, mark: Mark?): Int {
         if (mark == null) return -1
-        val same = items.withIndex().filter { (_, node) ->
-            if (mark.named) {
-                node.id == mark.id && node.text == mark.text
-            } else {
-                node.id == null && node.text == null && node.left == mark.left && node.top == mark.top &&
-                    node.right == mark.right && node.bottom == mark.bottom
-            }
+        fun distance(node: NavNode) =
+            abs(node.left - mark.left) + abs(node.top - mark.top) + abs(node.right - mark.right) + abs(node.bottom - mark.bottom)
+        val tiers = listOf<(NavNode) -> Boolean>(
+            { mark.named && it.id == mark.id && it.text == mark.text },
+            { mark.id != null && it.id == mark.id },
+            { mark.id == null && it.id == null && distance(it) == 0 },
+        )
+        for (tier in tiers) {
+            val hit = items.withIndex().filter { tier(it.value) }.minByOrNull { distance(it.value) }
+            if (hit != null) return hit.index
         }
-        return same.minByOrNull { (_, node) -> abs(node.top - mark.top) }?.index ?: -1
+        return -1
     }
 }

@@ -54,6 +54,23 @@ class NavigationTest {
         assertEquals(Navigation.step(items.size, 1, 1), Navigation.step(items.size, Navigation.find(items, Navigation.Mark.of(items[1])), 1))
     }
 
+    @Test fun `in a grid of look-alikes focus moves on, cell by cell`() {
+        val grid = Fake(children = (0 until 3).map { Fake(id = "thumb", clickable = true, left = it * 100, right = it * 100 + 90) })
+        val items = Navigation.focusables(grid)
+        assertEquals(1, Navigation.find(items, Navigation.Mark.of(items[1])))
+        assertEquals(2, Navigation.find(items, Navigation.Mark.of(items[2])))
+    }
+
+    @Test fun `a pressed button whose text changed keeps the focus`() {
+        val before = Fake(id = "play", text = "Play", clickable = true, top = 300, bottom = 350)
+        val after = Fake(children = listOf(Fake(id = "prev", clickable = true), Fake(id = "play", text = "Pause", clickable = true, top = 300, bottom = 350)))
+        assertEquals(1, Navigation.find(Navigation.focusables(after), Navigation.Mark.of(before)))
+        // No id either: where it is still finds it.
+        val bare = Fake(text = "Follow", clickable = true, top = 300, bottom = 350)
+        val followed = Fake(children = listOf(Fake(text = "Following", clickable = true, top = 300, bottom = 350)))
+        assertEquals(0, Navigation.find(Navigation.focusables(followed), Navigation.Mark.of(bare)))
+    }
+
     @Test fun `focus finds its item again after the screen changes`() {
         val before = Navigation.focusables(screen)[2] // star1
         val after = Fake(children = listOf(Fake(id = "wifi", checkable = true), Fake(id = "star1", clickable = true, top = 400, bottom = 450)))
