@@ -245,7 +245,8 @@ abstract class GestureScreen : Screen() {
             addView(row(gap = 8f).apply {
                 setPadding(dpi(12f), dpi(8f), dpi(6f), dpi(8f))
                 background = Cb.hairlineCard(context, 10f)
-                addView(text(13f, Actions.AUTOMATION_ACTION, Cb.INK_900, R.font.geist_mono_medium), weighted())
+                // Shown breakable after its dots only (never mid-word); Copy copies it whole.
+                addView(text(13f, Actions.AUTOMATION_ACTION.replace(".", ".\u200B"), Cb.INK_900, R.font.geist_mono_medium), weighted())
                 addView(pill("Copy", R.drawable.ic_copy) {
                     getSystemService(android.content.ClipboardManager::class.java)
                         .setPrimaryClip(android.content.ClipData.newPlainText("Air Gestures broadcast", Actions.AUTOMATION_ACTION))
