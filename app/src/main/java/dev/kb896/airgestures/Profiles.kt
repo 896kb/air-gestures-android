@@ -11,6 +11,7 @@ object Profiles {
     private const val APPS = "profile.apps"
     private const val PICKED = "profile.current"
     private const val SPEAK = "profile.speak"
+    private const val BROKEN = "profiles.broken"
 
     @Volatile
     private var cached: ProfileList? = null
@@ -32,9 +33,14 @@ object Profiles {
         val prefs = prefs(context)
         val profiles = prefs.getString(PROFILES, null)
         if (profiles != null) {
-            runCatching {
-                return ProfileList.fromJson(profiles, prefs.getString(APPS, null) ?: "{}", prefs.getString(PICKED, null) ?: "p1")
-            }
+            val picked = prefs.getString(PICKED, null) ?: "p1"
+            val apps = prefs.getString(APPS, null) ?: "{}"
+            // Unreadable app assignments cost only the assignments, not the profiles.
+            runCatching { return ProfileList.fromJson(profiles, apps, picked) }
+            runCatching { return ProfileList.fromJson(profiles, "{}", picked) }
+            // The profiles themselves are unreadable: keep a copy before starting over.
+            android.util.Log.w("AirGestures", "profiles unreadable; kept as $BROKEN, starting from the old mapping")
+            prefs.edit().putString(BROKEN, profiles).apply()
         }
         // Before profiles (or unreadable): the stored mapping becomes Profile 1.
         val map = Gesture.entries.associate { it.key to (prefs.getString("map.${it.key}", null) ?: it.default.id) }

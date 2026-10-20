@@ -113,6 +113,9 @@ pub struct Controller {
     toggle_finger: ToggleGesture,
     /// When a triple tap last toggled (its third tap may also report a double).
     toggled_at: f64,
+    /// When a triple tap last switched profiles (kept apart from [`Self::toggled_at`],
+    /// which also spaces out middle-hold toggles).
+    tripled_at: f64,
     status: Status,
 }
 
@@ -147,6 +150,7 @@ impl Controller {
             toggle_taps: Vec::new(),
             toggle_finger: ToggleGesture::None,
             toggled_at: f64::NEG_INFINITY,
+            tripled_at: f64::NEG_INFINITY,
             status,
         }
     }
@@ -316,13 +320,18 @@ impl Controller {
                 if self.toggle_taps.len() >= 3 {
                     self.toggle_taps.clear();
                     self.held_tap = None;
-                    self.toggled_at = now;
                     return match triple {
-                        Triple::Toggle => self.toggle_by_tap(now),
-                        Triple::Profile(action) => self.profile_by_tap(action),
+                        Triple::Toggle => {
+                            self.toggled_at = now;
+                            self.toggle_by_tap(now)
+                        }
+                        Triple::Profile(action) => {
+                            self.tripled_at = now;
+                            self.profile_by_tap(action)
+                        }
                     };
                 }
-            } else if now - self.toggled_at < 0.15 {
+            } else if now - self.toggled_at.max(self.tripled_at) < 0.15 {
                 // The third tap's own double tap: part of the triple.
                 return Vec::new();
             } else {
@@ -344,8 +353,10 @@ impl Controller {
                 self.held_tap = None;
             }
             // A single tap whose double has an action waits to see whether it
-            // is the first half of that double tap; so does one whose finger's
-            // triple tap switches profiles (else a triple would run it twice).
+            // is the first half of that double tap; one whose finger's triple tap
+            // switches profiles waits out the whole triple (slow taps come without
+            // the band's double tap), else a triple would also run it.
+            let profile_triple = matches!(self.triple_use(tap), Some(Triple::Profile(_)));
             if let Some(double) = double_of(tap)
                 && !self
                     .config
@@ -357,15 +368,17 @@ impl Controller {
                     .gestures
                     .command(Recognized::Tap(double))
                     .is_empty()
-                    || matches!(self.triple_use(tap), Some(Triple::Profile(_))))
+                    || profile_triple)
             {
                 match &mut self.held_tap {
                     // The double's second tap: its double tap comes right with it.
-                    Some(held) if held.tap == tap => held.fire_at = held.fire_at.max(now + 0.08),
+                    Some(held) if held.tap == tap => {
+                        held.fire_at = held.fire_at.max(now + if profile_triple { TRIPLE_TAP_GAP } else { 0.08 })
+                    }
                     _ => {
                         self.held_tap = Some(HeldTap {
                             tap,
-                            fire_at: now + DOUBLE_TAP_WAIT,
+                            fire_at: now + if profile_triple { TRIPLE_TAP_GAP } else { DOUBLE_TAP_WAIT },
                             received_at: message.received_at,
                         })
                     }
@@ -633,6 +646,37 @@ mod tests {
         assert!(c.fire_held_tap(2.2).is_empty());
         assert_eq!(runs(&c.fire_held_tap(2.45)), ["media.play_pause"]);
         assert!(c.fire_held_tap(3.0).is_empty());
+    }
+
+    #[test]
+    fn a_slow_triple_tap_without_band_doubles_runs_no_single_tap() {
+        let mut c = controller("index_tap=media.play_pause;index_double=;triples=profiles");
+        let mut out = Vec::new();
+        // 0.38 s apart: too slow for the band's own double tap, quick enough for a triple.
+        out.extend(tap(&mut c, "index", "tap", 1, 2.0));
+        out.extend(c.fire_held_tap(2.3));
+        out.extend(tap(&mut c, "index", "tap", 2, 2.38));
+        out.extend(c.fire_held_tap(2.7));
+        out.extend(tap(&mut c, "index", "tap", 3, 2.76));
+        out.extend(c.fire_held_tap(4.0));
+        assert_eq!(runs(&out), ["profile.next"]);
+    }
+
+    #[test]
+    fn a_middle_hold_right_after_a_profile_triple_still_toggles_the_controls() {
+        let mut c = controller("middle_tap=;middle_double=volume.mute;triples=profiles");
+        triple(&mut c, "middle", 2.0);
+        let hold = GestureMessage {
+            sequence: 9,
+            timestamp_us: 9_000,
+            finger: "middle".into(),
+            action: "hold".into(),
+            derived_action: String::new(),
+            synthetic: false,
+            received_at: 2.9,
+        };
+        c.on_event(&Event::Gesture(hold), 2.9);
+        assert!(c.status().paused);
     }
 
     #[test]

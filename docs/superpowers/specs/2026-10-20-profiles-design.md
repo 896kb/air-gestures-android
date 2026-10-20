@@ -21,8 +21,9 @@ tagged until the user says so).
 
 The bridge has to wait to see whether a third tap follows, so for both index and middle:
 - a **double tap** fires ~0.45 s later than now;
-- a **single tap** waits ~0.4 s even when its double tap is set to Nothing (today it waits only
-  when the double has an action), or a triple tap would also run the single tap twice.
+- a **single tap** waits ~0.45 s (the whole triple window) even when its double tap is set to
+  Nothing (today it waits only when the double has an action), or a triple tap would also run
+  it; two slow single taps within that window run the tap's action once.
 
 ## Architecture
 

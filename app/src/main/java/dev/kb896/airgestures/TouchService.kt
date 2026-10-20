@@ -23,12 +23,15 @@ class TouchService : AccessibilityService() {
     override fun onDestroy() {
         picker?.cancel()
         instance = null
+        // Without the service nothing says which app is in front: no app's profile applies.
+        BandService.foreground(this, null)
         super.onDestroy()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         picker?.cancel()
         instance = null
+        BandService.foreground(this, null)
         return super.onUnbind(intent)
     }
 

@@ -75,6 +75,11 @@ class ProfileListTest {
         assertEquals("volume", list.profiles[1].dial)
     }
 
+    @Test(expected = IllegalArgumentException::class)
+    fun `a stored list with no profiles is refused`() {
+        ProfileList.fromJson("[]", "{}", "p1")
+    }
+
     @Test fun `it round-trips through JSON`() {
         val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1)
         val json = list.toJson()

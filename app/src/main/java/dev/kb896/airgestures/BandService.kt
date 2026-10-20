@@ -280,7 +280,7 @@ class BandService : Service(), BandLink.Listener {
          * The accessibility service saw [pkg] come to the front: if that changes the profile
          * in force (into or out of an app's own), the band gets it and the user is told.
          */
-        fun foreground(context: Context, pkg: String) {
+        fun foreground(context: Context, pkg: String?) {
             val list = Profiles.load(context)
             val before = list.active(Profiles.foreground)
             Profiles.foreground = pkg

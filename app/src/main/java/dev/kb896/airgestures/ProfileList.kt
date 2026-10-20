@@ -77,6 +77,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
         fun migrated(map: Map<String, String>, dial: String) =
             ProfileList(listOf(Profile("p1", "Profile 1", map, dial)), "p1", emptyMap())
 
+        /** Throws on anything it can't read, including a list with no profiles. */
         fun fromJson(profiles: String, apps: String, picked: String): ProfileList {
             val list = JSONArray(profiles)
             val parsed = (0 until list.length()).map { i ->
@@ -89,6 +90,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                     item.getString("dial"),
                 )
             }
+            require(parsed.isNotEmpty()) { "no profiles" }
             val owners = JSONObject(apps)
             return ProfileList(parsed, picked, owners.keys().asSequence().associateWith { owners.getString(it) })
         }
