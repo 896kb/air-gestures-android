@@ -86,8 +86,13 @@ abstract class Screen : Activity() {
             background = ripple(999f)
             setOnClickListener { finish() }
         })
-        addView(Cb.text(context, 24f, R.font.geist_bold, Cb.INK_900, -.03f).apply { text = title }, weighted())
+        titleView = Cb.text(context, 24f, R.font.geist_bold, Cb.INK_900, -.03f).apply { text = title }
+        addView(titleView, weighted())
     }
+
+    /** A sub-screen's title, to change it later (a renamed profile). */
+    var titleView: TextView? = null
+        private set
 
     inline fun <reified T : Activity> open() = startActivity(Intent(this, T::class.java))
 
@@ -96,11 +101,12 @@ abstract class Screen : Activity() {
         ColorStateList.valueOf(0x14111214), null, GradientDrawable().apply { setColor(-1); cornerRadius = dp(radius) },
     )
 
-    /** A row that opens another screen: icon, label, an optional WARN [badge], chevron. */
-    fun navRow(iconRes: Int, label: String, badge: String? = null, onClick: () -> Unit) = row(gap = 12f).apply {
+    /** A row that opens another screen: icon, label, a quiet [detail] or a WARN [badge], chevron. */
+    fun navRow(iconRes: Int, label: String, badge: String? = null, detail: String? = null, onClick: () -> Unit) = row(gap = 12f).apply {
         setPadding(dpi(4f), dpi(12f), dpi(4f), dpi(12f))
         addView(icon(iconRes, 18f))
         addView(Cb.text(context, 15f, R.font.geist_medium, Cb.INK_900).apply { text = label }, weighted())
+        if (detail != null) addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = detail })
         if (badge != null) addView(Cb.chip(context, Cb.Signal.WARN, badge))
         addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))
         isClickable = true
@@ -291,7 +297,40 @@ abstract class Screen : Activity() {
     }
 
     /** A confirmation in the picker's style: title, body, Cancel and the action. */
-    fun confirm(title: String, body: String, action: String, onConfirm: () -> Unit) {
+    fun confirm(title: String, body: String, action: String, onConfirm: () -> Unit) =
+        sheet(title, Cb.text(this, 14f, color = Cb.INK_500).apply { text = body; setLineSpacing(0f, 1.3f) }, action) {
+            onConfirm()
+            true
+        }
+
+    /** Ask for a line of text (a profile's name): the field starts with [initial]. */
+    fun ask(title: String, initial: String, action: String, onDone: (String) -> Unit) {
+        val field = android.widget.EditText(this).apply {
+            setText(initial)
+            setSelection(initial.length)
+            isSingleLine = true
+            textSize = 16f
+            typeface = Cb.font(context, R.font.geist_medium)
+            setTextColor(Cb.INK_900)
+            background = Cb.hairlineCard(context, 10f)
+            setPadding(dpi(14f), dpi(12f), dpi(14f), dpi(12f))
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        }
+        val dialog = sheet(title, field, action) {
+            onDone(field.text.toString())
+            true
+        }
+        field.setOnEditorActionListener { _, _, _ ->
+            onDone(field.text.toString())
+            dialog.dismiss()
+            true
+        }
+        field.requestFocus()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+    }
+
+    /** A modal sheet in the picker's style: title, [body], Cancel and [action]. */
+    private fun sheet(title: String, body: View, action: String, onAction: () -> Boolean): android.app.Dialog {
         val dialog = android.app.Dialog(this)
         val sheet = column(gap = 14f).apply {
             setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(18f))
@@ -301,11 +340,11 @@ abstract class Screen : Activity() {
             }
             elevation = dp(24f)
             addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
-            addView(Cb.text(context, 14f, color = Cb.INK_500).apply { text = body; setLineSpacing(0f, 1.3f) })
+            addView(body)
             addView(row(gap = 12f).apply {
                 gravity = Gravity.END
                 addView(pill("Cancel") { dialog.dismiss() }.first)
-                addView(pill(action) { dialog.dismiss(); onConfirm() }.first)
+                addView(pill(action) { if (onAction()) dialog.dismiss() }.first)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         dialog.setContentView(FrameLayout(this).apply {
@@ -318,5 +357,6 @@ abstract class Screen : Activity() {
             setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         dialog.show()
+        return dialog
     }
 }

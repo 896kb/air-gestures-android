@@ -17,6 +17,12 @@ fails without one.
 - Pinch and turn can go to automation too, for dimming a smart light: `gesture` is
   `dial` and `steps` the steps turned (+ up, − down), sent at most every 250 ms so a
   quick turn doesn't flood the light.
+- Profiles: several sets of gestures (each with its own pinch and turn), renamable,
+  under Gestures. An index triple tap moves to the next profile, a middle triple tap to
+  the previous one; apps can have their own profile, which applies while the app is open
+  (the triple taps don't switch there). Every switch shows the profile's name, and can
+  say it. With more than one profile, index and middle taps wait a moment so a triple
+  tap can be told apart.
 - During calls: while the phone rings or a call is on, gestures can do something else.
   By default an index double tap answers and a middle double tap declines or hangs up;
   every gesture is yours to set. Phone calls only: WhatsApp and other app calls can't

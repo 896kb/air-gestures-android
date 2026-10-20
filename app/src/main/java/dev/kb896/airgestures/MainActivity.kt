@@ -35,6 +35,7 @@ class MainActivity : Screen() {
     private lateinit var hand: TextView
     private lateinit var gestures: TextView
     private lateinit var lastGesture: TextView
+    private lateinit var profile: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
@@ -250,9 +251,11 @@ class MainActivity : Screen() {
         val (h, hv) = stat("Hand"); hand = hv
         val (g, gv) = stat("Gestures"); gestures = gv
         val (l, lv) = stat("Last gesture"); lastGesture = lv.apply { typeface = Cb.font(context, R.font.geist_medium); textSize = 15f }
+        val (p, pv) = stat("Profile"); profile = pv.apply { typeface = Cb.font(context, R.font.geist_medium); textSize = 15f }
         return card("Status", column(gap = 16f).apply {
             addView(row().apply { addView(b, weighted()); addView(h, weighted()) })
             addView(row().apply { addView(g, weighted()); addView(l, weighted()) })
+            addView(row().apply { addView(p, weighted()) })
         })
     }
 
@@ -359,6 +362,7 @@ class MainActivity : Screen() {
         hand.text = state.hand?.replaceFirstChar { it.uppercase() } ?: "—"
         gestures.text = state.gestures.toString()
         lastGesture.text = state.lastGesture?.replaceFirstChar { it.uppercase() } ?: "None yet"
+        profile.text = state.profile ?: Profiles.active(this).name
 
         // Toggled-on states are pushed, toggled-off states raised.
         controls.first.text = if (paused) "Controls off" else "Controls on"
