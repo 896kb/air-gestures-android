@@ -33,6 +33,9 @@ object Setup {
         Manifest.permission.POST_NOTIFICATIONS,
     )
 
+    /** Seeing a call ring or start, and answering or ending it. */
+    val callPermissions = arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS)
+
     fun granted(context: Context) = permissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
     fun bluetoothOn(context: Context) =
@@ -123,12 +126,16 @@ object Setup {
                 it.startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${it.packageName}")))
             })
         }
-        // Only asked for when the dial seeks.
+        // Only asked for when the dial seeks or a notification gesture is set.
         if (prefs.usesNotifications()) {
             val media = MediaAccess.granted(context)
+            val needs = listOfNotNull(
+                "playback position".takeIf { prefs.dial == DialChoice.SEEK },
+                "notification gestures".takeIf { prefs.usesNotificationGestures() },
+            ).joinToString(" and ")
             add(Step(
                 "Notification access",
-                if (media) "Allowed" else "Needed for playback position. If it's greyed out: App info, then Allow restricted settings",
+                if (media) "Allowed" else "Needed for $needs. If it's greyed out: App info, then Allow restricted settings",
                 media,
                 "Allow",
             ) { screen ->
@@ -136,6 +143,13 @@ object Setup {
                     .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MediaAccess.component(screen).flattenToString())
                 runCatching { screen.startActivity(detail) }
                     .onFailure { screen.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+            })
+        }
+        // Only asked for when a call action is set in During calls (the defaults are).
+        if (prefs.usesCalls()) {
+            val calls = callPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+            add(Step("Phone calls", if (calls) "Allowed" else "Needed to answer and end calls with gestures", calls, "Allow") {
+                it.requestPermissions(callPermissions, PERMISSIONS)
             })
         }
         val unrestricted = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)

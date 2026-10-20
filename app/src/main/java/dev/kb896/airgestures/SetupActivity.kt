@@ -190,6 +190,8 @@ class SetupActivity : Screen() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // The call layer starts working as soon as the phone permission is in.
+        BandService.instance?.watchCalls()
         render()
     }
 

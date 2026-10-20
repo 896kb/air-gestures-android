@@ -9,6 +9,15 @@ fails without one.
 - Needs Android 13 or newer. Below that the app didn't work properly before either.
 - On Android 13 to 15, linking the band no longer closes the app, and the band coming
   into range wakes the app again (that wake-up worked on Android 16 only).
+- New gesture actions: tap a spot on the screen you pick (drag a target over the app
+  it's for), open the voice assistant, read the newest notification aloud (only the app
+  and title while the phone is locked) or dismiss it, and send the gesture to Tasker,
+  MacroDroid or Home Assistant (broadcast `dev.kb896.airgestures.GESTURE`, extra
+  `gesture`).
+- During calls: while the phone rings or a call is on, gestures can do something else.
+  By default an index double tap answers and a middle double tap declines or hangs up;
+  every gesture is yours to set. Phone calls only: WhatsApp and other app calls can't
+  be answered by another app.
 - Home is shorter: Gestures, Setup and Activity have their own screens. Home shows how
   many Setup steps are left.
 - A debug build installs beside the release (as "Air Gestures (dev)") instead of over it.
