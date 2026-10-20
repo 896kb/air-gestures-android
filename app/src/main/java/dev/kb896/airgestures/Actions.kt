@@ -82,6 +82,11 @@ class Actions(private val context: Context) {
             "notification.read" -> return read()
             "call.answer" -> return call(answer = true)
             "call.end" -> return call(answer = false)
+            "nav.next" -> return navigate { it.move(+1) }
+            "nav.previous" -> return navigate { it.move(-1) }
+            "nav.select" -> return navigate { it.select() }
+            "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }
+            "nav.scroll_back" -> return navigate { it.scroll(forward = false) }
             "profile.next" -> return BandService.instance?.profileStep(+1)
             "profile.previous" -> return BandService.instance?.profileStep(-1)
             else -> return when {
@@ -160,6 +165,10 @@ class Actions(private val context: Context) {
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         return runCatching { touch.startActivity(launch) }.exceptionOrNull()?.let { "couldn't open $packageName" }
     }
+
+    /** Navigation goes through its own accessibility service, when it's switched on. */
+    private fun navigate(how: (NavigateService) -> String?): String? =
+        NavigateService.instance?.let(how) ?: "navigation needs Air Gestures navigation on (Setup)"
 
     private fun tap(action: String): String? {
         val touch = TouchService.instance ?: return "tap here needs screen gestures (Setup)"

@@ -30,6 +30,12 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     READ("notification.read", "Read notification", R.drawable.ic_message_square_text),
     AUTOMATION(Mappings.AUTOMATION, "Send to automation", R.drawable.ic_zap),
 
+    FOCUS_NEXT("nav.next", "Focus next", R.drawable.ic_circle_arrow_right),
+    FOCUS_PREVIOUS("nav.previous", "Focus previous", R.drawable.ic_circle_arrow_left),
+    SELECT("nav.select", "Select", R.drawable.ic_mouse_pointer_click),
+    SCROLL_FORWARD("nav.scroll_forward", "Scroll forward", R.drawable.ic_chevrons_down),
+    SCROLL_BACK("nav.scroll_back", "Scroll back", R.drawable.ic_chevrons_up),
+
     /** During calls only. */
     ANSWER("call.answer", "Answer call", R.drawable.ic_phone),
     /** During calls only: declines a ringing call, ends an active one. */
@@ -70,6 +76,8 @@ enum class DialChoice(val key: String, val label: String, val up: String, val do
     VOLUME("volume", "Volume", "volume.up", "volume.down", R.drawable.ic_volume_2),
     SEEK("seek", "Playback position", "dial.seek_forward", "dial.seek_back", R.drawable.ic_fast_forward),
     BRIGHTNESS("brightness", "Brightness", "brightness.up", "brightness.down", R.drawable.ic_sun),
+    /** Each step moves the navigation focus (next / previous). */
+    NAVIGATE("navigate", "Navigate", "nav.next", "nav.previous", R.drawable.ic_scan_line),
     /** For smart lights and the like: Tasker / Home Assistant get the steps, gathered every 250 ms. */
     AUTOMATION("automation", "Send to automation", "automation:dial_up", "automation:dial_down", R.drawable.ic_zap),
     NONE("none", "Nothing", "", "", R.drawable.ic_minus);
@@ -78,4 +86,20 @@ enum class DialChoice(val key: String, val label: String, val up: String, val do
         /** "tracks" was the old next/previous choice; playback position replaced it. */
         fun of(key: String?) = if (key == "tracks") SEEK else entries.firstOrNull { it.key == key } ?: VOLUME
     }
+}
+
+/** The ready-made profiles New profile offers besides an empty one. */
+object Presets {
+    /** Moving through the screen: focus, select, scroll, back and home. */
+    val navigate = mapOf(
+        Gesture.SWIPE_RIGHT.key to Action.FOCUS_NEXT.id,
+        Gesture.SWIPE_LEFT.key to Action.FOCUS_PREVIOUS.id,
+        // As a finger on the screen: moving up scrolls forward.
+        Gesture.SWIPE_UP.key to Action.SCROLL_FORWARD.id,
+        Gesture.SWIPE_DOWN.key to Action.SCROLL_BACK.id,
+        Gesture.INDEX_TAP.key to Action.SELECT.id,
+        Gesture.INDEX_DOUBLE.key to Action.NONE.id,
+        Gesture.MIDDLE_TAP.key to Action.HOME.id,
+        Gesture.MIDDLE_DOUBLE.key to Action.BACK.id,
+    )
 }

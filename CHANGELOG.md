@@ -23,6 +23,10 @@ fails without one.
   (the triple taps don't switch there). Every switch shows the profile's name, and can
   say it. With more than one profile, index and middle taps wait a moment so a triple
   tap can be told apart.
+- Navigation for when the screen is hard to reach: actions that move a glowing outline
+  between buttons and fields, select, and scroll, and a ready-made Navigate profile (New
+  profile, Navigate). It's a separate accessibility service, Air Gestures navigation, that
+  reads the screen's layout to find what to focus; nothing is kept or leaves the phone.
 - Practice: guided lessons for every gesture, one at a time, waiting until the band sees
   it and saying what it would do. Nothing runs while you practise.
 - Back up and restore the settings (profiles, During calls, wrist, switches) to a file,

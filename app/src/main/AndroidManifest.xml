@@ -155,6 +155,19 @@
                 android:resource="@xml/touch_service" />
         </service>
 
+        <service
+            android:name=".NavigateService"
+            android:exported="false"
+            android:label="${appLabel} navigation"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/navigate_service" />
+        </service>
+
         <!-- Notification access: steering the playing app (the playback-position dial), and the
              newest notification, read or cleared only when a notification gesture is made. -->
         <service

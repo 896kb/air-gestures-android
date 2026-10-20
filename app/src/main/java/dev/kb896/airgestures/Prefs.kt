@@ -109,6 +109,9 @@ class Prefs(context: Context) {
 
     fun usesNotificationGestures() = allIds().any { it.startsWith("notification.") }
 
+    /** Navigation is mapped somewhere (its own accessibility service, which reads the screen's layout). */
+    fun usesNavigation() = DialChoice.NAVIGATE in dials() || allIds().any { it.startsWith("nav.") }
+
     /** Anything is set in the During calls layer: it needs the phone permissions to know when a call is on. */
     fun usesCalls() = Gesture.entries.any { callActionId(it) != Mappings.AS_USUAL }
 

@@ -59,10 +59,24 @@ class GesturesActivity : GestureScreen() {
         })
         profiles.addView(row(gap = 10f).apply {
             addView(pill("New profile", R.drawable.ic_layers) {
-                val made = Profiles.update(applicationContext) { it.added(Profiles.defaultMap(), DialChoice.VOLUME.key).first }
-                    .profiles.last()
-                BandService.instance?.remap()
-                ProfileActivity.open(context, made.id)
+                // Empty (the defaults) or a ready-made one.
+                choose(
+                    "New profile",
+                    listOf(Option("Empty", false, R.drawable.ic_layers), Option("Navigate", false, R.drawable.ic_scan_line)),
+                    heading = "Profile",
+                ) { index ->
+                    val navigate = index == 1
+                    val made = Profiles.update(applicationContext) { list ->
+                        val (added, profile) = if (navigate) {
+                            list.added(Profiles.defaultMap() + Presets.navigate, DialChoice.NAVIGATE.key)
+                        } else {
+                            list.added(Profiles.defaultMap(), DialChoice.VOLUME.key)
+                        }
+                        if (navigate) added.renamed(profile.id, "Navigate") else added
+                    }.profiles.last()
+                    BandService.instance?.remap()
+                    ProfileActivity.open(context, made.id)
+                }
             }.first)
         })
         if (list.profiles.size > 1) {

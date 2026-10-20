@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="touch_service_description">Lets band gestures swipe and tap the screen, press Back, Home or Recent apps, and open apps or the voice assistant. For per-app profiles it notices which app is open. Air Gestures reads nothing on screen.</string>
+    <string name="navigate_service_description">Lets band gestures move a focus outline between the buttons, links and fields on screen, press them and scroll. To find them it reads the screen\'s layout; nothing is kept or leaves the phone.</string>
     <string name="tile_band">Air Gestures</string>
     <string name="tile_controls">Gesture controls</string>
     <string name="widget_description">The band\'s connection, battery and profile, with power and controls buttons.</string>

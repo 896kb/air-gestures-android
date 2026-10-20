@@ -111,6 +111,16 @@ object Setup {
                 "Turn on",
             ) { it.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
         }
+        // Only asked for when navigation is mapped: its own service, which reads the screen's layout.
+        if (prefs.usesNavigation()) {
+            val on = NavigateService.instance != null
+            add(Step(
+                "Screen navigation",
+                if (on) "On" else "Settings, Accessibility, Air Gestures navigation. It reads the screen's layout to find what to focus; nothing is kept or sent",
+                on,
+                "Turn on",
+            ) { it.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
+        }
         // HyperOS drops app launches from the background without its own permission.
         if (Xiaomi.isXiaomi && prefs.usesApps()) {
             val allowed = Xiaomi.canOpenFromBackground(context)
