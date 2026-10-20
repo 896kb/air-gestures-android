@@ -109,3 +109,41 @@ class StepBatch(private val window: Long) {
         return steps
     }
 }
+
+/** Which battery notification a band reading calls for, each once until it's re-armed. */
+object BatteryAlerts {
+    enum class Kind { LOW, CHARGED }
+
+    data class Alert(val kind: Kind, val level: Int)
+
+    /** What's been said since the last re-arm: the 20 % and 10 % warnings, and "charged". */
+    data class Flags(val low20: Boolean = false, val low10: Boolean = false, val charged: Boolean = false)
+
+    /**
+     * A reading of [level] % ([charging] or not): the alert to post, if any, and the flags after.
+     * Charging to at least half re-arms the low warnings; leaving the charger re-arms "charged".
+     */
+    fun check(level: Int, charging: Boolean, flags: Flags): Pair<Alert?, Flags> = when {
+        charging && level >= 100 && !flags.charged -> Alert(Kind.CHARGED, level) to Flags(charged = true)
+        charging && level >= 50 -> null to flags.copy(low20 = false, low10 = false)
+        charging -> null to flags
+        level <= 10 && !flags.low10 -> Alert(Kind.LOW, level) to Flags(low20 = true, low10 = true)
+        level <= 20 && !flags.low20 -> Alert(Kind.LOW, level) to flags.copy(low20 = true, charged = false)
+        else -> null to flags.copy(charged = false)
+    }
+}
+
+/** The evening "charge your band" reminder. */
+object Reminder {
+    const val HOUR = 21
+
+    /** The last reading (at [readAt] ms) was below half, not charging, and from the last day. */
+    fun due(level: Int?, charging: Boolean, readAt: Long, now: Long) =
+        level != null && level < 50 && !charging && now - readAt <= 24 * 3_600_000L
+
+    /** The next 21:00 after [now], in its time zone. */
+    fun next(now: java.time.ZonedDateTime): java.time.ZonedDateTime {
+        val today = now.withHour(HOUR).withMinute(0).withSecond(0).withNano(0)
+        return if (today.isAfter(now)) today else today.plusDays(1)
+    }
+}
