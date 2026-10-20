@@ -67,6 +67,7 @@
 
         <activity android:name=".GesturesActivity" android:exported="false" />
         <activity android:name=".ProfileActivity" android:exported="false" />
+        <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SetupActivity" android:exported="false" />
         <activity android:name=".ActivityLogActivity" android:exported="false" />
 

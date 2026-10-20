@@ -73,6 +73,7 @@ class MainActivity : Screen() {
     /** Where the rest of the app lives. */
     private fun navCard() = card(null, column().apply {
         addView(navRow(R.drawable.ic_hand, "Gestures") { open<GesturesActivity>() })
+        addView(navRow(R.drawable.ic_graduation_cap, "Practice") { open<PracticeActivity>() })
         setupNav = FrameLayout(context)
         addView(setupNav)
         addView(navRow(R.drawable.ic_activity, "Activity") { open<ActivityLogActivity>() })

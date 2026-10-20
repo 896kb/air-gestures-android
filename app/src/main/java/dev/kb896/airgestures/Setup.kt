@@ -80,6 +80,14 @@ object Setup {
             "Forget the band", "Removes the key, the pairing and the link from this phone", false, "Forget",
             always = true, icon = R.drawable.ic_link, required = false,
         ) { it.forgetBand() })
+        add(Step(
+            "Back up settings", "Profiles, During calls and switches in a file; the key stays apart", true, "Back up",
+            always = true, icon = R.drawable.ic_arrow_down, required = false,
+        ) { it.backup() })
+        add(Step(
+            "Restore settings", "From a settings backup", true, "Restore",
+            always = true, icon = R.drawable.ic_rotate_cw, required = false,
+        ) { it.restore() })
         if (SessionStore.present(context)) add(Step(
             "Meta sign-in", "Signed in; used only to claim a band", true, "Sign out", always = true, required = false,
         ) { it.signOut() })

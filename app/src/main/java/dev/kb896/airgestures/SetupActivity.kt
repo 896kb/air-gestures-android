@@ -17,6 +17,9 @@ private const val IMPORT = 3
 private const val SIGN_IN = 4
 /** The file picker's request code for exporting the owner key. */
 private const val EXPORT = 5
+/** The file pickers' request codes for the settings backup. */
+private const val BACKUP = 6
+private const val RESTORE = 7
 
 /** Setup: the owner key, the permissions and the system settings the band needs. */
 class SetupActivity : Screen() {
@@ -162,6 +165,44 @@ class SetupActivity : Screen() {
         )
     }
 
+    /** Save the settings (not the key) to a file the user picks. */
+    fun backup() = startActivityForResult(
+        Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/json")
+            .putExtra(Intent.EXTRA_TITLE, "air-gestures-settings.json"),
+        BACKUP,
+    )
+
+    fun restore() = startActivityForResult(
+        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),
+        RESTORE,
+    )
+
+    private fun settings(): Backup.Settings {
+        val prefs = Prefs(this)
+        return Backup.Settings(
+            Profiles.load(this),
+            Gesture.entries.associate { it.key to prefs.callActionId(it) },
+            prefs.hand,
+            Profiles.speak(this),
+            Profiles.vibrate(this),
+        )
+    }
+
+    /** Replace the settings with a backup's, and give the band the new mapping. */
+    private fun apply(settings: Backup.Settings) {
+        val prefs = Prefs(this)
+        Profiles.update(applicationContext) { settings.profiles }
+        for (gesture in Gesture.entries) settings.calls[gesture.key]?.let { prefs.setCallAction(gesture, it) }
+        prefs.hand = settings.hand
+        Profiles.setSpeak(this, settings.speak)
+        Profiles.setVibrate(this, settings.vibrate)
+        BandService.instance?.remap()
+        log("restored the settings: ${settings.profiles.profiles.size} profiles")
+        render()
+    }
+
     fun forgetBand() = confirm(
         "Forget the band?",
         "The key, the Bluetooth pairing and the companion link are removed from this phone. " +
@@ -216,6 +257,33 @@ class SetupActivity : Screen() {
             val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } }
                 ?: listOfNotNull(data.data)
             log(Identity.import(this, uris))
+        }
+        if (requestCode == BACKUP && resultCode == RESULT_OK) {
+            log(
+                runCatching {
+                    val uri = data?.data ?: throw IllegalStateException("no file chosen")
+                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(Backup.write(settings()).toByteArray()) }
+                        ?: throw IllegalStateException("couldn't open the file")
+                    "backed up the settings"
+                }.getOrElse { "backup failed: ${it.message}" },
+            )
+        }
+        if (requestCode == RESTORE && resultCode == RESULT_OK) {
+            val text = runCatching {
+                contentResolver.openInputStream(data?.data ?: return@runCatching null)?.use { it.readBytes().decodeToString() }
+            }.getOrNull()
+            val settings = text?.let(Backup::read)
+            if (settings == null) {
+                log("that file isn't a settings backup")
+            } else {
+                val n = settings.profiles.profiles.size
+                confirm(
+                    "Restore settings?",
+                    "Replace your profiles, During calls, wrist and switches with this backup's " +
+                        "$n ${if (n == 1) "profile" else "profiles"}. The owner key stays as it is.",
+                    "Restore",
+                ) { apply(settings) }
+            }
         }
         if (requestCode == EXPORT && resultCode == RESULT_OK) {
             val uri = data?.data

@@ -23,6 +23,10 @@ fails without one.
   (the triple taps don't switch there). Every switch shows the profile's name, and can
   say it. With more than one profile, index and middle taps wait a moment so a triple
   tap can be told apart.
+- Practice: guided lessons for every gesture, one at a time, waiting until the band sees
+  it and saying what it would do. Nothing runs while you practise.
+- Back up and restore the settings (profiles, During calls, wrist, switches) to a file,
+  under Setup. The owner key isn't in it; it has its own export.
 - Two Quick Settings tiles: Air Gestures (connect or release the band, with its status
   and battery) and Gesture controls (on or off). Long-press either to open the app.
 - A home-screen widget: the band, its status, battery and profile, with a power and a

@@ -178,7 +178,14 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
-        val paused = status.optBoolean("paused")
+        var paused = status.optBoolean("paused")
+        val lesson = practice
+        if (lesson != null && paused) {
+            // The middle hold in a lesson: it counts, but the controls stay on.
+            lesson.held()
+            link.setPaused(false)
+            paused = false
+        }
         if (paused != prefs.paused) prefs.paused = paused
         if (paused != state.value.paused) pausedChanged(paused)
         val before = state.value
@@ -194,6 +201,7 @@ class BandService : Service(), BandLink.Listener {
             )
         }
         val now = state.value
+        if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
         if (level != null && (level != before.battery || now.charging != before.charging)) {
             Alerts.battery(this, now.band, level, now.charging)
@@ -202,8 +210,36 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onActions(actions: List<String>) = main.post {
-        for (action in actions) this.actions.run(action)?.let(::onLog)
+        // In a lesson nothing runs; the lesson sees what would have.
+        practice?.let { lesson -> actions.forEach(lesson::action) } ?: actions.forEach { action ->
+            this.actions.run(action)?.let(::onLog)
+        }
     }.let {}
+
+    /** What a practice lesson hears from the band while it's open. */
+    interface Practice {
+        fun gesture(label: String)
+        fun action(id: String)
+        fun held()
+    }
+
+    /** Set while a lesson is open: gestures are reported to it and run nothing. */
+    var practice: Practice? = null
+        private set
+    private var practiceWasPaused = false
+
+    /** Start a lesson: the controls go on (the band reports more), and come back as they were after. */
+    fun startPractice(lesson: Practice) {
+        if (practice == null) practiceWasPaused = state.value.paused
+        practice = lesson
+        if (state.value.paused) setPaused(false)
+    }
+
+    fun endPractice() {
+        if (practice == null) return
+        practice = null
+        if (state.value.paused != practiceWasPaused) setPaused(practiceWasPaused)
+    }
 
     override fun onLog(line: String) = main.post {
         android.util.Log.i("AirGestures", line)
