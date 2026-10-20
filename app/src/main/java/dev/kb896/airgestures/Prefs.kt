@@ -34,26 +34,47 @@ class Prefs(context: Context) {
     fun setAction(gesture: Gesture, id: String) =
         prefs.edit().putString("map.${gesture.key}", id).apply()
 
-    /** `gesture=action;…` plus `dial_up`/`dial_down` for the bridge. */
-    fun mapping(): String =
-        Gesture.entries.joinToString(";") { "${it.key}=${actionId(it)}" } +
-            ";dial_up=${dial.up};dial_down=${dial.down};hand=$hand"
+    /** The During calls layer: an action id, [Mappings.AS_USUAL] or [Mappings.NOTHING]. */
+    fun callActionId(gesture: Gesture): String =
+        prefs.getString("call.${gesture.key}", gesture.callDefault) ?: gesture.callDefault
+
+    fun setCallAction(gesture: Gesture, id: String) =
+        prefs.edit().putString("call.${gesture.key}", id).apply()
+
+    /** `gesture=action;…` plus `dial_up`/`dial_down` for the bridge, with the call layer while in a call. */
+    fun mapping(inCall: Boolean = CallWatch.inCall): String = Mappings.effective(
+        Gesture.entries.associateTo(LinkedHashMap()) { it.key to actionId(it) },
+        Gesture.entries.associate { it.key to callActionId(it) },
+        dial.up,
+        dial.down,
+        hand,
+        inCall,
+    )
+
+    /** Every action id a gesture can run, in or out of a call. */
+    private fun allIds() = Gesture.entries.flatMap { listOf(actionId(it), callActionId(it)) }
 
     /**
-     * A screen gesture or an app is mapped somewhere: both need the accessibility
-     * service (Android lets it open apps from the background).
+     * Something needs the accessibility service: a screen gesture, a tap, an app or the voice
+     * assistant (Android lets the service start those from the background).
      */
-    fun usesScreen() = Gesture.entries.any { actionId(it).let { id -> id.startsWith("screen.") || id.startsWith(APP_PREFIX) } }
+    fun usesScreen() = allIds().any { id ->
+        id.startsWith("screen.") || id.startsWith(APP_PREFIX) || id.startsWith(Tap.PREFIX) || id == Action.ASSISTANT.id
+    }
 
     /** An app is mapped somewhere (on Xiaomi it needs the background-windows permission). */
-    fun usesApps() = Gesture.entries.any { actionId(it).startsWith(APP_PREFIX) }
+    fun usesApps() = allIds().any { it.startsWith(APP_PREFIX) }
 
     /** Brightness is mapped somewhere (it needs Modify system settings). */
-    fun usesBrightness() = dial == DialChoice.BRIGHTNESS ||
-        Gesture.entries.any { action(it).id.startsWith("brightness.") }
+    fun usesBrightness() = dial == DialChoice.BRIGHTNESS || allIds().any { it.startsWith("brightness.") }
 
-    /** The dial seeks (it needs notification access to reach the playing app). */
-    fun usesMedia() = dial == DialChoice.SEEK
+    /** Notification access: the seek dial reaches the playing app through it, the notification gestures read or clear. */
+    fun usesNotifications() = dial == DialChoice.SEEK || usesNotificationGestures()
+
+    fun usesNotificationGestures() = allIds().any { it.startsWith("notification.") }
+
+    /** A call action is set in the During calls layer (it needs the Phone calls permission). */
+    fun usesCalls() = Gesture.entries.any { callActionId(it).startsWith("call.") }
 
     var associationId: Int
         get() = prefs.getInt("association", -1)

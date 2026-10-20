@@ -23,27 +23,46 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     RECENTS("screen.recents", "Recent apps", R.drawable.ic_layers),
     FLASHLIGHT("torch.toggle", "Flashlight on or off", R.drawable.ic_flashlight),
 
+    /** Stored as `tap:<x>,<y>`; the picker asks where. */
+    TAP(Tap.PREFIX, "Tap here", R.drawable.ic_crosshair),
+    ASSISTANT("assistant.voice", "Voice assistant", R.drawable.ic_mic),
+    DISMISS("notification.dismiss", "Dismiss notification", R.drawable.ic_bell_off),
+    READ("notification.read", "Read notification", R.drawable.ic_message_square_text),
+    AUTOMATION(Mappings.AUTOMATION, "Send to automation", R.drawable.ic_zap),
+
+    /** During calls only. */
+    ANSWER("call.answer", "Answer call", R.drawable.ic_phone),
+    /** During calls only: declines a ringing call, ends an active one. */
+    END_CALL("call.end", "Decline or hang up", R.drawable.ic_phone_off),
+
     /** Stored as `app:<package>`; the picker asks which app. */
     OPEN_APP(APP_PREFIX, "Open an app", R.drawable.ic_app_open);
 
+    /** Whether it belongs to the During calls picker only. */
+    val callOnly get() = this == ANSWER || this == END_CALL
+
     companion object {
-        fun of(id: String) = if (id.startsWith(APP_PREFIX)) OPEN_APP else entries.firstOrNull { it.id == id } ?: NONE
+        fun of(id: String) = when {
+            id.startsWith(APP_PREFIX) -> OPEN_APP
+            id.startsWith(Tap.PREFIX) -> TAP
+            else -> entries.firstOrNull { it.id == id } ?: NONE
+        }
     }
 }
 
 /**
  * The mappable gestures (the middle hold stays the controls toggle), with the
- * defaults mirroring the desktop layout.
+ * defaults mirroring the desktop layout, and what each does during a call by default.
  */
-enum class Gesture(val key: String, val label: String, val default: Action) {
+enum class Gesture(val key: String, val label: String, val default: Action, val callDefault: String = Mappings.AS_USUAL) {
     SWIPE_UP("swipe_up", "Swipe up", Action.PREVIOUS),
     SWIPE_DOWN("swipe_down", "Swipe down", Action.NEXT),
     SWIPE_LEFT("swipe_left", "Swipe left", Action.NONE),
     SWIPE_RIGHT("swipe_right", "Swipe right", Action.NONE),
     INDEX_TAP("index_tap", "Index tap", Action.PLAY_PAUSE),
-    INDEX_DOUBLE("index_double", "Index double tap", Action.NONE),
+    INDEX_DOUBLE("index_double", "Index double tap", Action.NONE, Action.ANSWER.id),
     MIDDLE_TAP("middle_tap", "Middle tap", Action.NONE),
-    MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE),
+    MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE, Action.END_CALL.id),
 }
 
 /** What pinch and turn does: one action per step each way. */

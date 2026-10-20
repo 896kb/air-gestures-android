@@ -21,6 +21,7 @@ class BandService : Service(), BandLink.Listener {
     private lateinit var link: BandLink
     private lateinit var actions: Actions
     private lateinit var prefs: Prefs
+    private lateinit var calls: CallWatch
     private val main = Handler(Looper.getMainLooper())
 
     override fun onCreate() {
@@ -28,6 +29,8 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this)
         link = BandLink(this, this)
+        // A call starting or ending swaps the During calls layer in or out.
+        calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
         // The app's Companion (the CDM link), not this class's companion object.
         dev.kb896.airgestures.Companion.observe(this)
         val notifications = getSystemService(NotificationManager::class.java)
@@ -66,6 +69,7 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onDestroy() {
         main.removeCallbacks(updateCheck)
+        calls.stop()
         link.stop()
         actions.close()
         instance = null
@@ -91,6 +95,14 @@ class BandService : Service(), BandLink.Listener {
         prefs.setAction(gesture, id)
         link.setMapping(prefs.mapping())
     }
+
+    fun setCallAction(gesture: Gesture, id: String) {
+        prefs.setCallAction(gesture, id)
+        link.setMapping(prefs.mapping())
+    }
+
+    /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
+    fun watchCalls() = calls.start()
 
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
@@ -231,5 +243,13 @@ class BandService : Service(), BandLink.Listener {
             Prefs(context).running = false
             context.stopService(Intent(context, BandService::class.java))
         }
+
+        /** Store a gesture's action, live on the band when the service runs. */
+        fun setAction(context: Context, gesture: Gesture, id: String) =
+            instance?.setAction(gesture, id) ?: Prefs(context).setAction(gesture, id)
+
+        /** Store what a gesture does during calls, live on the band when the service runs. */
+        fun setCallAction(context: Context, gesture: Gesture, id: String) =
+            instance?.setCallAction(gesture, id) ?: Prefs(context).setCallAction(gesture, id)
     }
 }

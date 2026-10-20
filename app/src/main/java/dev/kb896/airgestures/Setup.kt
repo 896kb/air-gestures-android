@@ -124,7 +124,7 @@ object Setup {
             })
         }
         // Only asked for when the dial seeks.
-        if (prefs.usesMedia()) {
+        if (prefs.usesNotifications()) {
             val media = MediaAccess.granted(context)
             add(Step(
                 "Notification access",
