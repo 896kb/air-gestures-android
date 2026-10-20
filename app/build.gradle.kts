@@ -54,4 +54,6 @@ android {
 dependencies {
     // JVM tests of the pure parts (Mappings.kt); not AndroidX.
     testImplementation("junit:junit:4.13.2")
+    // Android's org.json is only stubs on the JVM; the real one for the profile store's tests.
+    testImplementation("org.json:json:20240303")
 }
