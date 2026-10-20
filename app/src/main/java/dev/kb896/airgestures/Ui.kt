@@ -352,8 +352,8 @@ abstract class Screen : Activity() {
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
     }
 
-    /** A modal sheet in the picker's style: title, [body], Cancel and [action]. */
-    private fun sheet(title: String, body: View, action: String, onAction: () -> Boolean): android.app.Dialog {
+    /** A modal sheet in the picker's style: title, [body], Cancel (unless [cancel] is off) and [action]. */
+    fun sheet(title: String, body: View, action: String, cancel: Boolean = true, onAction: () -> Boolean): android.app.Dialog {
         val dialog = android.app.Dialog(this)
         val sheet = column(gap = 14f).apply {
             setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(18f))
@@ -366,7 +366,7 @@ abstract class Screen : Activity() {
             addView(body)
             addView(row(gap = 12f).apply {
                 gravity = Gravity.END
-                addView(pill("Cancel") { dialog.dismiss() }.first)
+                if (cancel) addView(pill("Cancel") { dialog.dismiss() }.first)
                 addView(pill(action) { if (onAction()) dialog.dismiss() }.first)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }

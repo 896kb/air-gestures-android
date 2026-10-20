@@ -30,12 +30,23 @@ abstract class GestureScreen : Screen() {
         }
     }
 
-    fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, onClick: (() -> Unit)?) =
+    fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, info: (() -> Unit)? = null, onClick: (() -> Unit)?) =
         row(gap = 12f).apply {
             setPadding(0, dpi(8f), 0, dpi(8f))
             addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
             addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
             addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
+            // (i): how this action is used (Send to automation's guide).
+            if (info != null) {
+                addView(android.widget.FrameLayout(context).apply {
+                    addView(icon(R.drawable.ic_info, 16f, Cb.INK_500), android.widget.FrameLayout.LayoutParams(dpi(16f), dpi(16f), android.view.Gravity.CENTER))
+                    layoutParams = android.widget.LinearLayout.LayoutParams(dpi(30f), dpi(30f))
+                    contentDescription = "How to use it"
+                    isClickable = true
+                    background = ripple(999f)
+                    setOnClickListener { info() }
+                })
+            }
             addView(icon(if (onClick != null) R.drawable.ic_chevron_right else R.drawable.ic_lock, 14f, Cb.INK_400))
             if (onClick != null) {
                 isClickable = true
@@ -50,13 +61,15 @@ abstract class GestureScreen : Screen() {
         for (gesture in Gesture.entries) {
             val id = prefs.actionId(gesture, profile)
             val action = Action.of(id)
-            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE) {
+            val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
+            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE, guide) {
                 pick(gesture, profile)
             })
         }
         val dial = prefs.dial(profile)
-        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE) { pickDial(profile) })
-        addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, null))
+        val dialGuide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
+        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, dialGuide) { pickDial(profile) })
+        addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, onClick = null))
     }
 
     /** The During calls rows: every gesture, As usual unless set. */
@@ -126,6 +139,10 @@ abstract class GestureScreen : Screen() {
                     pickScreen(mode, current) { onChosen(it.first()) }
                 }
                 Action.SEQUENCE -> pickSequence(current, onChosen)
+                Action.AUTOMATION -> {
+                    onChosen(action.id)
+                    automationGuide(firstTime = true)
+                }
                 else -> onChosen(action.id)
             }
         }
@@ -202,9 +219,73 @@ abstract class GestureScreen : Screen() {
         choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == current, it.icon) }) { index ->
             BandService.setDial(applicationContext, profile, DialChoice.entries[index])
             render()
+            if (DialChoice.entries[index] == DialChoice.AUTOMATION) automationGuide(firstTime = true)
         }
     }
 
     /** 0.5 s, 2 s, 1.2 s. */
     fun formatSeconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
+
+    /**
+     * How Send to automation reaches Tasker, MacroDroid or Home Assistant: the broadcast (to
+     * copy), what it carries, a recipe for each, a test, and the full guide. Shown once when
+     * the action is first picked ([firstTime]), and from any row's (i).
+     */
+    fun automationGuide(firstTime: Boolean = false) {
+        val prefs = getSharedPreferences("air-gestures", MODE_PRIVATE)
+        if (firstTime && prefs.getBoolean(GUIDE_SEEN, false)) return
+        prefs.edit().putBoolean(GUIDE_SEEN, true).apply()
+        fun text(size: Float, value: String, color: Int = Cb.INK_700, font: Int = R.font.geist_regular) =
+            Cb.text(this, size, font, color).apply {
+                text = value
+                setLineSpacing(0f, 1.3f)
+            }
+        val body = column(gap = 10f).apply {
+            addView(text(14f, "The gesture sends this to every app listening, and does nothing else itself:", Cb.INK_500))
+            addView(row(gap = 8f).apply {
+                setPadding(dpi(12f), dpi(8f), dpi(6f), dpi(8f))
+                background = Cb.hairlineCard(context, 10f)
+                addView(text(13f, Actions.AUTOMATION_ACTION, Cb.INK_900, R.font.geist_mono_medium), weighted())
+                addView(pill("Copy", R.drawable.ic_copy) {
+                    getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("Air Gestures broadcast", Actions.AUTOMATION_ACTION))
+                    android.widget.Toast.makeText(this@GestureScreen, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+                }.first)
+            })
+            addView(text(14f, "With gesture = which one (swipe_left, middle_tap, … or dial for pinch and turn), and for the dial steps = how far it turned (+3, −2).", Cb.INK_500))
+            addView(Cb.label(context, "Tasker"))
+            addView(text(14f, "New profile, Event, System, Intent Received. Action: paste the line above. In the task, %gesture and %steps hold the values."))
+            addView(Cb.label(context, "MacroDroid"))
+            addView(text(14f, "Trigger: Intent Received, the same action. Tick the extras gesture and steps to get them as variables."))
+            addView(Cb.label(context, "Home Assistant"))
+            addView(text(14f, "In its app: Settings, Companion app, Manage sensors, Last update trigger: turn it on and add the action as a new intent, then force-stop the app once. Automations can then trigger on the event android.intent_received; the extras are in its data."))
+            addView(row(gap = 10f).apply {
+                addView(pill("Send a test") {
+                    sendBroadcast(android.content.Intent(Actions.AUTOMATION_ACTION).putExtra("gesture", "test"))
+                    android.widget.Toast.makeText(this@GestureScreen, "Sent gesture = test", android.widget.Toast.LENGTH_SHORT).show()
+                }.first)
+                addView(pill("Full guide") {
+                    startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(GUIDE_URL)))
+                }.first)
+            })
+        }
+        // Long on a small screen: the body scrolls inside the sheet.
+        val scroll = object : android.widget.ScrollView(this) {
+            override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+                val most = (resources.displayMetrics.heightPixels * .62f).toInt()
+                super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(most, MeasureSpec.AT_MOST))
+            }
+        }.apply {
+            isVerticalScrollBarEnabled = false
+            addView(body)
+        }
+        sheet("Send to automation", scroll, "Close", cancel = false) { true }
+    }
+
+    companion object {
+        private const val GUIDE_SEEN = "automation.guide_seen"
+
+        /** The full guide on the site (with the release). */
+        const val GUIDE_URL = "https://band.896.ro/automation/"
+    }
 }

@@ -4,7 +4,7 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
-## Unreleased
+## 0.7.7
 
 - Needs Android 13 or newer. Below that the app didn't work properly before either.
 - On Android 13 to 15, linking the band no longer closes the app, and the band coming
@@ -13,7 +13,8 @@ fails without one.
   it's for), open the voice assistant, read the newest notification aloud (only the app
   and title while the phone is locked) or dismiss it, and send the gesture to Tasker,
   MacroDroid or Home Assistant (broadcast `dev.kb896.airgestures.GESTURE`, extra
-  `gesture`).
+  `gesture`). Picking it shows how to set each of them up, with a test to try it, and
+  the guide is on band.896.ro too.
 - Pinch and turn can go to automation too, for dimming a smart light: `gesture` is
   `dial` and `steps` the steps turned (+ up, − down), sent at most every 250 ms so a
   quick turn doesn't flood the light.
