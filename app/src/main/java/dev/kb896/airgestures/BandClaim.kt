@@ -15,7 +15,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -117,8 +116,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
         }
         bonding = receiver
         val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else context.registerReceiver(receiver, filter)
+        context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         if (!device.createBond()) return bonded(device, false)
         bondTimeout = Runnable { bonded(device, false) }.also { main.postDelayed(it, BOND_MS) }
     }

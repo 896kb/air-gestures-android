@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Message
 import android.view.View
@@ -87,9 +86,7 @@ class MetaSignIn : Activity() {
                 insets
             }
         })
-        if (Build.VERSION.SDK_INT >= 33) {
-            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
-        }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         thread(name = "meta-signin") {
             val start = runCatching { JSONObject(Bridge.signinStart()) }
             runOnUiThread {
@@ -109,9 +106,6 @@ class MetaSignIn : Activity() {
         web.destroy()
         super.onDestroy()
     }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() = back()
 
     private fun back() {
         if (web.canGoBack()) web.goBack() else {

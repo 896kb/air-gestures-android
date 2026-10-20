@@ -14,8 +14,8 @@ android {
 
     defaultConfig {
         applicationId = "dev.kb896.airgestures"
-        // L2CAP connection-oriented channels need API 29.
-        minSdk = 29
+        // Android 13: L2CAP channels (29) and the companion link's AssociationInfo API (33).
+        minSdk = 33
         targetSdk = 36
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
         // Release builds take the tag (v0.3.9 → 0.3.9); a local build is the work after the last release.
