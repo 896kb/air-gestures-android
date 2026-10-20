@@ -1,24 +1,31 @@
 package dev.kb896.airgestures
 
 import android.accessibilityservice.AccessibilityService
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RadialGradient
+import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.PI
+import kotlin.math.cos
 
 /**
  * Picks the spot for "Tap here", over whatever app is open: first a bubble while the
  * user opens the app ("Open the app, then tap here"), then a full-screen layer with a
- * target to drag onto the spot. Accessibility overlays need no extra permission.
+ * glowing orb to drag onto the spot. Accessibility overlays need no extra permission.
  * [done] gets the spot as fractions of the screen, or null when cancelled.
  */
 class SpotPicker(
@@ -113,60 +120,147 @@ class SpotPicker(
         /** The target's centre, in screen pixels. */
         private var x = bounds.width() * (start?.first ?: .5f)
         private var y = bounds.height() * (start?.second ?: .5f)
-        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = dp(3f)
-            color = Cb.Signal.STOP.fill
+        /** The orb's radius; its glow reaches about three times as far. */
+        private val radius = dp(22f)
+        private val coral = Cb.Signal.STOP.fill
+
+        /** The soft coral light around the orb (breathes with [phase]). */
+        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(
+                0f, 0f, radius * 3f,
+                intArrayOf(withAlpha(coral, .55f), withAlpha(coral, .22f), withAlpha(coral, 0f)),
+                floatArrayOf(0f, .42f, 1f),
+                Shader.TileMode.CLAMP,
+            )
         }
-        private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = dp(6f)
-            color = 0xCCFFFFFF.toInt()
+
+        /** The orb: lit from the top left, peach to coral to a deeper coral, a little see-through. */
+        private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = RadialGradient(
+                -radius * .35f, -radius * .4f, radius * 1.45f,
+                intArrayOf(0xF2FFD9CF.toInt(), withAlpha(0xFFFF7A6E.toInt(), .92f), withAlpha(0xFFE5484D.toInt(), .9f)),
+                floatArrayOf(0f, .55f, 1f),
+                Shader.TileMode.CLAMP,
+            )
         }
-        private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cb.INK_900 }
+
+        /** A faint ring rippling out now and then. */
+        private val ripple = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1.5f)
+            color = coral
+        }
+        private val shine = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x73FFFFFF }
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1f)
+            color = 0x40FFFFFF
+        }
+        /** Where the tap lands, exactly. */
+        private val point = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+        private val pointEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = dp(1f)
+            color = withAlpha(Cb.INK_900, .6f)
+        }
+        private val oval = RectF()
+
+        /** 0…1, round and round: the glow breathes, the ripple spreads. */
+        private var phase = 0f
+        /** 0 at rest, 1 while the finger is on the orb (bigger, brighter). */
+        private var lift = 0f
+        private var held = false
+        private val clock = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 2400
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                phase = it.animatedValue as Float
+                lift += ((if (held) 1f else 0f) - lift) * .18f
+                invalidate()
+            }
+        }
 
         init {
             setWillNotDraw(false)
             setBackgroundColor(0x26111214) // 15% ink
             addView(pills(
                 Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
-                    text = "Drag the target onto the spot"
+                    text = "Drag the orb onto the spot"
                     setPadding(dpi(16f), dpi(10f), dpi(16f), dpi(10f))
                     background = GradientDrawable().apply { cornerRadius = dp(999f); setColor(Cb.PAGE) }
                 },
             ), LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(56f) })
+            // Cancel and Set on one raised bar in the page tone, so they read as the app's.
             addView(pills(
                 pill(context, "Cancel", main = false) { cancel() },
                 pill(context, "Set", main = true) { finish(x / bounds.width() to y / bounds.height()) },
-            ), LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dpi(56f) })
+            ).apply {
+                setPadding(dpi(6f), dpi(6f), dpi(6f), dpi(6f))
+                background = GradientDrawable().apply { cornerRadius = dp(999f); setColor(Cb.PAGE) }
+                elevation = dp(10f)
+            }, LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dpi(56f) })
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            clock.start()
+        }
+
+        override fun onDetachedFromWindow() {
+            clock.cancel()
+            super.onDetachedFromWindow()
         }
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             // The window covers the whole screen from its corner, so screen pixels are view pixels.
             val at = IntArray(2).also(::getLocationOnScreen)
-            val cx = x - at[0]
-            val cy = y - at[1]
-            val r = dp(26f)
-            canvas.drawCircle(cx, cy, r, halo)
-            canvas.drawCircle(cx, cy, r, ring)
-            canvas.drawLine(cx - r * 1.5f, cy, cx - r * .5f, cy, ring)
-            canvas.drawLine(cx + r * .5f, cy, cx + r * 1.5f, cy, ring)
-            canvas.drawLine(cx, cy - r * 1.5f, cx, cy - r * .5f, ring)
-            canvas.drawLine(cx, cy + r * .5f, cx, cy + r * 1.5f, ring)
-            canvas.drawCircle(cx, cy, dp(2.5f), dot)
+            canvas.save()
+            canvas.translate(x - at[0], y - at[1])
+            val breath = (1f - cos(phase * 2f * PI.toFloat())) / 2f
+            val grow = 1f + .12f * lift
+
+            // The glow: breathing a little, stronger while held.
+            val glowScale = grow * (1f + .1f * breath)
+            canvas.save()
+            canvas.scale(glowScale, glowScale)
+            glow.alpha = (190 + 65 * lift).toInt()
+            canvas.drawCircle(0f, 0f, radius * 3f, glow)
+            canvas.restore()
+
+            // The ripple: out from the orb's edge and fading, once a cycle.
+            ripple.alpha = ((1f - phase) * 110).toInt()
+            canvas.drawCircle(0f, 0f, radius * grow * (1f + phase * 1.6f), ripple)
+
+            canvas.save()
+            canvas.scale(grow, grow)
+            canvas.drawCircle(0f, 0f, radius, core)
+            canvas.drawCircle(0f, 0f, radius - rim.strokeWidth / 2f, rim)
+            oval.set(-radius * .62f, -radius * .72f, -radius * .08f, -radius * .36f)
+            canvas.drawOval(oval, shine)
+            canvas.restore()
+
+            canvas.drawCircle(0f, 0f, dp(3f), point)
+            canvas.drawCircle(0f, 0f, dp(3f), pointEdge)
+            canvas.restore()
         }
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    held = true
                     x = event.rawX.coerceIn(0f, bounds.width().toFloat())
                     y = event.rawY.coerceIn(0f, bounds.height().toFloat())
                     invalidate()
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> held = false
             }
             return true
         }
     }
 }
+
+/** [color] with its alpha set to [alpha] (0…1). */
+private fun withAlpha(color: Int, alpha: Float) = (color and 0x00FFFFFF) or ((alpha * 255).toInt() shl 24)

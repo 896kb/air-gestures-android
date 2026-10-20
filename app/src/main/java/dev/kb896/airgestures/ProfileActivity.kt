@@ -24,6 +24,14 @@ class ProfileActivity : GestureScreen() {
             addView(card("Apps", apps))
             addView(actions)
         }, title = Profiles.load(this).profile(profileId)?.name ?: "Profile")
+        titleButton(R.drawable.ic_pencil, "Rename") {
+            val name = Profiles.load(this).profile(profileId)?.name ?: return@titleButton
+            ask("Rename", name, "Save") { new ->
+                Profiles.update(applicationContext) { it.renamed(profileId, new) }
+                BandService.instance?.remap()
+                render()
+            }
+        }
     }
 
     override fun onResume() {
@@ -55,13 +63,6 @@ class ProfileActivity : GestureScreen() {
         })
 
         actions.removeAllViews()
-        actions.addView(pill("Rename") {
-            ask("Rename", profile.name, "Save") { name ->
-                Profiles.update(applicationContext) { it.renamed(profileId, name) }
-                BandService.instance?.remap()
-                render()
-            }
-        }.first)
         if (list.profiles.size > 1) {
             actions.addView(pill("Delete") {
                 confirm(

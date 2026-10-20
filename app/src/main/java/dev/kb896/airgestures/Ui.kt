@@ -86,8 +86,29 @@ abstract class Screen : Activity() {
             background = ripple(999f)
             setOnClickListener { finish() }
         })
-        titleView = Cb.text(context, 24f, R.font.geist_bold, Cb.INK_900, -.03f).apply { text = title }
-        addView(titleView, weighted())
+        titleView = Cb.text(context, 24f, R.font.geist_bold, Cb.INK_900, -.03f).apply {
+            text = title
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        // The title takes its own width, so an edit button can sit right after it.
+        addView(titleView, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT).apply { weight = 0f; width = LinearLayout.LayoutParams.WRAP_CONTENT })
+        titleRow = this
+    }
+
+    private var titleRow: LinearLayout? = null
+
+    /** A small button right after the title (a profile's rename), before the rest of the row. */
+    fun titleButton(iconRes: Int, description: String, onClick: () -> Unit) {
+        val row = titleRow ?: return
+        row.addView(FrameLayout(this).apply {
+            addView(icon(iconRes, 18f, Cb.INK_500), FrameLayout.LayoutParams(dpi(18f), dpi(18f), Gravity.CENTER))
+            layoutParams = LinearLayout.LayoutParams(dpi(36f), dpi(36f))
+            contentDescription = description
+            isClickable = true
+            background = ripple(999f)
+            setOnClickListener { onClick() }
+        })
     }
 
     /** A sub-screen's title, to change it later (a renamed profile). */
