@@ -262,7 +262,8 @@ class SetupActivity : Screen() {
             log(
                 runCatching {
                     val uri = data?.data ?: throw IllegalStateException("no file chosen")
-                    contentResolver.openOutputStream(uri, "wt")?.use { it.write(Backup.write(settings()).toByteArray()) }
+                    // A new file: plain "w", which every document provider takes.
+                    contentResolver.openOutputStream(uri, "w")?.use { it.write(Backup.write(settings()).toByteArray()) }
                         ?: throw IllegalStateException("couldn't open the file")
                     "backed up the settings"
                 }.getOrElse { "backup failed: ${it.message}" },
@@ -270,7 +271,10 @@ class SetupActivity : Screen() {
         }
         if (requestCode == RESTORE && resultCode == RESULT_OK) {
             val text = runCatching {
-                contentResolver.openInputStream(data?.data ?: return@runCatching null)?.use { it.readBytes().decodeToString() }
+                // A backup is a few kilobytes; anything past 1 MB isn't one (and isn't read whole).
+                contentResolver.openInputStream(data?.data ?: return@runCatching null)?.use { input ->
+                    input.readNBytes(1_000_001).takeIf { it.size <= 1_000_000 }?.decodeToString()
+                }
             }.getOrNull()
             val settings = text?.let(Backup::read)
             if (settings == null) {

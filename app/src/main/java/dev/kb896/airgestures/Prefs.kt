@@ -25,6 +25,15 @@ class Prefs(context: Context) {
 
     fun setDial(profile: String, dial: DialChoice) = Profiles.update(context) { it.withDial(profile, dial.key) }
 
+    /** A practice lesson is open (its controls state is [practiceWasPaused]). */
+    var practising: Boolean
+        get() = prefs.getBoolean("practice.on", false)
+        set(value) = prefs.edit().putBoolean("practice.on", value).apply()
+
+    var practiceWasPaused: Boolean
+        get() = prefs.getBoolean("practice.was_paused", false)
+        set(value) = prefs.edit().putBoolean("practice.was_paused", value).apply()
+
     /** The service should keep the band connected. */
     var running: Boolean
         get() = prefs.getBoolean("running", false)

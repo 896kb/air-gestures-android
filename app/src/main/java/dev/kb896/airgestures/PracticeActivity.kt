@@ -30,6 +30,8 @@ class PracticeActivity : Screen() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A rotation or a fold keeps the lesson where it was.
+        at = savedInstanceState?.getInt("step") ?: 0
         val active = Profiles.active(this)
         steps = Lessons.steps(Profiles.load(this).profiles.size, dial = DialChoice.of(active.dial) != DialChoice.NONE)
         count = Cb.label(this, "")
@@ -46,6 +48,11 @@ class PracticeActivity : Screen() {
             }))
             addView(buttons, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }, title = "Practice")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("step", at)
     }
 
     override fun onResume() {

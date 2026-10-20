@@ -47,6 +47,11 @@ class BandService : Service(), BandLink.Listener {
         instance = this
         main.post(updateCheck)
         Alerts.scheduleReminder(this)
+        // A lesson the app never closed (it was killed): the controls go back as they were.
+        if (prefs.practising) {
+            prefs.practising = false
+            prefs.paused = prefs.practiceWasPaused
+        }
     }
 
     /** Look for a newer release now and then while the band is kept connected. */
@@ -88,10 +93,15 @@ class BandService : Service(), BandLink.Listener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     fun setPaused(paused: Boolean) {
+        // Asked for (button, tile, widget, notification, a lesson): not a middle hold.
+        commandedAt = android.os.SystemClock.uptimeMillis()
         prefs.paused = paused
         link.setPaused(paused)
         pausedChanged(paused)
     }
+
+    /** When the controls were last switched by the app rather than by the band. */
+    private var commandedAt = 0L
 
     /** Record the controls' state; the status notification shows it. */
     private fun pausedChanged(paused: Boolean) {
@@ -180,7 +190,10 @@ class BandService : Service(), BandLink.Listener {
     override fun onStatus(status: JSONObject) = main.post {
         var paused = status.optBoolean("paused")
         val lesson = practice
-        if (lesson != null && paused) {
+        // A flip to off within a moment of the app switching the controls is that switch
+        // (or a late report of it), not the middle hold.
+        val ours = android.os.SystemClock.uptimeMillis() - commandedAt < 1_500
+        if (lesson != null && paused && !ours) {
             // The middle hold in a lesson: it counts, but the controls stay on.
             lesson.held()
             link.setPaused(false)
@@ -226,19 +239,24 @@ class BandService : Service(), BandLink.Listener {
     /** Set while a lesson is open: gestures are reported to it and run nothing. */
     var practice: Practice? = null
         private set
-    private var practiceWasPaused = false
-
-    /** Start a lesson: the controls go on (the band reports more), and come back as they were after. */
+    /**
+     * Start a lesson: the controls go on (the band reports more), and come back as they were
+     * after. How they were is kept in the prefs, so a service restarted mid-lesson keeps it.
+     */
     fun startPractice(lesson: Practice) {
-        if (practice == null) practiceWasPaused = state.value.paused
+        if (!prefs.practising) {
+            prefs.practiceWasPaused = state.value.paused
+            prefs.practising = true
+        }
         practice = lesson
         if (state.value.paused) setPaused(false)
     }
 
     fun endPractice() {
-        if (practice == null) return
         practice = null
-        if (state.value.paused != practiceWasPaused) setPaused(practiceWasPaused)
+        if (!prefs.practising) return
+        prefs.practising = false
+        if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused)
     }
 
     override fun onLog(line: String) = main.post {
