@@ -10,13 +10,16 @@ import android.widget.LinearLayout
 class GesturesActivity : GestureScreen() {
     private lateinit var profiles: LinearLayout
     private lateinit var calls: LinearLayout
+    private lateinit var sequences: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         profiles = column(gap = 8f)
         calls = column()
+        sequences = column(gap = 8f)
         show(pageColumn().apply {
             addView(card("Profiles", profiles))
+            addView(card("Sequences", sequences))
             addView(card("During calls", column(gap = 8f).apply {
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
                     text = "While the phone rings or a call is on, in every profile. Phone calls only; WhatsApp and other app calls can't be answered by another app."
@@ -91,6 +94,27 @@ class GesturesActivity : GestureScreen() {
                 render()
             }.first))
         }
+        sequences.removeAllViews()
+        val library = Profiles.sequences(this).sequences
+        sequences.addView(column().apply {
+            for (sequence in library) {
+                val steps = sequence.steps.count { Sequences.waitMs(it) == null }
+                addView(navRow(R.drawable.ic_list_ordered, sequence.name, detail = if (steps == 1) "1 step" else "$steps steps") {
+                    SequenceActivity.open(context, sequence.id)
+                })
+            }
+        })
+        if (library.isEmpty()) {
+            sequences.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {
+                text = "Several actions in a row on one gesture, with waits between: build one, or record what you do in an app."
+            })
+        }
+        sequences.addView(row().apply {
+            addView(pill("New sequence", R.drawable.ic_list_ordered) {
+                val made = Profiles.updateSequences(applicationContext) { it.added().first }.sequences.last()
+                SequenceActivity.open(context, made.id)
+            }.first)
+        })
         calls.removeAllViews()
         calls.addView(callRows())
     }

@@ -404,6 +404,8 @@ class SpotPicker(
     private inner class RecordLayer(context: Context) : Layer(context, "● REC  Don't type while recording") {
         private val touches = mutableListOf<Pair<Strokes.Path, Long>>()
         private val points = mutableListOf<Strokes.Point>()
+        /** A recorded touch is being passed on: whatever reaches the layer now is that replay, not the user. */
+        private var replaying = false
         private var downAt = 0L
         private val trail = Path()
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -431,6 +433,7 @@ class SpotPicker(
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (replaying) return true
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     points.clear()
@@ -445,12 +448,20 @@ class SpotPicker(
                 // A tap can be a single instant: give it a moment so it has a duration.
                 val path = Strokes.Path(points.toList()).let { if (it.duration > 0) it else Strokes.Path(it.points + it.points.last().copy(t = 40)) }
                 touches.add(path to downAt)
-                // Let the app have it: through the layer, as it was done.
+                // Let the app have it, through the layer, as it was done. The window manager takes
+                // a moment to let touches through: replaying at once would land on the layer
+                // again (and be recorded again); so does catching touches the moment it ends.
+                replaying = true
                 touchable(false)
-                service.stroke(path) {
-                    trail.reset()
-                    touchable(true)
-                }
+                postDelayed({
+                    service.stroke(path) {
+                        postDelayed({
+                            trail.reset()
+                            touchable(true)
+                            replaying = false
+                        }, 120)
+                    }
+                }, 80)
             }
             return true
         }

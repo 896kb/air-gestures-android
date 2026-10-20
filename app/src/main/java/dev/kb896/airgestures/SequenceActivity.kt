@@ -123,9 +123,10 @@ class SequenceActivity : GestureScreen() {
 
     /** Run it now, as the gesture would (the app steps aside so its taps land in the other apps). */
     private fun tryIt() {
-        val run = Intent(this, SequenceRunner::class.java).putExtra(EXTRA_SEQUENCE, sequenceId)
+        val run = Intent(this, SequenceRunner::class.java).putExtra(EXTRA_SEQUENCE, sequenceId).setPackage(packageName)
         moveTaskToBack(true)
-        sendBroadcast(run.setPackage(packageName))
+        // Give the app behind a moment to come forward, so the first tap lands in it.
+        android.os.Handler(mainLooper).postDelayed({ applicationContext.sendBroadcast(run) }, 700)
     }
 
     companion object {
