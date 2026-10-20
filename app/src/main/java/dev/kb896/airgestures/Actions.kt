@@ -1,9 +1,14 @@
 package dev.kb896.airgestures
 
+import android.Manifest
+import android.app.KeyguardManager
+import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSessionManager
@@ -12,6 +17,9 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.service.notification.StatusBarNotification
+import android.speech.tts.TextToSpeech
+import android.telecom.TelecomManager
 import android.view.KeyEvent
 
 /** Runs the bridge's action names on the phone. */
@@ -44,8 +52,12 @@ class Actions(private val context: Context) {
         if (torchCamera != null) cameras.registerTorchCallback(torchWatch, Handler(Looper.getMainLooper()))
     }
 
-    /** Stop following the flash (the service is going away). */
-    fun close() = cameras.unregisterTorchCallback(torchWatch)
+    /** Stop following the flash and the speech engine (the service is going away). */
+    fun close() {
+        cameras.unregisterTorchCallback(torchWatch)
+        tts?.shutdown()
+        tts = null
+    }
 
     /** Returns a line for the activity log when the action couldn't run. */
     fun run(action: String): String? {
@@ -64,7 +76,17 @@ class Actions(private val context: Context) {
             "torch.toggle" -> return torch()
             "dial.seek_forward" -> return seek(+SEEK_STEP)
             "dial.seek_back" -> return seek(-SEEK_STEP)
-            else -> return if (action.startsWith(APP_PREFIX)) open(action.removePrefix(APP_PREFIX)) else "unknown action $action"
+            "assistant.voice" -> return assistant()
+            "notification.dismiss" -> return dismiss()
+            "notification.read" -> return read()
+            "call.answer" -> return call(answer = true)
+            "call.end" -> return call(answer = false)
+            else -> return when {
+                action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
+                action.startsWith(Tap.PREFIX) -> tap(action)
+                action.startsWith("${Mappings.AUTOMATION}:") -> automation(action.substringAfter(':'))
+                else -> "unknown action $action"
+            }
         }
         return null
     }
@@ -136,6 +158,107 @@ class Actions(private val context: Context) {
         return runCatching { touch.startActivity(launch) }.exceptionOrNull()?.let { "couldn't open $packageName" }
     }
 
+    private fun tap(action: String): String? {
+        val touch = TouchService.instance ?: return "tap here needs screen gestures (Setup)"
+        val (x, y) = Tap.parse(action) ?: return "the tap spot is broken; pick it again"
+        touch.tap(x, y)
+        return null
+    }
+
+    /** The default assistant: the voice command screen, else the assist app. */
+    private fun assistant(): String? {
+        val touch = TouchService.instance ?: return "the voice assistant needs screen gestures (Setup)"
+        if (touch.startFromBackground(Intent(Intent.ACTION_VOICE_COMMAND))) return null
+        return if (touch.startFromBackground(Intent(Intent.ACTION_ASSIST))) null else "no voice assistant answered"
+    }
+
+    /** The newest notification the user could swipe away (see [Notes.newest]). */
+    private fun newest(listener: MediaAccess): StatusBarNotification? {
+        val active = runCatching { listener.activeNotifications }.getOrNull() ?: return null
+        val pick = Notes.newest(active.map {
+            Notes.Note(
+                it.key,
+                it.postTime,
+                it.isClearable,
+                it.isOngoing,
+                ours = it.packageName == context.packageName,
+                emptySummary = it.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0 &&
+                    it.notification.extras.getCharSequence(Notification.EXTRA_TEXT).isNullOrBlank(),
+            )
+        }) ?: return null
+        return active.first { it.key == pick.key }
+    }
+
+    private fun dismiss(): String? {
+        val listener = MediaAccess.instance ?: return "notification gestures need notification access (Setup)"
+        val note = newest(listener) ?: return "no notifications"
+        listener.cancelNotification(note.key)
+        return null
+    }
+
+    /** App, title and text aloud; only app and title while the phone is locked. */
+    private fun read(): String? {
+        val listener = MediaAccess.instance ?: return "notification gestures need notification access (Setup)"
+        val note = newest(listener) ?: return "no notifications"
+        val extras = note.notification.extras
+        val app = runCatching {
+            context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(note.packageName, 0)).toString()
+        }.getOrDefault(note.packageName)
+        val locked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        speak(Speech.sentence(
+            app,
+            extras.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
+            (extras.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString(),
+            locked,
+        ))
+        return null
+    }
+
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var pendingSpeech: String? = null
+
+    /** One engine for the service's life; the first sentence waits for it to start. */
+    private fun speak(text: String) {
+        if (ttsReady) return say(text)
+        pendingSpeech = text
+        if (tts == null) {
+            tts = TextToSpeech(context) { status ->
+                ttsReady = status == TextToSpeech.SUCCESS
+                if (ttsReady) pendingSpeech?.let(::say)
+                pendingSpeech = null
+            }.apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+            }
+        }
+    }
+
+    private fun say(text: String) {
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "notification")
+    }
+
+    /** Answer the ringing call, or decline it / hang up (Android's endCall does both). */
+    private fun call(answer: Boolean): String? {
+        if (context.checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED) {
+            return "call gestures need the Phone calls permission (Setup)"
+        }
+        val telecom = context.getSystemService(TelecomManager::class.java)
+        @Suppress("DEPRECATION")
+        if (answer) telecom.acceptRingingCall() else if (!telecom.endCall()) return "no call to end"
+        return null
+    }
+
+    /** For Tasker, MacroDroid, Home Assistant…: the gesture's name, nothing else. */
+    private fun automation(gesture: String): String? {
+        context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", gesture))
+        return null
+    }
+
     /** Media volume, with the system volume panel as the on-screen feedback. */
     private fun volume(direction: Int) =
         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
@@ -164,5 +287,8 @@ class Actions(private val context: Context) {
 
         /** One dial step of playback position. */
         const val SEEK_STEP = 5_000L
+
+        /** The broadcast "Send to automation" sends, with the gesture's name in `gesture`. */
+        const val AUTOMATION_ACTION = "dev.kb896.airgestures.GESTURE"
     }
 }

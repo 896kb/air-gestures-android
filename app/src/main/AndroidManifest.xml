@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+    <!-- During calls: whether the phone rings or is in a call, and answering / ending it. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <!-- The brightness dial. -->
     <uses-permission
         android:name="android.permission.WRITE_SETTINGS"
@@ -87,11 +90,12 @@
                 android:resource="@xml/touch_service" />
         </service>
 
-        <!-- Notification access, only to steer the playing app (the playback-position dial). -->
+        <!-- Notification access: steering the playing app (the playback-position dial), and the
+             newest notification, read or cleared only when a notification gesture is made. -->
         <service
             android:name=".MediaAccess"
             android:exported="true"
-            android:label="${appLabel} playback position"
+            android:label="${appLabel} media and notifications"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
