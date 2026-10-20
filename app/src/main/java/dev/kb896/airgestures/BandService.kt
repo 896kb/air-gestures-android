@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.widget.Toast
 import org.json.JSONObject
 
 /**
@@ -29,6 +30,7 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this)
         link = BandLink(this, this)
+        showProfile()
         // A call starting or ending swaps the During calls layer in or out.
         calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
         // The app's Companion (the CDM link), not this class's companion object.
@@ -92,7 +94,35 @@ class BandService : Service(), BandLink.Listener {
     }
 
     /** Send the mapping in force to the band again (a profile, call or setting changed). */
-    fun remap() = link.setMapping(prefs.mapping())
+    fun remap() {
+        link.setMapping(prefs.mapping())
+        showProfile()
+    }
+
+    /** The profile's name in the state and the notification, while there's more than one. */
+    private fun showProfile() {
+        val list = Profiles.load(this)
+        val name = list.active(Profiles.foreground).name.takeIf { list.profiles.size > 1 }
+        if (name != state.value.profile) {
+            state.update { copy(profile = name) }
+            refreshNotification()
+        }
+    }
+
+    /** A triple tap: the next (+1) or previous (−1) profile, unless the app in front has its own. */
+    fun profileStep(by: Int): String? {
+        if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
+        switched(Profiles.update(this) { it.step(by) }.active(Profiles.foreground))
+        return null
+    }
+
+    /** Another profile is in force: the band gets it, and the user is told which. */
+    private fun switched(profile: Profile) {
+        remap()
+        Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
+        if (Profiles.speak(this)) actions.announce(profile.name)
+        onLog("profile: ${profile.name}")
+    }
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
     fun watchCalls() = calls.start()
@@ -148,7 +178,7 @@ class BandService : Service(), BandLink.Listener {
             s.phase == Phase.STOPPED -> "Stopped"
             else -> "Looking for the band"
         }
-        val text = listOfNotNull(s.band, s.battery?.let { "$it %" }).joinToString(" · ")
+        val text = listOfNotNull(s.band, s.battery?.let { "$it %" }, s.profile).joinToString(" · ")
         // The launcher's own intent, so the app comes back as it was (not a second Home on top).
         val launch = Intent(this, MainActivity::class.java)
             .setAction(Intent.ACTION_MAIN)
@@ -186,6 +216,8 @@ class BandService : Service(), BandLink.Listener {
         val log: List<String> = emptyList(),
         /** A claim ([BandClaim]) is running; the service is off meanwhile. */
         val claiming: Boolean = false,
+        /** The profile in force; null while there's only one (nothing to tell apart). */
+        val profile: String? = null,
     )
 
     /** A tiny main-thread observable (no AndroidX in this app). */
@@ -242,6 +274,18 @@ class BandService : Service(), BandLink.Listener {
         fun setCallAction(context: Context, gesture: Gesture, id: String) {
             Prefs(context).setCallAction(gesture, id)
             instance?.remap()
+        }
+
+        /**
+         * The accessibility service saw [pkg] come to the front: if that changes the profile
+         * in force (into or out of an app's own), the band gets it and the user is told.
+         */
+        fun foreground(context: Context, pkg: String) {
+            val list = Profiles.load(context)
+            val before = list.active(Profiles.foreground)
+            Profiles.foreground = pkg
+            val after = list.active(pkg)
+            if (after.id != before.id) instance?.switched(after)
         }
 
         fun setDial(context: Context, profile: String, dial: DialChoice) {

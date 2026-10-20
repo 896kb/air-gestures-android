@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Path
+import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 
 /**
@@ -11,7 +12,8 @@ import android.view.accessibility.AccessibilityEvent
  * a swipe through the middle of the screen, a tap at a chosen spot, or Back /
  * Home / Recents. It also opens mapped apps and the voice assistant, which Android
  * allows an accessibility service from the background, and shows the overlay that
- * picks a tap spot. It performs gestures only; it reads nothing on screen.
+ * picks a tap spot. For per-app profiles it notices which app is in front (the
+ * package name only). It performs gestures only; it reads nothing on screen.
  */
 class TouchService : AccessibilityService() {
     override fun onServiceConnected() {
@@ -30,7 +32,33 @@ class TouchService : AccessibilityService() {
         return super.onUnbind(intent)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    /**
+     * Which app is in front, for per-app profiles: only the package of a window that came
+     * up, never its content. The notification shade, the keyboard and system pop-ups don't
+     * count, so they don't flip the profile; the home screen does (leaving an app).
+     */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        if (counts(pkg)) BandService.foreground(this, pkg)
+    }
+
+    private val counted = mutableMapOf<String, Boolean>()
+
+    private fun counts(pkg: String): Boolean {
+        if (pkg == "com.android.systemui") return false
+        val keyboard = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.substringBefore('/')
+        if (pkg == keyboard) return false
+        return counted.getOrPut(pkg) {
+            pkg == packageName || pkg == home() || packageManager.getLaunchIntentForPackage(pkg) != null
+        }
+    }
+
+    private fun home() = packageManager.resolveActivity(
+        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+        0,
+    )?.activityInfo?.packageName
     override fun onInterrupt() = Unit
 
     /** A finger moving up (content scrolls down) or down, over 40% of the screen's height. */

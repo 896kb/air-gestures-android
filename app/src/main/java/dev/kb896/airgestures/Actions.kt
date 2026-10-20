@@ -82,6 +82,8 @@ class Actions(private val context: Context) {
             "notification.read" -> return read()
             "call.answer" -> return call(answer = true)
             "call.end" -> return call(answer = false)
+            "profile.next" -> return BandService.instance?.profileStep(+1)
+            "profile.previous" -> return BandService.instance?.profileStep(-1)
             else -> return when {
                 action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
                 action.startsWith(Tap.PREFIX) -> tap(action)
@@ -213,6 +215,9 @@ class Actions(private val context: Context) {
             locked,
         ))
     }
+
+    /** Say [text] aloud (a profile's name), in the same voice as a read notification. */
+    fun announce(text: String) = speak(text)
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
