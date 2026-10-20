@@ -8,8 +8,7 @@
     <!-- Finding the band by its advertised name; no location is derived from scans. -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation"
-        tools:targetApi="s" />
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- The Meta sign-in and the band claim (Meta's servers). -->
     <uses-permission android:name="android.permission.INTERNET" />
