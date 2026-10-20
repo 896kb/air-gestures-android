@@ -4,6 +4,16 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
+## Unreleased
+
+- Needs Android 13 or newer. Below that the app didn't work properly before either.
+- On Android 13 to 15, linking the band no longer closes the app, and the band coming
+  into range wakes the app again (that wake-up worked on Android 16 only).
+- Home is shorter: Gestures, Setup and Activity have their own screens. Home shows how
+  many Setup steps are left.
+- A debug build installs beside the release (as "Air Gestures (dev)") instead of over it.
+- The update card shows the whole first line of the release notes.
+
 ## 0.4.0
 
 - A new package name, dev.kb896.airgestures, the same family as my other apps and the

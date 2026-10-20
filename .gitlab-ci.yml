@@ -70,6 +70,8 @@ test:
   script:
     - (cd rust && cargo test)
     - ./gradlew --no-daemon :app:testDebugUnitTest
+    # Lint errors (calls above minSdk, missing permissions) fail the pipeline; warnings don't.
+    - ./gradlew --no-daemon :app:lintDebug
   artifacts:
     when: always
     reports:
