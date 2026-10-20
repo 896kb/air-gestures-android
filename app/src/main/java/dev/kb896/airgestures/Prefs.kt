@@ -76,10 +76,17 @@ class Prefs(context: Context) {
         ) + if (list.profiles.size >= 2) ";triples=profiles" else ""
     }
 
-    /** Every action id a gesture can run, in any profile and during calls, and every sequence's steps. */
-    private fun allIds() = Profiles.load(context).profiles.flatMap { profile ->
-        Gesture.entries.map { profile.map[it.key] ?: it.default.id }
-    } + Gesture.entries.map { callActionId(it) } + Profiles.sequences(context).sequences.flatMap { it.steps }
+    /**
+     * Every action id a gesture can run, in any profile and during calls, with the steps of the
+     * sequences a gesture is set to (one no gesture uses doesn't make Setup ask for anything).
+     */
+    private fun allIds(): List<String> {
+        val ids = Profiles.load(context).profiles.flatMap { profile ->
+            Gesture.entries.map { profile.map[it.key] ?: it.default.id }
+        } + Gesture.entries.map { callActionId(it) }
+        val used = ids.filter { it.startsWith(Sequences.PREFIX) }.map { it.removePrefix(Sequences.PREFIX) }.toSet()
+        return ids + Profiles.sequences(context).sequences.filter { it.id in used }.flatMap { it.steps }
+    }
 
     /** Every profile's dial. */
     private fun dials() = Profiles.load(context).profiles.map { DialChoice.of(it.dial) }

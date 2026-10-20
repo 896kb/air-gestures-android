@@ -36,6 +36,14 @@ class StrokesTest {
         )
     }
 
+    @Test fun `a deleted sequence's id isn't given to a new one`() {
+        val (one, first) = Sequences.Library(emptyList()).added()
+        val (again, second) = one.deleted(first.id).added()
+        assertEquals("q1", first.id)
+        assertEquals("q2", second.id)
+        assertEquals("q3", Sequences.Library.fromJson(again.toJson()).added().second.id)
+    }
+
     @Test fun `sequences round-trip and keep their steps in order`() {
         var library = Sequences.Library(emptyList())
         val (added, made) = library.added()

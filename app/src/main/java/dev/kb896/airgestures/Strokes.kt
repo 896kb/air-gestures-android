@@ -88,14 +88,19 @@ object Sequences {
 
     data class Sequence(val id: String, val name: String, val steps: List<String>)
 
-    data class Library(val sequences: List<Sequence>) {
+    /**
+     * The sequences, and the number the next one's id gets ([next]): ids are never given out
+     * again, so a gesture still set to a deleted sequence doesn't run a new one.
+     */
+    data class Library(val sequences: List<Sequence>, val next: Int = 1) {
         fun get(id: String?) = sequences.firstOrNull { it.id == id }
 
-        /** A new, empty sequence with the lowest free number. */
+        /** A new, empty sequence: a fresh id, and the lowest free "Sequence n" name. */
         fun added(): Pair<Library, Sequence> {
-            val n = generateSequence(1) { it + 1 }.first { n -> sequences.none { it.id == "q$n" || it.name == "Sequence $n" } }
-            val made = Sequence("q$n", "Sequence $n", emptyList())
-            return Library(sequences + made) to made
+            val id = maxOf(next, (sequences.mapNotNull { it.id.removePrefix("q").toIntOrNull() }.maxOrNull() ?: 0) + 1)
+            val n = generateSequence(1) { it + 1 }.first { n -> sequences.none { it.name == "Sequence $n" } }
+            val made = Sequence("q$id", "Sequence $n", emptyList())
+            return Library(sequences + made, id + 1) to made
         }
 
         fun renamed(id: String, name: String): Library {
@@ -112,29 +117,33 @@ object Sequences {
             sequence.copy(steps = sequence.steps.toMutableList().apply { add(to, removeAt(index)) })
         }
 
-        fun deleted(id: String) = Library(sequences.filter { it.id != id })
+        fun deleted(id: String) = copy(sequences = sequences.filter { it.id != id })
 
-        private fun change(id: String, how: (Sequence) -> Sequence) = Library(sequences.map { if (it.id == id) how(it) else it })
+        private fun change(id: String, how: (Sequence) -> Sequence) = copy(sequences = sequences.map { if (it.id == id) how(it) else it })
 
-        fun toJson(): String = JSONArray().apply {
-            for (sequence in sequences) {
-                put(JSONObject().apply {
-                    put("id", sequence.id)
-                    put("name", sequence.name)
-                    put("steps", JSONArray(sequence.steps))
-                })
-            }
+        fun toJson(): String = JSONObject().apply {
+            put("next", next)
+            put("sequences", JSONArray().apply {
+                for (sequence in sequences) {
+                    put(JSONObject().apply {
+                        put("id", sequence.id)
+                        put("name", sequence.name)
+                        put("steps", JSONArray(sequence.steps))
+                    })
+                }
+            })
         }.toString()
 
         companion object {
-            /** Throws on anything it can't read. */
+            /** Throws on anything it can't read. (A plain list is how it was first stored.) */
             fun fromJson(json: String): Library {
-                val list = JSONArray(json)
+                val text = json.trim()
+                val (list, next) = if (text.startsWith("[")) JSONArray(text) to 1 else JSONObject(text).let { it.getJSONArray("sequences") to it.optInt("next", 1) }
                 return Library((0 until list.length()).map { i ->
                     val item = list.getJSONObject(i)
                     val steps = item.getJSONArray("steps")
                     Sequence(item.getString("id"), item.getString("name"), (0 until steps.length()).map(steps::getString))
-                })
+                }, next)
             }
         }
     }

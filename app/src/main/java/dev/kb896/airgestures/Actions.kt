@@ -195,8 +195,9 @@ class Actions(
         return null
     }
 
-    /** The sequence running now, if any: a gesture during it doesn't start it again. */
+    /** The sequence running now (its id and name), if any: a gesture during it doesn't start another. */
     private var running: String? = null
+    private var runningName = ""
 
     /**
      * Run a sequence's steps in order: actions, and waits between them. Steps without a wait
@@ -204,8 +205,9 @@ class Actions(
      */
     private fun sequence(id: String): String? {
         val sequence = Profiles.sequences(context).get(id) ?: return "that sequence is gone"
-        if (running != null) return "${sequence.name} is still running"
+        if (running != null) return "$runningName is still running"
         running = id
+        runningName = sequence.name
         fun step(at: Int) {
             if (at >= sequence.steps.size || running != id) {
                 running = null
@@ -214,10 +216,21 @@ class Actions(
             val step = sequence.steps[at]
             val wait = Sequences.waitMs(step)
             if (wait == null) run(step)?.let { log("${sequence.name}, step ${at + 1}: $it") }
-            main.postDelayed({ step(at + 1) }, wait ?: STEP_PAUSE_MS)
+            main.postDelayed({ step(at + 1) }, wait ?: (STEP_PAUSE_MS + busyMs(step)))
         }
         step(0)
         return null
+    }
+
+    /**
+     * How long a step keeps the screen busy: the next step waits for it, since a new gesture
+     * cancels one still in progress (a slow swipe would be cut short).
+     */
+    private fun busyMs(step: String): Long = when {
+        step.startsWith(Strokes.SWIPE) || step.startsWith(Strokes.PATH) -> Strokes.parse(step)?.duration ?: 0
+        step.startsWith(Tap.PREFIX) -> 50
+        step.startsWith("screen.swipe") -> 220
+        else -> 0
     }
 
     /** The default assistant: the voice command screen, else the assist app. */

@@ -62,7 +62,8 @@ object Backup {
         val hand: String,
         val speak: Boolean,
         val vibrate: Boolean,
-        val sequences: Sequences.Library = Sequences.Library(emptyList()),
+        /** Null in a backup made before sequences: restoring it leaves the sequences as they are. */
+        val sequences: Sequences.Library? = null,
     )
 
     fun write(settings: Settings): String {
@@ -76,7 +77,7 @@ object Backup {
             put("hand", settings.hand)
             put("speak", settings.speak)
             put("vibrate", settings.vibrate)
-            put("sequences", JSONArray(settings.sequences.toJson()))
+            settings.sequences?.let { put("sequences", JSONObject(it.toJson())) }
         }.toString(2)
     }
 
@@ -91,7 +92,7 @@ object Backup {
             json.getString("hand"),
             json.optBoolean("speak", false),
             json.optBoolean("vibrate", false),
-            json.optJSONArray("sequences")?.let { Sequences.Library.fromJson(it.toString()) } ?: Sequences.Library(emptyList()),
+            json.opt("sequences")?.let { Sequences.Library.fromJson(it.toString()) },
         )
     }.getOrNull()
 }

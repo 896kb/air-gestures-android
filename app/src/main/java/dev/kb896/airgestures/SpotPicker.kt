@@ -77,6 +77,26 @@ class SpotPicker(
     private fun remove() {
         shown?.let { runCatching { windows.removeView(it) } }
         shown = null
+        controls?.let { runCatching { windows.removeView(it) } }
+        controls = null
+    }
+
+    /** The recorder's buttons, in a window of their own that can always be pressed. */
+    private var controls: View? = null
+
+    private fun putControls(view: View) {
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = dpi(56f)
+        }
+        windows.addView(view, params)
+        controls = view
     }
 
     private fun put(view: View, size: Int, gravity: Int, y: Int = 0) {
@@ -401,11 +421,13 @@ class SpotPicker(
      * layer lets touches through while it's replayed), and kept with its timing. Stop ends it.
      */
     @SuppressLint("ViewConstructor")
-    private inner class RecordLayer(context: Context) : Layer(context, "● REC  Don't type while recording") {
+    private inner class RecordLayer(context: Context) : Layer(context, "● REC  One finger, one touch at a time. Don't type.") {
         private val touches = mutableListOf<Pair<Strokes.Path, Long>>()
         private val points = mutableListOf<Strokes.Point>()
         /** A recorded touch is being passed on: whatever reaches the layer now is that replay, not the user. */
         private var replaying = false
+        /** The touch going on now isn't recorded (it began during a replay, or a second finger joined). */
+        private var ignoring = false
         private var downAt = 0L
         private val trail = Path()
         private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -418,10 +440,18 @@ class SpotPicker(
 
         init {
             setBackgroundColor(0x0F111214) // fainter: the app should be easy to see
-            bottom(
-                pill(context, "Cancel", main = false) { cancel() },
-                pill(context, "Stop", main = true) { finish(Strokes.steps(touches)) },
-            )
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            // Stop and Cancel live in their own window: this layer stops catching touches while
+            // one is replayed, and the buttons must still work then.
+            if (controls == null) {
+                putControls(bar(
+                    pill(context, "Cancel", main = false) { cancel() },
+                    pill(context, "Stop", main = true) { finish(Strokes.steps(touches)) },
+                ))
+            }
         }
 
         override fun tick() {
@@ -433,8 +463,24 @@ class SpotPicker(
 
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
-            if (replaying) return true
             when (event.actionMasked) {
+                // A touch that starts while one is replayed is that replay (or too quick to keep apart).
+                MotionEvent.ACTION_DOWN -> ignoring = replaying
+                // Two fingers can't be replayed as one: this touch isn't kept.
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    ignoring = true
+                    trail.reset()
+                }
+            }
+            if (ignoring || replaying) {
+                if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) ignoring = false
+                return true
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_CANCEL -> {
+                    trail.reset()
+                    return true
+                }
                 MotionEvent.ACTION_DOWN -> {
                     points.clear()
                     trail.reset()

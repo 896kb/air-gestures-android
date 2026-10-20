@@ -199,7 +199,7 @@ class SetupActivity : Screen() {
         prefs.hand = settings.hand
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
-        Profiles.updateSequences(applicationContext) { settings.sequences }
+        settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         BandService.instance?.remap()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()

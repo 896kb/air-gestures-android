@@ -48,6 +48,11 @@ class LessonsBackupTest {
     @Test fun `settings round-trip, tap spots and apps included`() =
         assertEquals(settings, Backup.read(Backup.write(settings)))
 
+    @Test fun `a backup from before sequences leaves them out instead of empty`() {
+        val old = Backup.write(settings.copy(sequences = null)).replace(Regex(",\\s*\"sequences\":[^\\]]*\\]"), "")
+        assertNull(Backup.read(old)?.sequences)
+    }
+
     @Test fun `a broken, empty or newer backup is refused`() {
         assertNull(Backup.read("not json"))
         assertNull(Backup.read("""{"version":1,"profiles":[],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""))
