@@ -1,47 +1,29 @@
 package dev.kb896.airgestures
 
-import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.view.Surface
 import android.view.TextureView
-
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
-import java.io.File
-
-/** The file picker's request code for importing the owner key. */
-private const val IMPORT = 3
-/** The Meta sign-in's request code (then the claim). */
-private const val SIGN_IN = 4
-/** The file picker's request code for exporting the owner key. */
-private const val EXPORT = 5
 
 /** Same Ko-fi page the website links. */
 private const val KOFI_URL = "https://ko-fi.com/88896kb"
 
-/** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
+/** Home: the band, its state, the controls, and the way to the other screens. */
 class MainActivity : Screen() {
     private val watch: (BandService.State) -> Unit = ::render
 
@@ -54,29 +36,22 @@ class MainActivity : Screen() {
     private lateinit var gestures: TextView
     private lateinit var lastGesture: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
-    private lateinit var setup: LinearLayout
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
-    private lateinit var activity: TextView
     private var player: MediaPlayer? = null
     /** `start`/`pause` are only legal once the player is prepared (else it drops into its error state). */
     private var prepared = false
     private var heroView: View? = null
     /** Whether the hero shows the band as live (full speed and opacity); null = not set yet. */
     private var heroLive: Boolean? = null
-    /** The claim state Setup was last drawn for. */
-    private var setupClaiming = false
+    private lateinit var setupNav: FrameLayout
+    /** The claim state the Setup row was last counted for. */
+    private var navClaiming = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.decorView.setBackgroundColor(Cb.PAGE)
-        window.insetsController?.setSystemBarsAppearance(
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-        )
-        val page = column(gap = 20f).apply {
-            // The bottom room keeps the last card clear of the Ko-fi pill.
-            setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(88f))
+        // The bottom room keeps the last card clear of the Ko-fi pill.
+        val page = pageColumn(bottom = 88f).apply {
             addView(header())
             update = column(gap = 0f)
             addView(update)
@@ -84,41 +59,38 @@ class MainActivity : Screen() {
             addView(powerBlock())
             addView(statusCard())
             addView(togglesBlock())
-            addView(gestureCard())
-            addView(setupCard())
-            addView(activityCard())
+            addView(navCard())
             // The installed version, quietly, bottom left.
             addView(Cb.text(context, 12f, color = Cb.INK_400).apply {
                 text = "v" + UpdateCheck.version(context)
             })
         }
-        val scroll = ScrollView(this).apply {
-            addView(page)
-            clipToPadding = true
-        }
-        val kofi = kofiPill()
-        setContentView(FrameLayout(this).apply {
-            addView(scroll)
-            addView(kofi, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.END,
-            ))
-            // Edge-to-edge is enforced from API 35: scroll inside the system bars, not under them.
-            setOnApplyWindowInsetsListener { _, insets ->
-                val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                scroll.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-                (kofi.layoutParams as FrameLayout.LayoutParams).setMargins(0, 0, bars.right + dpi(16f), bars.bottom + dpi(16f))
-                kofi.requestLayout()
-                insets
-            }
+        show(page, floating = kofiPill())
+        requestPermissions(Setup.permissions, PERMISSIONS)
+    }
+
+    /** Where the rest of the app lives. */
+    private fun navCard() = card(null, column().apply {
+        addView(navRow(R.drawable.ic_hand, "Gestures") { open<GesturesActivity>() })
+        setupNav = FrameLayout(context)
+        addView(setupNav)
+        addView(navRow(R.drawable.ic_activity, "Activity") { open<ActivityLogActivity>() })
+    })
+
+    /** Setup's row, with how many steps are left. */
+    private fun renderNav() {
+        val pending = Setup.pending(this)
+        setupNav.removeAllViews()
+        setupNav.addView(navRow(R.drawable.ic_shield_check, "Setup", if (pending > 0) "$pending to do" else null) {
+            open<SetupActivity>()
         })
-        requestPermissions(permissions(), 1)
     }
 
     override fun onResume() {
         super.onResume()
         BandService.state.observe(watch)
         registerReceiver(bluetoothChanged, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
-        renderSetup()
+        renderNav()
         renderUpdate()
         UpdateCheck.maybe(this) { runOnUiThread(::renderUpdate) }
     }
@@ -151,12 +123,9 @@ class MainActivity : Screen() {
     private val bluetoothChanged = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: Intent) {
             render(BandService.state.value)
-            renderSetup()
+            renderNav()
         }
     }
-
-    private fun bluetoothOn() =
-        getSystemService(android.bluetooth.BluetoothManager::class.java).adapter?.isEnabled == true
 
     override fun onPause() {
         BandService.state.remove(watch)
@@ -334,102 +303,6 @@ class MainActivity : Screen() {
         addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
     }
 
-    private lateinit var gestureRows: LinearLayout
-
-    private fun gestureCard(): View {
-        gestureRows = column(gap = 4f)
-        renderGestures()
-        return card("Gestures", gestureRows)
-    }
-
-    /** One row per gesture: tap to choose its action. The pinch and the middle hold are fixed. */
-    private fun renderGestures() {
-        gestureRows.removeAllViews()
-        val prefs = Prefs(this)
-        for (gesture in Gesture.entries) {
-            val action = prefs.action(gesture)
-            val label = if (action == Action.OPEN_APP) "Open ${appName(prefs.actionId(gesture).removePrefix(APP_PREFIX))}" else action.label
-            gestureRows.addView(gestureRow(action.icon, gesture.label, label, action == Action.NONE) {
-                pick(gesture)
-            })
-        }
-        val dial = prefs.dial
-        gestureRows.addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE) { pickDial() })
-        gestureRows.addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, null))
-    }
-
-    private fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, onClick: (() -> Unit)?) =
-        row(gap = 12f).apply {
-            setPadding(0, dpi(8f), 0, dpi(8f))
-            addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
-            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
-            addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
-            addView(icon(if (onClick != null) R.drawable.ic_chevron_right else R.drawable.ic_lock, 14f, Cb.INK_400))
-            if (onClick != null) {
-                isClickable = true
-                background = android.graphics.drawable.RippleDrawable(
-                    ColorStateList.valueOf(0x14111214), null, GradientDrawable().apply { setColor(-1); cornerRadius = dp(10f) },
-                )
-                setOnClickListener { onClick() }
-            }
-        }
-
-    private fun pick(gesture: Gesture) {
-        val prefs = Prefs(this)
-        choose(gesture.label, Action.entries.map { Option(it.label, it == prefs.action(gesture), it.icon) }) { index ->
-            val action = Action.entries[index]
-            if (action == Action.OPEN_APP) pickApp(gesture) else setAction(gesture, action.id)
-            renderGestures()
-            renderSetup()
-        }
-    }
-
-    private fun setAction(gesture: Gesture, id: String) =
-        BandService.instance?.setAction(gesture, id) ?: Prefs(this).setAction(gesture, id)
-
-    /** The apps with a launcher icon, by name, each with its own icon. */
-    private fun pickApp(gesture: Gesture) {
-        val current = Prefs(this).actionId(gesture).removePrefix(APP_PREFIX)
-        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = packageManager.queryIntentActivities(launcher, 0)
-            .distinctBy { it.activityInfo.packageName }
-            .filter { it.activityInfo.packageName != packageName }
-            .map { it.activityInfo.packageName to it }
-            .sortedBy { (_, info) -> info.loadLabel(packageManager).toString().lowercase() }
-        choose("Open an app", apps.map { (pkg, info) ->
-            Option(info.loadLabel(packageManager).toString(), pkg == current, image = info.loadIcon(packageManager))
-        }) { index ->
-            setAction(gesture, APP_PREFIX + apps[index].first)
-            renderGestures()
-            renderSetup()
-        }
-    }
-
-    /** An app's name, or its package if it's gone. */
-    private fun appName(pkg: String) = runCatching {
-        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-    }.getOrDefault(pkg)
-
-    private fun pickDial() {
-        val prefs = Prefs(this)
-        choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == prefs.dial, it.icon) }) { index ->
-            val dial = DialChoice.entries[index]
-            BandService.instance?.setDial(dial) ?: run { prefs.dial = dial }
-            renderGestures()
-            renderSetup()
-        }
-    }
-
-    private fun setupCard(): View {
-        setup = column(gap = 14f)
-        return card("Setup", setup)
-    }
-
-    private fun activityCard(): View {
-        activity = Cb.text(this, 12f, R.font.geist_mono_regular, Cb.INK_500).apply { setLineSpacing(0f, 1.35f) }
-        return card("Activity", activity)
-    }
-
     // ---- state ----
 
     private fun toggleService() {
@@ -437,81 +310,28 @@ class MainActivity : Screen() {
             stopClaim()
             return
         }
-        if (!granted()) {
-            requestPermissions(permissions(), 1)
+        if (!Setup.granted(this)) {
+            requestPermissions(Setup.permissions, PERMISSIONS)
             return
         }
         if (BandService.instance != null) {
             BandService.stop(this)
-        } else if (!bluetoothOn()) {
+        } else if (!Setup.bluetoothOn(this)) {
             askForBluetooth()
         } else {
             BandService.start(this)
         }
     }
 
-    /**
-     * Claim a band from this phone: explain, sign in to Meta if there's no session yet,
-     * then (the band gives up pairing mode while the sign-in page is open) ask for pairing
-     * mode and run [BandClaim].
-     */
-    private fun claim() {
-        if (!granted()) {
-            requestPermissions(permissions(), 1)
-            return
-        }
-        if (!bluetoothOn()) {
-            askForBluetooth()
-            return
-        }
-        val signedIn = SessionStore.present(this)
-        confirm(
-            "Claim a band?",
-            "Sign in to Meta on Meta's own page; the app keeps only the resulting session. " +
-                "Hold the band's button for 3 seconds until it flashes (pairing mode)" +
-                (if (signedIn) ", then tap Claim. " else " once you're signed in. ") +
-                "Claiming makes this phone the band's owner: it unlinks the band from Meta's glasses and app, " +
-                "and a key from a computer that claimed it before stops working.",
-            if (signedIn) "Claim" else "Sign in",
-        ) {
-            if (signedIn) runClaim() else startActivityForResult(Intent(this, MetaSignIn::class.java), SIGN_IN)
-        }
-    }
-
-    private fun runClaim() {
-        val session = SessionStore.load(this)
-        if (session == null) {
-            SessionStore.delete(this)
-            log("the Meta sign-in couldn't be read; sign in again")
-            startActivityForResult(Intent(this, MetaSignIn::class.java), SIGN_IN)
-            return
-        }
-        // The companion picker doubles as the claim's device picker: the band is in
-        // pairing mode for the claim anyway, so one choice links it and says which band
-        // to claim. Without a picked device (cancelled, or before Android 14) it scans.
-        if (Companion.linked(this)) {
-            BandClaim.start(this, session)
-            return
-        }
-        log("choose the band in the system's list to link and claim it")
-        Companion.link(
-            this,
-            2,
-            ::log,
-            onLinked = { device -> BandClaim.start(this, session, device); renderSetup() },
-            onFailed = { BandClaim.start(this, session) },
-        )
-    }
-
     private fun render(state: BandService.State) {
         val running = BandService.instance != null
         val claiming = state.claiming
-        if (claiming != setupClaiming) {
-            setupClaiming = claiming
-            renderSetup()
+        if (claiming != navClaiming) {
+            navClaiming = claiming
+            renderNav()
         }
         val paused = if (running) state.paused else Prefs(this).paused
-        val bluetooth = bluetoothOn()
+        val bluetooth = Setup.bluetoothOn(this)
         val (signal, label) = when {
             claiming -> Cb.Signal.INFO to "Claiming"
             !bluetooth -> Cb.Signal.STOP to "Bluetooth off"
@@ -559,7 +379,6 @@ class MainActivity : Screen() {
                 setColor(Cb.INK_900)
             } else null
         }
-        activity.text = state.log.takeLast(8).joinToString("\n").ifEmpty { "Nothing yet." }
         // The band is full size while it's connected with controls on;
         // otherwise smaller and faded to 30%.
         val live = running && state.phase == Phase.CONNECTED && !paused
@@ -584,241 +403,9 @@ class MainActivity : Screen() {
         }
     }
 
-    private fun renderSetup() {
-        setup.removeAllViews()
-        val ownerKey = Identity.present(this)
-        val claiming = BandClaim.current != null
-        // Claiming is offered until a confirmed key is here (an unconfirmed one may be retried).
-        if (!Identity.keyFile(this).exists()) {
-            setupRow(
-                "Claim a band",
-                if (claiming) "Claiming; progress is under Activity" else "Sign in to Meta, then claim a band in pairing mode",
-                false,
-                if (claiming) "Stop" else "Claim",
-                always = true,
-                icon = R.drawable.ic_link,
-            ) {
-                if (claiming) toggleService() else claim()
-            }
-        }
-        val band = Identity.bandName(this)?.let { " for $it" } ?: ""
-        setupRow(
-            "Owner key",
-            when {
-                Identity.unconfirmed(this) -> "Claimed$band, not confirmed yet; connecting confirms it"
-                ownerKey -> "Loaded$band"
-                else -> "Or import air-gestures-band.json from a computer"
-            },
-            ownerKey,
-            if (ownerKey) "Replace" else "Import",
-            always = true,
-        ) {
-            val pick = {
-                startActivityForResult(
-                    Intent(Intent.ACTION_OPEN_DOCUMENT)
-                        .addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType("*/*")
-                        .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true),
-                    IMPORT,
-                )
-            }
-            // Replacing drops the key this phone owns the band with; importing into an empty slot doesn't.
-            if (!ownerKey) {
-                pick()
-            } else {
-                confirm(
-                    "Replace the owner key?",
-                    "The key on this phone is overwritten by the one you pick. If this phone claimed the band, " +
-                        "its key is the only one the band trusts: export it first, or the band has to be claimed again.",
-                    "Choose file",
-                    pick,
-                )
-            }
-        }
-        // Only a confirmed key is exported: the band may never have committed a pending one.
-        if (Identity.keyFile(this).exists()) {
-            setupRow("Export the key", "Save it for a computer (air-gestures import) or another phone", true, "Export", always = true, icon = R.drawable.ic_arrow_down) {
-                confirm(
-                    "Export the owner key?",
-                    "The file lets anyone who has it control the band. Keep it private, and delete it once " +
-                        "it's imported on the other device. The band talks to one device at a time.",
-                    "Choose where",
-                ) {
-                    startActivityForResult(
-                        Intent(Intent.ACTION_CREATE_DOCUMENT)
-                            .addCategory(Intent.CATEGORY_OPENABLE)
-                            .setType("application/json")
-                            .putExtra(Intent.EXTRA_TITLE, "air-gestures-band.json"),
-                        EXPORT,
-                    )
-                }
-            }
-        }
-        if (ownerKey) {
-            setupRow("Forget the band", "Removes the key, the pairing and the link from this phone", false, "Forget", always = true, icon = R.drawable.ic_link) {
-                confirm(
-                    "Forget the band?",
-                    "The key, the Bluetooth pairing and the companion link are removed from this phone. " +
-                        "The band keeps its owner: to use it with Meta's apps again, hold its button for about 16 seconds to factory reset it.",
-                    "Forget",
-                ) {
-                    val openSettings = Identity.forget(this)
-                    log("forgot the band on this phone")
-                    if (openSettings) {
-                        log("tap Forget on the band in Bluetooth settings to remove the pairing")
-                        startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-                    }
-                    renderSetup()
-                    render(BandService.state.value)
-                }
-            }
-        }
-        if (SessionStore.present(this)) {
-            setupRow("Meta sign-in", "Signed in; used only to claim a band", true, "Sign out", always = true) {
-                confirm(
-                    "Sign out of Meta?",
-                    "The Meta sign-in is deleted from this phone. The band keeps working; you'd sign in again " +
-                        "only to claim a band.",
-                    "Sign out",
-                ) {
-                    SessionStore.delete(this)
-                    log("signed out of Meta on this phone")
-                    renderSetup()
-                }
-            }
-        }
-        val bluetooth = bluetoothOn()
-        setupRow("Bluetooth", if (bluetooth) "On" else "Off: the band needs it", bluetooth, "Turn on") { askForBluetooth() }
-        setupRow("Bluetooth and notifications", if (granted()) "Allowed" else "Needed to connect", granted(), "Allow") {
-            requestPermissions(permissions(), 1)
-        }
-        val linked = Companion.linked(this)
-        setupRow("Companion link", if (linked) "Linked; the system wakes the app" else "Hold the band's button 3 s, then link", linked, "Link") {
-            Companion.link(this, 2, log = { line -> log(line); renderSetup() })
-        }
-        // Only asked for when a screen gesture is mapped somewhere.
-        if (Prefs(this).usesScreen()) {
-            val on = TouchService.instance != null
-            setupRow(
-                "Screen gestures",
-                if (on) "On" else "Settings, Accessibility, Air Gestures. If it's greyed out: App info, then Allow restricted settings",
-                on,
-                "Turn on",
-            ) {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-        }
-        // HyperOS drops app launches from the background without its own permission.
-        if (Xiaomi.isXiaomi && Prefs(this).usesApps()) {
-            val allowed = Xiaomi.canOpenFromBackground(this)
-            setupRow(
-                "Open apps from gestures",
-                when (allowed) {
-                    true -> "Allowed"
-                    false -> "Other permissions: allow Open new windows while running in the background"
-                    null -> "Check Other permissions: Open new windows while running in the background"
-                },
-                allowed == true,
-                "Open",
-            ) { Xiaomi.openPermissions(this) }
-        }
-        // Only asked for when brightness is mapped somewhere.
-        if (Prefs(this).usesBrightness()) {
-            val brightness = Settings.System.canWrite(this)
-            setupRow("Brightness access", if (brightness) "Allowed" else "Needed for brightness", brightness, "Allow") {
-                startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
-            }
-        }
-        // Only asked for when the dial seeks.
-        if (Prefs(this).usesMedia()) {
-            val media = MediaAccess.granted(this)
-            setupRow(
-                "Notification access",
-                if (media) "Allowed" else "Needed for playback position. If it's greyed out: App info, then Allow restricted settings",
-                media,
-                "Allow",
-            ) {
-                val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
-                    .putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, MediaAccess.component(this).flattenToString())
-                runCatching { startActivity(detail) }.onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-            }
-        }
-        val unrestricted = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
-        setupRow("Battery", if (unrestricted) "Unrestricted" else "Set to no restrictions", unrestricted, "Open") {
-            @SuppressLint("BatteryLife")
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
-            startActivity(intent)
-        }
-    }
-
-    private fun setupRow(
-        title: String,
-        detail: String,
-        ok: Boolean,
-        button: String?,
-        always: Boolean = false,
-        icon: Int? = null,
-        onClick: (() -> Unit)? = null,
-    ) {
-        setup.addView(row(gap = 12f).apply {
-            addView(icon(icon ?: if (ok) R.drawable.ic_shield_check else R.drawable.ic_circle_alert, 16f, if (ok) Cb.INK_900 else Cb.INK_500))
-            addView(column(gap = 3f).apply {
-                addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = title })
-                addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = detail })
-            }, weighted())
-            if ((always || !ok) && button != null && onClick != null) addView(pill(button, null, onClick).first)
-        })
-    }
-
-    private fun permissions() = arrayOf(
-        Manifest.permission.BLUETOOTH_SCAN,
-        Manifest.permission.BLUETOOTH_CONNECT,
-        Manifest.permission.POST_NOTIFICATIONS,
-    )
-
-    private fun granted() = permissions().all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        renderSetup()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == SIGN_IN) {
-            if (resultCode == RESULT_OK) {
-                log("signed in to Meta")
-                renderSetup()
-                confirm(
-                    "Put the band in pairing mode",
-                    "Hold the band's button for 3 seconds until it flashes, then tap Claim.",
-                    "Claim",
-                ) { runClaim() }
-            } else {
-                data?.getStringExtra(MetaSignIn.EXTRA_ERROR)?.let(::log)
-            }
-            return
-        }
-        if (requestCode == IMPORT && resultCode == RESULT_OK && data != null) {
-            val uris = data.clipData?.let { clip -> (0 until clip.itemCount).map { clip.getItemAt(it).uri } }
-                ?: listOfNotNull(data.data)
-            log(Identity.import(this, uris))
-        }
-        if (requestCode == EXPORT && resultCode == RESULT_OK) {
-            val uri = data?.data
-            log(
-                try {
-                    val bytes = Identity.exportBundle(this)
-                    contentResolver.openOutputStream(uri ?: throw IllegalStateException("no file chosen"), "wt")
-                        ?.use { it.write(bytes) } ?: throw IllegalStateException("couldn't open the file")
-                    "exported the owner key; keep the file private"
-                } catch (e: Exception) {
-                    "export failed: ${e.message}"
-                },
-            )
-        }
-        renderSetup()
+        renderNav()
     }
 
 }

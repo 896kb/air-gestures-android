@@ -52,6 +52,10 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".GesturesActivity" android:exported="false" />
+        <activity android:name=".SetupActivity" android:exported="false" />
+        <activity android:name=".ActivityLogActivity" android:exported="false" />
+
         <activity
             android:name=".MetaSignIn"
             android:exported="false"
