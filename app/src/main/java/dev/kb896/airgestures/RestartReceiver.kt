@@ -8,7 +8,7 @@ import android.content.Intent
 class RestartReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         // Alarms don't outlive a reboot or an update: set the evening reminder again.
-        Alerts.scheduleReminder(context)
+        Alerts.scheduleReminder(context, again = true)
         if (intent.action in listOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED) &&
             Prefs(context).running
         ) {

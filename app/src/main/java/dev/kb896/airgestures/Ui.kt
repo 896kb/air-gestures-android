@@ -40,6 +40,8 @@ abstract class Screen : Activity() {
         super.onResume()
         // The phone permission may have been granted in system settings meanwhile.
         BandService.instance?.watchCalls()
+        // Bluetooth or a permission may have changed while the band was off: the widget follows.
+        Surfaces.refresh(this)
     }
 
     /** A page's column: 20 dp at the sides, [bottom] dp of room under the last card. */

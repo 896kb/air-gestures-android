@@ -38,7 +38,8 @@ object Surfaces {
     }
 
     fun refresh(context: Context) {
-        val now = listOf(status(context), controls(), BandService.state.value.profile, BandService.state.value.band).joinToString("|")
+        val now = listOf(status(context), controls(), BandService.state.value.profile, BandService.state.value.band, ready(context))
+            .joinToString("|")
         if (now == shown) return
         shown = now
         for (tile in listOf(BandTile::class.java, ControlsTile::class.java)) {
@@ -66,8 +67,9 @@ object Surfaces {
         PendingIntent.FLAG_IMMUTABLE,
     )
 
-    /** Ready to connect without a trip to the app first. */
-    fun ready(context: Context) = Setup.granted(context) && Setup.bluetoothOn(context) && Identity.present(context)
+    /** Ready to connect without a trip to the app first (and not while a claim holds the band). */
+    fun ready(context: Context) =
+        Setup.granted(context) && Setup.bluetoothOn(context) && Identity.present(context) && BandClaim.current == null
 }
 
 /** Opens the app from a tile (Android 14 wants a PendingIntent; 13 an Intent). */

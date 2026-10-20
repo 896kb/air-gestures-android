@@ -85,6 +85,8 @@ object Alerts {
             .putBoolean("battery.charged", next.charged)
             .apply()
         val name = band ?: "Meta Band"
+        // On the charger, a low warning no longer applies.
+        if (charging) runCatching { manager(context).cancel(LOW_ID) }
         when (alert?.kind) {
             BatteryAlerts.Kind.LOW -> post(context, BATTERY, LOW_ID, "$name is at ${alert.level} %", "Charge it soon.")
             BatteryAlerts.Kind.CHARGED -> {
@@ -105,15 +107,16 @@ object Alerts {
         post(context, BATTERY, REMINDER_ID, "Charge your band tonight?", "It was at $level % at $time.")
     }
 
-    /** The daily alarm for [reminder], at the next 21:00; inexact, so no special permission. */
-    fun scheduleReminder(context: Context) {
+    /**
+     * The daily alarm for [reminder], at the next 21:00; inexact, so no special permission.
+     * Only when it isn't set yet (or [again], after a reboot or an update): setting it again
+     * moves it to the next 21:00, and an inexact one may still be due tonight.
+     */
+    fun scheduleReminder(context: Context, again: Boolean = false) {
         val alarms = context.getSystemService(AlarmManager::class.java) ?: return
-        val intent = PendingIntent.getBroadcast(
-            context,
-            0,
-            Intent(context, ReminderReceiver::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        val target = Intent(context, ReminderReceiver::class.java)
+        if (!again && PendingIntent.getBroadcast(context, 0, target, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE) != null) return
+        val intent = PendingIntent.getBroadcast(context, 0, target, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val first = Reminder.next(ZonedDateTime.now()).toInstant().toEpochMilli()
         alarms.setInexactRepeating(AlarmManager.RTC_WAKEUP, first, AlarmManager.INTERVAL_DAY, intent)
     }
