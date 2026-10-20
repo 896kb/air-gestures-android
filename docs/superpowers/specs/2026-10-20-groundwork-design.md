@@ -29,10 +29,12 @@ roadmap ships as one release; nothing is tagged until the version is chosen at t
   `onDeviceAppeared(AssociationInfo)` (33–35). Both call one `appeared()` that starts
   `BandService` only when `Prefs.running` and `BandService.instance == null`, so a
   double call on 36 is harmless.
-- `MetaSignIn` back: replace `onBackPressed` with an `onBackInvokedDispatcher` callback.
-  With targetSdk 36, Android 16 no longer calls `onBackPressed` for the back gesture, so
-  today a back swipe closes the whole sign-in. The callback goes back in the WebView while
-  it can, otherwise cancels and finishes.
+- `MetaSignIn` back: it already registers an `onBackInvokedDispatcher` callback on 33+,
+  which Android 16 uses (targetSdk 36 opts in by default). On 13–15 the app hasn't opted
+  in (`android:enableOnBackInvokedCallback` is unset), so there it relies on the
+  deprecated `onBackPressed` override (lint GestureBackNavigation). Set
+  `android:enableOnBackInvokedCallback="true"` on `<application>`, register the callback
+  unconditionally, delete `onBackPressed`. Other screens keep the default back (finish).
 - "Turn on Bluetooth" (`MainActivity.kt:172`, MissingPermission): if `BLUETOOTH_CONNECT`
   isn't granted, open Bluetooth settings instead of `ACTION_REQUEST_ENABLE`.
 - Lint warnings: fix the InlinedApi/ObsoleteSdkInt ones that minSdk 33 makes moot; look
@@ -49,8 +51,9 @@ roadmap ships as one release; nothing is tagged until the version is chosen at t
 - The UI kit, moved unchanged as methods so call sites read the same: `dp`, `dpi`,
   `column`, `row`, `weighted`, `card`, `icon`, `pill`, `segment`, `segmented`,
   `settingRow`, `choose` (with `Option`), `confirm`.
-- New: `navRow(icon, label, badge: String?, onClick)` for Home's list; new vector
-  `ic_chevron_right` (Lucide).
+- New: `navRow(icon, label, badge: String?, onClick)` for Home's list (a badge is drawn as
+  a WARN chip); the title row's back button uses the existing `ic_arrow_left`, the rows
+  the existing `ic_chevron_right`, so there's no new art.
 
 ### Screens
 
@@ -61,14 +64,16 @@ roadmap ships as one release; nothing is tagged until the version is chosen at t
 | `SetupActivity` | Setup rows, claim (`claim`/`runClaim`), permission requests, Bluetooth state receiver, the companion picker (its result arrives through the CDM callback), `onActivityResult` (Meta sign-in, key import/export). |
 | `ActivityLogActivity` | The live log. |
 
-Home's nav list: **Gestures ›**, **Setup ›** (badge "N to do" while any step isn't done,
-drawn highlighted when the band isn't claimed or linked yet), **Activity ›**. Profiles,
+Home's nav list: **Gestures ›**, **Setup ›** (a WARN chip "N to do" while any required
+step isn't done), **Activity ›**. Profiles,
 Practice and Settings rows arrive with their own sub-projects, with no empty screens now.
 All new activities `exported="false"`.
 
 ### `Setup.steps(context): List<Step>`
 
-`Step(title, detail, done, actionLabel, always, icon, action: (Activity) -> Unit)`.
+`Step(title, detail, done, button, always, icon, required, action: (SetupActivity) -> Unit)`.
+`required = false` for rows that are actions rather than to-dos (Claim, Export, Forget,
+Sign out); "N to do" counts required steps that aren't done.
 Pulls the step list and "is it done" logic out of `renderSetup()` (today ~165 lines
 mixing both). `SetupActivity` renders the steps; Home counts `!done` for the badge, so
 the two can't disagree. Steps that need an activity result take the calling activity.
@@ -77,7 +82,8 @@ the two can't disagree. Steps that need an activity result take the calling acti
 
 Each screen subscribes to `BandService.state` in `onResume` and removes the listener in
 `onPause`, as `MainActivity` does today. The cards look the same as now; this changes
-where things are, not how they look.
+where things are, not how they look. The choose() picker no longer re-renders the
+gesture and setup cards itself; callers re-render in their `onChoice`.
 
 ## 3. CI, verification, git
 
@@ -88,7 +94,8 @@ where things are, not how they look.
   build an x86_64 bridge locally only (not shipped). On each:
   - launch; Home → each sub-screen → back (gesture and chevron);
   - Setup → Link: picker finds nothing / is cancelled, **no crash**;
-  - Meta sign-in: back gesture moves back within the WebView, then closes it.
+  - Meta sign-in: back gesture moves back within the WebView, then closes it (13–15 is
+    where this changes; 16 should behave as before).
 - Not provable on emulators: the band waking the app on 13–15 (no real Bluetooth). That
   path is checked by reading the code only, and the notes say so.
 - Xiaomi 17 Pro (Android 16, adb over Wi-Fi; the user gives the port): connect, gestures,
