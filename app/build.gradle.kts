@@ -50,3 +50,8 @@ android {
         }
     }
 }
+
+dependencies {
+    // JVM tests of the pure parts (Mappings.kt); not AndroidX.
+    testImplementation("junit:junit:4.13.2")
+}
