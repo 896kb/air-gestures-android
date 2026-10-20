@@ -23,6 +23,15 @@ fails without one.
   (the triple taps don't switch there). Every switch shows the profile's name, and can
   say it. With more than one profile, index and middle taps wait a moment so a triple
   tap can be told apart.
+- Two Quick Settings tiles: Air Gestures (connect or release the band, with its status
+  and battery) and Gesture controls (on or off). Long-press either to open the app.
+- A home-screen widget: the band, its status, battery and profile, with a power and a
+  controls button.
+- Battery notifications: at 20 % and 10 %, when it's charged, and at 21:00 when the last
+  reading was below half. When the controls have been off for 15 minutes, a notification
+  offers to disconnect the band (it goes away once the controls are back on).
+- Optional vibration when the profile switches: once for the next, twice for the
+  previous (the band already buzzes for its own gestures).
 - During calls: while the phone rings or a call is on, gestures can do something else.
   By default an index double tap answers and a middle double tap declines or hangs up;
   every gesture is yours to set. Phone calls only: WhatsApp and other app calls can't

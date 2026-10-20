@@ -46,6 +46,7 @@ class BandService : Service(), BandLink.Listener {
         notifications.deleteNotificationChannel(OLD_ALERTS)
         instance = this
         main.post(updateCheck)
+        Alerts.scheduleReminder(this)
     }
 
     /** Look for a newer release now and then while the band is kept connected. */
@@ -59,6 +60,8 @@ class BandService : Service(), BandLink.Listener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         when (intent?.action) {
+            // From the widget: as the power button.
+            ACTION_START -> prefs.running = true
             ACTION_TOGGLE_CONTROLS -> setPaused(!prefs.paused)
             ACTION_STOP -> {
                 stop(this)
@@ -71,11 +74,14 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onDestroy() {
         main.removeCallbacks(updateCheck)
+        main.removeCallbacks(idleCheck)
+        Alerts.notIdle(this)
         calls.stop()
         link.stop()
         actions.close()
         instance = null
         state.update { copy(phase = Phase.STOPPED) }
+        Surfaces.refresh(this)
         super.onDestroy()
     }
 
@@ -91,6 +97,24 @@ class BandService : Service(), BandLink.Listener {
     private fun pausedChanged(paused: Boolean) {
         state.update { copy(paused = paused) }
         refreshNotification()
+        watchIdle()
+    }
+
+    private val idleCheck = Runnable { if (idleNow()) Alerts.idle(this) }
+    private var idleWaiting = false
+
+    private fun idleNow() = state.value.paused && state.value.phase == Phase.CONNECTED
+
+    /** Controls off with the band connected: after [Alerts.IDLE_MS], suggest disconnecting; else take that back. */
+    private fun watchIdle() {
+        if (idleNow()) {
+            if (!idleWaiting) main.postDelayed(idleCheck, Alerts.IDLE_MS)
+            idleWaiting = true
+        } else {
+            main.removeCallbacks(idleCheck)
+            idleWaiting = false
+            Alerts.notIdle(this)
+        }
     }
 
     /** Send the mapping in force to the band again (a profile, call or setting changed). */
@@ -112,16 +136,28 @@ class BandService : Service(), BandLink.Listener {
     /** A triple tap: the next (+1) or previous (−1) profile, unless the app in front has its own. */
     fun profileStep(by: Int): String? {
         if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        switched(Profiles.update(this) { it.step(by) }.active(Profiles.foreground))
+        switched(Profiles.update(this) { it.step(by) }.active(Profiles.foreground), back = by < 0)
         return null
     }
 
     /** Another profile is in force: the band gets it, and the user is told which. */
-    private fun switched(profile: Profile) {
+    private fun switched(profile: Profile, back: Boolean = false) {
         remap()
         Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
         if (Profiles.speak(this)) actions.announce(profile.name)
+        if (Profiles.vibrate(this)) buzz(times = if (back) 2 else 1)
         onLog("profile: ${profile.name}")
+    }
+
+    /** One short buzz, or two (the previous profile). */
+    private fun buzz(times: Int) {
+        val vibrator = getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
+        val effect = if (times == 1) {
+            android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+        } else {
+            android.os.VibrationEffect.createWaveform(longArrayOf(0, 40, 90, 40), -1)
+        }
+        runCatching { vibrator.vibrate(effect) }
     }
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
@@ -138,12 +174,14 @@ class BandService : Service(), BandLink.Listener {
     override fun onPhase(phase: Phase, band: String?) = main.post {
         state.update { copy(phase = phase, band = band ?: this.band) }
         refreshNotification()
+        watchIdle()
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
         val paused = status.optBoolean("paused")
         if (paused != prefs.paused) prefs.paused = paused
         if (paused != state.value.paused) pausedChanged(paused)
+        val before = state.value
         state.update {
             copy(
                 paused = paused,
@@ -154,6 +192,11 @@ class BandService : Service(), BandLink.Listener {
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
             )
+        }
+        val now = state.value
+        val level = now.battery
+        if (level != null && (level != before.battery || now.charging != before.charging)) {
+            Alerts.battery(this, now.band, level, now.charging)
         }
         refreshNotification()
     }.let {}
@@ -167,8 +210,10 @@ class BandService : Service(), BandLink.Listener {
         state.update { copy(log = (log + line).takeLast(LOG_LINES)) }
     }.let {}
 
-    private fun refreshNotification() =
+    private fun refreshNotification() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
+        Surfaces.refresh(this)
+    }
 
     private fun notification(): Notification {
         val s = state.value
@@ -249,6 +294,7 @@ class BandService : Service(), BandLink.Listener {
         private const val LOG_LINES = 60
         const val ACTION_TOGGLE_CONTROLS = "dev.kb896.airgestures.TOGGLE_CONTROLS"
         const val ACTION_STOP = "dev.kb896.airgestures.STOP"
+        const val ACTION_START = "dev.kb896.airgestures.START"
 
         val state = Observable(State())
         var instance: BandService? = null

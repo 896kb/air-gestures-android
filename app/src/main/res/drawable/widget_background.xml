@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget's card: the page tone with a hairline, like the app's cards. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFF1F1F3" />
+    <stroke android:width="1dp" android:color="#14111214" />
+    <corners android:radius="24dp" />
+</shape>

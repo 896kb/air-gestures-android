@@ -25,6 +25,8 @@
     <!-- During calls: whether the phone rings or is in a call, and answering / ending it. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <!-- A buzz on a profile switch, when that's on. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- The brightness dial. -->
     <uses-permission
         android:name="android.permission.WRITE_SETTINGS"
@@ -57,6 +59,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-pressing one of the Quick Settings tiles opens the app. -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
         </activity>
 
         <activity android:name=".GesturesActivity" android:exported="false" />
@@ -68,6 +74,50 @@
             android:name=".MetaSignIn"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
+
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BandWidget"
+            android:exported="false"
+            android:label="@string/tile_band">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/band_widget" />
+        </receiver>
+
+        <service
+            android:name=".BandTile"
+            android:exported="true"
+            android:icon="@drawable/ic_power"
+            android:label="@string/tile_band"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+
+        <service
+            android:name=".ControlsTile"
+            android:exported="true"
+            android:icon="@drawable/ic_hand"
+            android:label="@string/tile_controls"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
 
         <receiver
             android:name=".RestartReceiver"

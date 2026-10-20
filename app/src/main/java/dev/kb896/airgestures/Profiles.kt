@@ -11,6 +11,7 @@ object Profiles {
     private const val APPS = "profile.apps"
     private const val PICKED = "profile.current"
     private const val SPEAK = "profile.speak"
+    private const val VIBRATE = "profile.vibrate"
     private const val BROKEN = "profiles.broken"
 
     @Volatile
@@ -67,4 +68,9 @@ object Profiles {
     fun speak(context: Context) = prefs(context).getBoolean(SPEAK, false)
 
     fun setSpeak(context: Context, on: Boolean) = prefs(context).edit().putBoolean(SPEAK, on).apply()
+
+    /** Buzz on a profile switch (the band already buzzes for its gestures). */
+    fun vibrate(context: Context) = prefs(context).getBoolean(VIBRATE, false)
+
+    fun setVibrate(context: Context, on: Boolean) = prefs(context).edit().putBoolean(VIBRATE, on).apply()
 }
