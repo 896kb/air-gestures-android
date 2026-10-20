@@ -44,18 +44,28 @@ object Navigation {
     }
 
     /** Enough of a focused item to find it again on a changed screen. */
-    data class Mark(val id: String?, val text: String?, val top: Int) {
+    data class Mark(val id: String?, val text: String?, val left: Int, val top: Int, val right: Int, val bottom: Int) {
+        val named get() = id != null || text != null
+
         companion object {
-            fun of(node: NavNode) = Mark(node.id, node.text, node.top)
+            fun of(node: NavNode) = Mark(node.id, node.text, node.left, node.top, node.right, node.bottom)
         }
     }
 
-    /** Where [mark]'s item is in [items] now: the same id and text, nearest to where it was; −1 if gone. */
+    /**
+     * Where [mark]'s item is in [items] now: the same id and text, nearest to where it was; an
+     * item with neither, by exactly where it was. −1 if it's gone.
+     */
     fun find(items: List<NavNode>, mark: Mark?): Int {
-        if (mark == null || (mark.id == null && mark.text == null)) return -1
-        return items.withIndex()
-            .filter { (_, node) -> node.id == mark.id && node.text == mark.text }
-            .minByOrNull { (_, node) -> abs(node.top - mark.top) }
-            ?.index ?: -1
+        if (mark == null) return -1
+        val same = items.withIndex().filter { (_, node) ->
+            if (mark.named) {
+                node.id == mark.id && node.text == mark.text
+            } else {
+                node.id == null && node.text == null && node.left == mark.left && node.top == mark.top &&
+                    node.right == mark.right && node.bottom == mark.bottom
+            }
+        }
+        return same.minByOrNull { (_, node) -> abs(node.top - mark.top) }?.index ?: -1
     }
 }

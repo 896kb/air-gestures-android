@@ -47,6 +47,13 @@ class NavigationTest {
         assertEquals(-1, Navigation.step(size = 0, at = -1, by = 1))
     }
 
+    @Test fun `an item with no id or text is found again by where it is`() {
+        val anonymous = Fake(children = listOf(Fake(clickable = true, top = 0, bottom = 50), Fake(clickable = true, top = 60, bottom = 110)))
+        val items = Navigation.focusables(anonymous)
+        assertEquals(1, Navigation.find(items, Navigation.Mark.of(items[1])))
+        assertEquals(Navigation.step(items.size, 1, 1), Navigation.step(items.size, Navigation.find(items, Navigation.Mark.of(items[1])), 1))
+    }
+
     @Test fun `focus finds its item again after the screen changes`() {
         val before = Navigation.focusables(screen)[2] // star1
         val after = Fake(children = listOf(Fake(id = "wifi", checkable = true), Fake(id = "star1", clickable = true, top = 400, bottom = 450)))

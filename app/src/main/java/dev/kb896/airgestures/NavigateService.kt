@@ -30,6 +30,7 @@ class NavigateService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        android.util.Log.i("AirGestures", "navigation on")
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
@@ -43,6 +44,7 @@ class NavigateService : AccessibilityService() {
     }
 
     private fun stop() {
+        android.util.Log.i("AirGestures", "navigation off")
         main.removeCallbacksAndMessages(null)
         ring?.remove()
         ring = null
@@ -112,12 +114,19 @@ class NavigateService : AccessibilityService() {
         return if (pressed || item.editable) null else "couldn't press it"
     }
 
-    /** Scroll the outlined item's list, or else the largest scrollable thing on screen. */
+    /**
+     * Scroll: each scrollable container around the outlined item, outwards, until one moves;
+     * else the largest scrollable thing on screen; else a swipe on the screen (screen gestures).
+     */
     fun scroll(forward: Boolean): String? {
         val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-        val around = current()?.info?.let { node -> generateSequence(node) { it.parent }.firstOrNull { it.isScrollable } }
-        val target = around ?: largestScrollable() ?: return "nothing scrolls here"
-        return if (target.performAction(action)) null else "can't scroll further"
+        val around = current()?.info?.let { node -> generateSequence(node) { it.parent }.filter { it.isScrollable }.toList() }.orEmpty()
+        for (target in around + listOfNotNull(largestScrollable())) {
+            if (target.performAction(action)) return null
+        }
+        val touch = TouchService.instance ?: return "can't scroll here"
+        touch.swipe(up = forward)
+        return null
     }
 
     private fun largestScrollable(): AccessibilityNodeInfo? {

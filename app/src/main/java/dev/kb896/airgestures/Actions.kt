@@ -167,8 +167,11 @@ class Actions(private val context: Context) {
     }
 
     /** Navigation goes through its own accessibility service, when it's switched on. */
-    private fun navigate(how: (NavigateService) -> String?): String? =
-        NavigateService.instance?.let(how) ?: "navigation needs Air Gestures navigation on (Setup)"
+    private fun navigate(how: (NavigateService) -> String?): String? {
+        val service = NavigateService.instance ?: return "navigation needs Air Gestures navigation on (Setup)"
+        // (Not instance?.let(how) ?: …: a move that worked returns null too.)
+        return how(service)
+    }
 
     private fun tap(action: String): String? {
         val touch = TouchService.instance ?: return "tap here needs screen gestures (Setup)"
