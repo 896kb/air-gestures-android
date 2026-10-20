@@ -42,7 +42,7 @@ private const val EXPORT = 5
 private const val KOFI_URL = "https://ko-fi.com/88896kb"
 
 /** One screen in the CargoBolt soft-UI language: the connection, its state, the gesture map, setup. */
-class MainActivity : Activity() {
+class MainActivity : Screen() {
     private val watch: (BandService.State) -> Unit = ::render
 
     private lateinit var chip: FrameLayout
@@ -66,9 +66,6 @@ class MainActivity : Activity() {
     private var heroLive: Boolean? = null
     /** The claim state Setup was last drawn for. */
     private var setupClaiming = false
-
-    private fun dp(value: Float) = Cb.dp(this, value)
-    private fun dpi(value: Float) = dp(value).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -161,17 +158,6 @@ class MainActivity : Activity() {
     private fun bluetoothOn() =
         getSystemService(android.bluetooth.BluetoothManager::class.java).adapter?.isEnabled == true
 
-    /** The band needs Bluetooth: say so and offer Android's own prompt to switch it on. */
-    private fun askForBluetooth() = confirm(
-        "Bluetooth is off",
-        "The band connects over Bluetooth. Turn it on to use the band.",
-        "Turn on",
-    ) {
-        @SuppressLint("MissingPermission")
-        val request = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
-        runCatching { startActivity(request) }.onFailure { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
-    }
-
     override fun onPause() {
         BandService.state.remove(watch)
         runCatching { unregisterReceiver(bluetoothChanged) }
@@ -233,40 +219,6 @@ class MainActivity : Activity() {
                 }
             }
         }
-    }
-
-    // ---- layout pieces ----
-
-    private fun column(gap: Float = 0f) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        if (gap > 0) {
-            showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE
-            dividerDrawable = GradientDrawable().apply { setSize(1, dpi(gap)) }
-        }
-    }
-
-    private fun row(gap: Float = 0f) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        if (gap > 0) {
-            showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE
-            dividerDrawable = GradientDrawable().apply { setSize(dpi(gap), 1) }
-        }
-    }
-
-    private fun weighted() = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-
-    private fun card(title: String, content: View) = column(gap = 12f).apply {
-        background = Cb.hairlineCard(context)
-        setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(16f))
-        addView(Cb.text(context, 17f, R.font.geist_semibold, Cb.INK_900, -.015f).apply { text = title })
-        addView(content)
-    }
-
-    private fun icon(res: Int, size: Float = 16f, color: Int = Cb.INK_900) = ImageView(this).apply {
-        setImageResource(res)
-        imageTintList = ColorStateList.valueOf(color)
-        layoutParams = LinearLayout.LayoutParams(dpi(size), dpi(size))
     }
 
     private fun header() = column(gap = 6f).apply {
@@ -366,66 +318,9 @@ class MainActivity : Activity() {
         setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(KOFI_URL))) }
     }
 
-    /** A pill that sits on the page and presses into it; `latched` keeps it pushed. */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun pill(text: String, iconRes: Int? = null, onClick: () -> Unit): Pair<TextView, NeuDrawable> {
-        val shape = NeuDrawable(this, 999f, soft = false)
-        val view = Cb.text(this, 14f, R.font.geist_medium, Cb.INK_900, -.005f).apply {
-            this.text = text
-            isSingleLine = true
-            gravity = Gravity.CENTER
-            background = shape
-            val m = shape.margin
-            setPadding(m + dpi(16f), m + dpi(9f), m + dpi(16f), m + dpi(9f))
-            if (iconRes != null) {
-                val drawable = context.getDrawable(iconRes)!!.mutate().apply {
-                    setBounds(0, 0, dpi(16f), dpi(16f))
-                    setTint(Cb.INK_900)
-                }
-                setCompoundDrawables(drawable, null, null, null)
-                compoundDrawablePadding = dpi(8f)
-            }
-            setOnTouchListener { view, event ->
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> view.animate().scaleX(.985f).scaleY(.985f).setDuration(Cb.DURATION).start()
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
-                        view.animate().scaleX(1f).scaleY(1f).setDuration(Cb.DURATION).start()
-                }
-                false
-            }
-            setOnClickListener { onClick() }
-        }
-        return view to shape
-    }
-
-    /** Segmented control: an ink-filled active pill on a pushed track. */
-    private fun segment(text: String, onClick: () -> Unit) = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_700).apply {
-        this.text = text
-        gravity = Gravity.CENTER
-        setPadding(dpi(18f), dpi(8f), dpi(18f), dpi(8f))
-        setOnClickListener { onClick() }
-    }
-
-    private fun segmented(vararg segments: TextView) = row().apply {
-        val track = NeuDrawable(context, 999f, soft = false).apply { pressed = 1f }
-        background = track
-        val m = track.margin
-        setPadding(m + dpi(4f), m + dpi(4f), m + dpi(4f), m + dpi(4f))
-        segments.forEach(::addView)
-    }
-
     private fun setHand(hand: String) {
         BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
         render(BandService.state.value)
-    }
-
-    /** A setting: its label and a line of detail on the left, the control on the right. */
-    private fun settingRow(label: String, detail: String, control: View) = row(gap = 12f).apply {
-        addView(column(gap = 4f).apply {
-            addView(Cb.label(context, label))
-            addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = detail })
-        }, weighted())
-        addView(control)
     }
 
     private fun togglesBlock() = column(gap = 16f).apply {
@@ -484,6 +379,8 @@ class MainActivity : Activity() {
         choose(gesture.label, Action.entries.map { Option(it.label, it == prefs.action(gesture), it.icon) }) { index ->
             val action = Action.entries[index]
             if (action == Action.OPEN_APP) pickApp(gesture) else setAction(gesture, action.id)
+            renderGestures()
+            renderSetup()
         }
     }
 
@@ -501,7 +398,11 @@ class MainActivity : Activity() {
             .sortedBy { (_, info) -> info.loadLabel(packageManager).toString().lowercase() }
         choose("Open an app", apps.map { (pkg, info) ->
             Option(info.loadLabel(packageManager).toString(), pkg == current, image = info.loadIcon(packageManager))
-        }) { index -> setAction(gesture, APP_PREFIX + apps[index].first) }
+        }) { index ->
+            setAction(gesture, APP_PREFIX + apps[index].first)
+            renderGestures()
+            renderSetup()
+        }
     }
 
     /** An app's name, or its package if it's gone. */
@@ -509,81 +410,14 @@ class MainActivity : Activity() {
         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
     }.getOrDefault(pkg)
 
-    /** One line in the picker: a Lucide icon (tinted) or an app's own icon (as is). */
-    private class Option(val label: String, val selected: Boolean, val iconRes: Int = 0, val image: android.graphics.drawable.Drawable? = null)
-
     private fun pickDial() {
         val prefs = Prefs(this)
         choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == prefs.dial, it.icon) }) { index ->
             val dial = DialChoice.entries[index]
             BandService.instance?.setDial(dial) ?: run { prefs.dial = dial }
+            renderGestures()
+            renderSetup()
         }
-    }
-
-    /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
-    private fun choose(title: String, options: List<Option>, onChoice: (Int) -> Unit) {
-        val dialog = android.app.Dialog(this)
-        val list = column(gap = 2f)
-        val sheet = column(gap = 12f).apply {
-            setPadding(dpi(20f), dpi(18f), dpi(20f), dpi(14f))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(20f)
-                setColor(Cb.PAGE)
-            }
-            elevation = dp(24f)
-            addView(Cb.label(context, "Gesture"))
-            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
-            // Long lists (the actions, the apps) scroll inside the sheet.
-            addView(object : ScrollView(context) {
-                override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-                    val most = (resources.displayMetrics.heightPixels * .6f).toInt()
-                    super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(most, MeasureSpec.AT_MOST))
-                }
-            }.apply {
-                isVerticalScrollBarEnabled = false
-                addView(list)
-            })
-        }
-        options.forEachIndexed { index, option ->
-            val selected = option.selected
-            list.addView(row(gap = 12f).apply {
-                setPadding(dpi(10f), dpi(11f), dpi(10f), dpi(11f))
-                if (option.image != null) {
-                    addView(ImageView(context).apply {
-                        setImageDrawable(option.image)
-                        layoutParams = LinearLayout.LayoutParams(dpi(24f), dpi(24f))
-                    })
-                } else {
-                    addView(icon(option.iconRes, 16f))
-                }
-                addView(Cb.text(context, 15f, if (selected) R.font.geist_semibold else R.font.geist_regular, Cb.INK_900).apply {
-                    text = option.label
-                    isSingleLine = true
-                    ellipsize = android.text.TextUtils.TruncateAt.END
-                }, weighted())
-                if (selected) addView(icon(R.drawable.ic_check, 16f))
-                background = if (selected) GradientDrawable().apply {
-                    cornerRadius = dp(10f)
-                    setColor(0x14111214) // --action-quiet
-                } else null
-                setOnClickListener {
-                    onChoice(index)
-                    renderGestures()
-                    renderSetup()
-                    dialog.dismiss()
-                }
-            })
-        }
-        dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
-            addView(sheet)
-        })
-        dialog.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
-            setDimAmount(.55f)
-            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        dialog.show()
     }
 
     private fun setupCard(): View {
@@ -600,9 +434,7 @@ class MainActivity : Activity() {
 
     private fun toggleService() {
         if (BandClaim.current != null) {
-            confirm("Stop claiming?", "The claim stops here. If the band already accepted this phone, its key is kept.", "Stop") {
-                BandClaim.cancel()
-            }
+            stopClaim()
             return
         }
         if (!granted()) {
@@ -987,38 +819,6 @@ class MainActivity : Activity() {
             )
         }
         renderSetup()
-    }
-
-    private fun log(line: String) = BandService.state.update { copy(log = (log + line).takeLast(60)) }
-
-    /** A confirmation in the picker's style: title, body, Cancel and the action. */
-    private fun confirm(title: String, body: String, action: String, onConfirm: () -> Unit) {
-        val dialog = android.app.Dialog(this)
-        val sheet = column(gap = 14f).apply {
-            setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(18f))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(20f)
-                setColor(Cb.PAGE)
-            }
-            elevation = dp(24f)
-            addView(Cb.text(context, 22f, R.font.geist_semibold, Cb.INK_900, -.02f).apply { text = title })
-            addView(Cb.text(context, 14f, color = Cb.INK_500).apply { text = body; setLineSpacing(0f, 1.3f) })
-            addView(row(gap = 12f).apply {
-                gravity = Gravity.END
-                addView(pill("Cancel") { dialog.dismiss() }.first)
-                addView(pill(action) { dialog.dismiss(); onConfirm() }.first)
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
-        dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
-            addView(sheet)
-        })
-        dialog.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
-            setDimAmount(.55f)
-            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
-        dialog.show()
     }
 
 }
