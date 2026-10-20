@@ -55,6 +55,7 @@ class Actions(private val context: Context) {
     /** Stop following the flash and the speech engine (the service is going away). */
     fun close() {
         cameras.unregisterTorchCallback(torchWatch)
+        main.removeCallbacksAndMessages(null)
         tts?.shutdown()
         tts = null
     }
@@ -271,8 +272,38 @@ class Actions(private val context: Context) {
 
     /** For Tasker, MacroDroid, Home Assistant…: the gesture's name, nothing else. */
     private fun automation(gesture: String): String? {
-        context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", gesture))
+        when (gesture) {
+            "dial_up" -> dialStep(+1)
+            "dial_down" -> dialStep(-1)
+            else -> context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", gesture))
+        }
         return null
+    }
+
+    private val dialBatch = StepBatch(DIAL_BATCH_MS)
+    private var dialFlush = false
+    private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * A dial step for automation: sent as `gesture=dial` with the net `steps` (+ up, − down),
+     * at most once per [DIAL_BATCH_MS], so a smart light follows a quick turn smoothly.
+     */
+    private fun dialStep(step: Int) {
+        val now = SystemClock.uptimeMillis()
+        val sent = dialBatch.add(step, now)
+        if (sent != null) {
+            sendDial(sent)
+        } else if (!dialFlush) {
+            dialFlush = true
+            main.postAtTime({
+                dialFlush = false
+                sendDial(dialBatch.take(SystemClock.uptimeMillis()))
+            }, dialBatch.due())
+        }
+    }
+
+    private fun sendDial(steps: Int) {
+        if (steps != 0) context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", "dial").putExtra("steps", steps))
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */
@@ -306,5 +337,8 @@ class Actions(private val context: Context) {
 
         /** The broadcast "Send to automation" sends, with the gesture's name in `gesture`. */
         const val AUTOMATION_ACTION = "dev.kb896.airgestures.GESTURE"
+
+        /** The dial's automation steps go out at most this often. */
+        const val DIAL_BATCH_MS = 250L
     }
 }

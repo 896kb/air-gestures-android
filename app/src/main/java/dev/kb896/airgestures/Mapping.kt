@@ -70,6 +70,8 @@ enum class DialChoice(val key: String, val label: String, val up: String, val do
     VOLUME("volume", "Volume", "volume.up", "volume.down", R.drawable.ic_volume_2),
     SEEK("seek", "Playback position", "dial.seek_forward", "dial.seek_back", R.drawable.ic_fast_forward),
     BRIGHTNESS("brightness", "Brightness", "brightness.up", "brightness.down", R.drawable.ic_sun),
+    /** For smart lights and the like: Tasker / Home Assistant get the steps, gathered every 250 ms. */
+    AUTOMATION("automation", "Send to automation", "automation:dial_up", "automation:dial_down", R.drawable.ic_zap),
     NONE("none", "Nothing", "", "", R.drawable.ic_minus);
 
     companion object {

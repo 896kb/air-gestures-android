@@ -14,6 +14,9 @@ fails without one.
   and title while the phone is locked) or dismiss it, and send the gesture to Tasker,
   MacroDroid or Home Assistant (broadcast `dev.kb896.airgestures.GESTURE`, extra
   `gesture`).
+- Pinch and turn can go to automation too, for dimming a smart light: `gesture` is
+  `dial` and `steps` the steps turned (+ up, − down), sent at most every 250 ms so a
+  quick turn doesn't flood the light.
 - During calls: while the phone rings or a call is on, gestures can do something else.
   By default an index double tap answers and a middle double tap declines or hangs up;
   every gesture is yours to set. Phone calls only: WhatsApp and other app calls can't

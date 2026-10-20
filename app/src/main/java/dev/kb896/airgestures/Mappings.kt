@@ -82,3 +82,30 @@ object Notes {
     fun newest(notes: List<Note>) =
         notes.filter { it.clearable && !it.ongoing && !it.ours && !it.emptySummary }.maxByOrNull { it.postTime }
 }
+
+/**
+ * Dial steps for automation, gathered so a quick turn doesn't flood a smart light: a
+ * step goes out at once when nothing went out in the last [window] ms, else it waits
+ * and adds up until [due].
+ */
+class StepBatch(private val window: Long) {
+    private var pending = 0
+    private var lastSent = Long.MIN_VALUE / 2
+
+    /** A step (+1 or −1) at [now]: the steps to send right away, or null when it waits for [due]. */
+    fun add(step: Int, now: Long): Int? {
+        pending += step
+        return if (now - lastSent >= window) take(now) else null
+    }
+
+    /** When the waiting steps go out. */
+    fun due() = lastSent + window
+
+    /** What's gathered (0 when the steps cancelled out); the window starts again at [now]. */
+    fun take(now: Long): Int {
+        val steps = pending
+        pending = 0
+        lastSent = now
+        return steps
+    }
+}
