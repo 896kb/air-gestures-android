@@ -1,3 +1,5 @@
+import java.util.Properties
+
 // Plain Android (no AndroidX); AGP 9 compiles the Kotlin sources itself.
 // The Rust bridge is built into src/main/jniLibs by ../build-rust.sh.
 plugins {
@@ -7,6 +9,13 @@ plugins {
 // Release signing comes from the environment (see .gitlab-ci.yml). Without
 // KEYSTORE_PATH the release build is left unsigned.
 val keystorePath: String? = System.getenv("KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+
+// Debug builds use the machine's debug key unless local.properties (git-ignored) names this
+// app's own dev key, `debug.keystore=<path>` with Android's debug passwords. Then a dev build
+// keeps installing over the one on the phone when the machine's debug key changes.
+val devKeystore: String? = rootProject.file("local.properties").takeIf { it.exists() }
+    ?.let { file -> Properties().apply { file.inputStream().use { load(it) } }.getProperty("debug.keystore") }
+    ?.takeIf { file(it).exists() }
 
 android {
     namespace = "dev.kb896.airgestures"
@@ -25,6 +34,14 @@ android {
     }
 
     signingConfigs {
+        if (devKeystore != null) {
+            getByName("debug") {
+                storeFile = file(devKeystore)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         if (keystorePath != null) {
             create("release") {
                 storeFile = file(keystorePath)

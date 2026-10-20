@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Lint suggests dropping -v26 since minSdk is 33, but next to the legacy ic_launcher.png
+         files a plain mipmap-anydpi loses to them: the adaptive icon (and the debug build's
+         "dev" tab, and the monochrome icon) would vanish from the APK. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>
