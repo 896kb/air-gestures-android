@@ -23,6 +23,11 @@ fails without one.
   (the triple taps don't switch there). Every switch shows the profile's name, and can
   say it. With more than one profile, index and middle taps wait a moment so a triple
   tap can be told apart.
+- Swipe here: place a swipe with a coral start orb and a blue end orb (quick or slow),
+  or draw it with your finger, curves and timing included.
+- Sequences: a gesture can run a list of actions with waits between them, built step by
+  step or recorded (each tap and swipe goes on to the app as you make it; don't type while
+  recording). Try one from its screen.
 - Navigation for when the screen is hard to reach: actions that move a glowing outline
   between buttons and fields, select, and scroll, and a ready-made Navigate profile (New
   profile, Navigate). It's a separate accessibility service, Air Gestures navigation, that

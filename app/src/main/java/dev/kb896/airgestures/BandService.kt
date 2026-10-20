@@ -28,7 +28,7 @@ class BandService : Service(), BandLink.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        actions = Actions(this)
+        actions = Actions(this, ::onLog)
         link = BandLink(this, this)
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
@@ -228,6 +228,9 @@ class BandService : Service(), BandLink.Listener {
             this.actions.run(action)?.let(::onLog)
         }
     }.let {}
+
+    /** Run one action as a gesture would (e.g. a sequence's Try it); a failure goes to the log. */
+    fun runAction(action: String) = actions.run(action)?.let(::onLog)
 
     /** What a practice lesson hears from the band while it's open. */
     interface Practice {

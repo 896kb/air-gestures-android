@@ -15,6 +15,15 @@ abstract class GestureScreen : Screen() {
     fun label(id: String, calls: Boolean) = when {
         calls && id == Mappings.AS_USUAL -> "As usual"
         calls && id == Mappings.NOTHING -> "Nothing"
+        else -> stepLabel(id)
+    }
+
+    /** An action id in words: Open <app>, Drawn swipe, Sequence: <name>, Wait 2 s… */
+    fun stepLabel(id: String): String = when {
+        Sequences.waitMs(id) != null -> "Wait ${formatSeconds(Sequences.waitMs(id)!!)}"
+        id.startsWith(Strokes.PATH) -> "Drawn swipe"
+        id.startsWith(Sequences.PREFIX) ->
+            Profiles.sequences(this).get(id.removePrefix(Sequences.PREFIX))?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
         else -> when (val action = Action.of(id)) {
             Action.OPEN_APP -> "Open ${appName(id.removePrefix(APP_PREFIX))}"
             else -> action.label
@@ -68,9 +77,26 @@ abstract class GestureScreen : Screen() {
      */
     fun pick(gesture: Gesture, profile: String?) {
         val prefs = Prefs(this)
-        val calls = profile == null
         val current = if (profile == null) prefs.callActionId(gesture) else prefs.actionId(gesture, profile)
-        val actions = if (calls) Action.entries.filter { it != Action.NONE } else Action.entries.filterNot { it.callOnly }
+        pickAction(gesture.label, current, calls = profile == null) { id ->
+            store(gesture, profile, id)
+            render()
+        }
+    }
+
+    /**
+     * The action picker: [calls] adds As usual, Nothing and the call actions; [inSequence] leaves
+     * out what a sequence can't hold (another sequence, automation, nothing). Actions that need
+     * more (an app, a spot, a swipe, a sequence) ask for it before [onChosen] gets the id.
+     */
+    fun pickAction(title: String, current: String, calls: Boolean = false, inSequence: Boolean = false, onChosen: (String) -> Unit) {
+        val actions = Action.entries.filter { action ->
+            when {
+                inSequence -> action != Action.NONE && !action.callOnly && action != Action.SEQUENCE && action != Action.AUTOMATION
+                calls -> action != Action.NONE
+                else -> !action.callOnly
+            }
+        }
         val extra = if (calls) {
             listOf(
                 Option("As usual", current == Mappings.AS_USUAL, R.drawable.ic_minus) to Mappings.AS_USUAL,
@@ -80,20 +106,40 @@ abstract class GestureScreen : Screen() {
             emptyList()
         }
         val selected = Action.of(current).takeUnless { calls && (current == Mappings.AS_USUAL || current == Mappings.NOTHING) }
-        val options = extra.map { it.first } + actions.map { Option(it.label, it == selected, it.icon) }
-        choose(gesture.label, options, heading = if (calls) "During calls" else "Gesture") { index ->
-            if (index < extra.size) {
-                store(gesture, profile, extra[index].second)
-            } else {
-                when (val action = actions[index - extra.size]) {
-                    Action.OPEN_APP -> pickApp(exclude = emptySet(), current = current.removePrefix(APP_PREFIX)) { pkg ->
-                        store(gesture, profile, APP_PREFIX + pkg)
-                    }
-                    Action.TAP -> pickTap(gesture, profile, current)
-                    else -> store(gesture, profile, action.id)
+        val options = extra.map { it.first } + actions.map { Option(it.label, it == selected && !inSequence, it.icon) }
+        val heading = when {
+            inSequence -> "Step"
+            calls -> "During calls"
+            else -> "Gesture"
+        }
+        choose(title, options, heading = heading) { index ->
+            if (index < extra.size) return@choose onChosen(extra[index].second)
+            when (val action = actions[index - extra.size]) {
+                Action.OPEN_APP -> pickApp(exclude = emptySet(), current = current.removePrefix(APP_PREFIX)) { onChosen(APP_PREFIX + it) }
+                Action.TAP -> pickScreen(SpotPicker.Mode.TAP, current) { onChosen(it.first()) }
+                Action.SWIPE_HERE -> choose(
+                    "Swipe here",
+                    listOf(Option("Place it: start and end", false, R.drawable.ic_move_up_right), Option("Draw it", false, R.drawable.ic_scan_line)),
+                    heading = heading,
+                ) { how ->
+                    val mode = if (how == 0) SpotPicker.Mode.SWIPE else SpotPicker.Mode.DRAW
+                    pickScreen(mode, current) { onChosen(it.first()) }
                 }
+                Action.SEQUENCE -> pickSequence(current, onChosen)
+                else -> onChosen(action.id)
             }
-            render()
+        }
+    }
+
+    /** A sequence from the library, or a new one (which opens to be filled in). */
+    private fun pickSequence(current: String, onChosen: (String) -> Unit) {
+        val library = Profiles.sequences(this).sequences
+        val options = library.map { Option(it.name, Sequences.PREFIX + it.id == current, R.drawable.ic_list_ordered) } +
+            Option("New sequence", false, R.drawable.ic_layers)
+        choose("Sequence", options, heading = "Gesture") { index ->
+            val sequence = library.getOrNull(index) ?: Profiles.updateSequences(applicationContext) { it.added().first }.sequences.last()
+            onChosen(Sequences.PREFIX + sequence.id)
+            if (index >= library.size) SequenceActivity.open(this, sequence.id)
         }
     }
 
@@ -122,15 +168,16 @@ abstract class GestureScreen : Screen() {
     }
 
     /**
-     * Pick the spot over the app it's for: the app steps aside, the overlay asks the user
-     * to open the app and drag the target, then this screen comes back.
+     * Set up a screen action over the app it's for (a tap spot, a swipe, a drawing, a
+     * recording): the app steps aside, the overlay asks the user to open the app, then this
+     * screen comes back with the result.
      */
-    private fun pickTap(gesture: Gesture, profile: String?, current: String) {
+    fun pickScreen(mode: SpotPicker.Mode, current: String?, onDone: (List<String>) -> Unit) {
         val touch = TouchService.instance
         if (touch == null) {
             confirm(
                 "Turn on screen gestures",
-                "Tap here uses the same accessibility service as the screen gestures. Turn it on in Setup first.",
+                "This uses the same accessibility service as the screen gestures. Turn it on in Setup first.",
                 "Open Setup",
             ) { open<SetupActivity>() }
             return
@@ -138,8 +185,8 @@ abstract class GestureScreen : Screen() {
         val back = Intent(intent).setClass(applicationContext, javaClass)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         moveTaskToBack(true)
-        touch.pickSpot(Tap.parse(current)) { spot ->
-            if (spot != null) store(gesture, profile, Tap.format(spot.first, spot.second))
+        touch.pick(mode, current) { ids ->
+            if (!ids.isNullOrEmpty()) onDone(ids)
             // Back to this screen; the service may start it from the background.
             TouchService.instance?.startFromBackground(back)
         }
@@ -157,4 +204,7 @@ abstract class GestureScreen : Screen() {
             render()
         }
     }
+
+    /** 0.5 s, 2 s, 1.2 s. */
+    fun formatSeconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
 }

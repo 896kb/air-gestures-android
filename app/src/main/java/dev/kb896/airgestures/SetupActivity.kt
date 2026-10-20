@@ -187,6 +187,7 @@ class SetupActivity : Screen() {
             prefs.hand,
             Profiles.speak(this),
             Profiles.vibrate(this),
+            Profiles.sequences(this),
         )
     }
 
@@ -198,6 +199,7 @@ class SetupActivity : Screen() {
         prefs.hand = settings.hand
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
+        Profiles.updateSequences(applicationContext) { settings.sequences }
         BandService.instance?.remap()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()

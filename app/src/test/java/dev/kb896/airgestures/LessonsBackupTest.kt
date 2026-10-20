@@ -42,6 +42,7 @@ class LessonsBackupTest {
         hand = "left",
         speak = true,
         vibrate = false,
+        sequences = Sequences.Library(listOf(Sequences.Sequence("q1", "Morning", listOf("app:com.spotify.music", "wait:2000")))),
     )
 
     @Test fun `settings round-trip, tap spots and apps included`() =

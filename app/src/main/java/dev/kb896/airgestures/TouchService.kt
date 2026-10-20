@@ -106,13 +106,46 @@ class TouchService : AccessibilityService() {
 
     private var picker: SpotPicker? = null
 
-    /** Let the user pick a "Tap here" spot over any app; a pick already showing is replaced. */
-    fun pickSpot(start: Pair<Float, Float>?, onPicked: (Pair<Float, Float>?) -> Unit) {
+    /**
+     * Set up a screen action over any app (a tap spot, a swipe, a drawn swipe, a recording);
+     * one already showing is replaced. [onDone] gets the action ids, or null when cancelled.
+     */
+    fun pick(mode: SpotPicker.Mode, current: String?, onDone: (List<String>?) -> Unit) {
         picker?.drop()
-        picker = SpotPicker(this, start) { spot ->
+        picker = SpotPicker(this, mode, current) { ids ->
             picker = null
-            onPicked(spot)
+            onDone(ids)
         }.also { it.show() }
+    }
+
+    /**
+     * A finger along [path] (fractions of the screen) in its time: a Swipe here, a drawn swipe
+     * or a recorded touch. The finger moves at an even speed along the path. [done] runs when
+     * it's over (or couldn't start).
+     */
+    fun stroke(path: Strokes.Path, done: (() -> Unit)? = null) {
+        val bounds = getSystemService(android.view.WindowManager::class.java).currentWindowMetrics.bounds
+        val line = Path()
+        path.points.forEachIndexed { i, point ->
+            val x = bounds.width() * point.x
+            val y = bounds.height() * point.y
+            if (i == 0) line.moveTo(x, y) else line.lineTo(x, y)
+        }
+        val duration = path.duration.coerceIn(1, GestureDescription.getMaxGestureDuration())
+        val started = dispatchGesture(
+            GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(line, 0, duration)).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    done?.invoke()
+                }
+
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    done?.invoke()
+                }
+            },
+            null,
+        )
+        if (!started) done?.invoke()
     }
 
     private fun stroke(path: Path) {

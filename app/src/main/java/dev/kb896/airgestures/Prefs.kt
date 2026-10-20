@@ -76,10 +76,10 @@ class Prefs(context: Context) {
         ) + if (list.profiles.size >= 2) ";triples=profiles" else ""
     }
 
-    /** Every action id a gesture can run, in any profile and during calls. */
+    /** Every action id a gesture can run, in any profile and during calls, and every sequence's steps. */
     private fun allIds() = Profiles.load(context).profiles.flatMap { profile ->
         Gesture.entries.map { profile.map[it.key] ?: it.default.id }
-    } + Gesture.entries.map { callActionId(it) }
+    } + Gesture.entries.map { callActionId(it) } + Profiles.sequences(context).sequences.flatMap { it.steps }
 
     /** Every profile's dial. */
     private fun dials() = Profiles.load(context).profiles.map { DialChoice.of(it.dial) }
@@ -89,7 +89,8 @@ class Prefs(context: Context) {
      * assistant (Android lets the service start those from the background).
      */
     fun usesScreen() = usesAppProfiles() || allIds().any { id ->
-        id.startsWith("screen.") || id.startsWith(APP_PREFIX) || id.startsWith(Tap.PREFIX) || id == Action.ASSISTANT.id
+        id.startsWith("screen.") || id.startsWith(APP_PREFIX) || id.startsWith(Tap.PREFIX) || id == Action.ASSISTANT.id ||
+            id.startsWith(Strokes.SWIPE) || id.startsWith(Strokes.PATH)
     }
 
     /** An app has its own profile: the accessibility service tells which app is in front. */

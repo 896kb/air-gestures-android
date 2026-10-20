@@ -24,6 +24,6 @@ class DebugActions : BroadcastReceiver() {
         /** One for the process, so the flashlight and the speech engine carry over between runs. */
         private var actions: Actions? = null
 
-        private fun runner(context: Context) = actions ?: Actions(context.applicationContext).also { actions = it }
+        private fun runner(context: Context) = actions ?: Actions(context.applicationContext) { Log.i("AirGestures", it) }.also { actions = it }
     }
 }

@@ -25,6 +25,10 @@ enum class Action(val id: String, val label: String, val icon: Int) {
 
     /** Stored as `tap:<x>,<y>`; the picker asks where. */
     TAP(Tap.PREFIX, "Tap here", R.drawable.ic_crosshair),
+    /** Stored as `swipe:…` (two orbs) or `path:…` (drawn); the picker asks which. */
+    SWIPE_HERE(Strokes.SWIPE, "Swipe here", R.drawable.ic_move_up_right),
+    /** Stored as `seq:<id>`: a list of actions and waits (see [Sequences]). */
+    SEQUENCE(Sequences.PREFIX, "Sequence", R.drawable.ic_list_ordered),
     ASSISTANT("assistant.voice", "Voice assistant", R.drawable.ic_mic),
     DISMISS("notification.dismiss", "Dismiss notification", R.drawable.ic_bell_off),
     READ("notification.read", "Read notification", R.drawable.ic_message_square_text),
@@ -51,6 +55,8 @@ enum class Action(val id: String, val label: String, val icon: Int) {
         fun of(id: String) = when {
             id.startsWith(APP_PREFIX) -> OPEN_APP
             id.startsWith(Tap.PREFIX) -> TAP
+            id.startsWith(Strokes.SWIPE) || id.startsWith(Strokes.PATH) -> SWIPE_HERE
+            id.startsWith(Sequences.PREFIX) -> SEQUENCE
             else -> entries.firstOrNull { it.id == id } ?: NONE
         }
     }

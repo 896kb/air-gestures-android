@@ -23,7 +23,11 @@ import android.telecom.TelecomManager
 import android.view.KeyEvent
 
 /** Runs the bridge's action names on the phone. */
-class Actions(private val context: Context) {
+class Actions(
+    private val context: Context,
+    /** Where a sequence's failing steps are told (the activity log). */
+    private val log: (String) -> Unit = {},
+) {
     private val audio = context.getSystemService(AudioManager::class.java)
     /** Where the last seek aimed, so fast dial steps add up before the player reports back. */
     private var seekTarget = 0L
@@ -56,6 +60,7 @@ class Actions(private val context: Context) {
     fun close() {
         cameras.unregisterTorchCallback(torchWatch)
         main.removeCallbacksAndMessages(null)
+        running = null
         tts?.shutdown()
         tts = null
     }
@@ -92,6 +97,8 @@ class Actions(private val context: Context) {
             else -> return when {
                 action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
                 action.startsWith(Tap.PREFIX) -> tap(action)
+                action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
+                action.startsWith(Sequences.PREFIX) -> sequence(action.removePrefix(Sequences.PREFIX))
                 action.startsWith("${Mappings.AUTOMATION}:") -> automation(action.substringAfter(':'))
                 else -> "unknown action $action"
             }
@@ -177,6 +184,39 @@ class Actions(private val context: Context) {
         val touch = TouchService.instance ?: return "tap here needs screen gestures (Setup)"
         val (x, y) = Tap.parse(action) ?: return "the tap spot is broken; pick it again"
         touch.tap(x, y)
+        return null
+    }
+
+    /** Swipe here / a drawn swipe: a finger along the stored path. */
+    private fun stroke(action: String): String? {
+        val touch = TouchService.instance ?: return "swipe here needs screen gestures (Setup)"
+        val path = Strokes.parse(action) ?: return "the swipe is broken; set it again"
+        touch.stroke(path)
+        return null
+    }
+
+    /** The sequence running now, if any: a gesture during it doesn't start it again. */
+    private var running: String? = null
+
+    /**
+     * Run a sequence's steps in order: actions, and waits between them. Steps without a wait
+     * get a short pause, so the screen can catch up (an app opening, a list scrolling).
+     */
+    private fun sequence(id: String): String? {
+        val sequence = Profiles.sequences(context).get(id) ?: return "that sequence is gone"
+        if (running != null) return "${sequence.name} is still running"
+        running = id
+        fun step(at: Int) {
+            if (at >= sequence.steps.size || running != id) {
+                running = null
+                return
+            }
+            val step = sequence.steps[at]
+            val wait = Sequences.waitMs(step)
+            if (wait == null) run(step)?.let { log("${sequence.name}, step ${at + 1}: $it") }
+            main.postDelayed({ step(at + 1) }, wait ?: STEP_PAUSE_MS)
+        }
+        step(0)
         return null
     }
 
@@ -354,6 +394,9 @@ class Actions(private val context: Context) {
 
         /** The broadcast "Send to automation" sends, with the gesture's name in `gesture`. */
         const val AUTOMATION_ACTION = "dev.kb896.airgestures.GESTURE"
+
+        /** The pause after a sequence step that has no wait of its own. */
+        const val STEP_PAUSE_MS = 150L
 
         /** The dial's automation steps go out at most this often. */
         const val DIAL_BATCH_MS = 250L

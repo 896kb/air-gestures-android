@@ -12,6 +12,7 @@ object Profiles {
     private const val PICKED = "profile.current"
     private const val SPEAK = "profile.speak"
     private const val VIBRATE = "profile.vibrate"
+    private const val SEQUENCES = "sequences"
     private const val BROKEN = "profiles.broken"
 
     @Volatile
@@ -68,6 +69,25 @@ object Profiles {
     fun speak(context: Context) = prefs(context).getBoolean(SPEAK, false)
 
     fun setSpeak(context: Context, on: Boolean) = prefs(context).edit().putBoolean(SPEAK, on).apply()
+
+    @Volatile
+    private var sequences: Sequences.Library? = null
+
+    /** The sequences (shared by every profile); empty when there are none or they're unreadable. */
+    fun sequences(context: Context): Sequences.Library = sequences ?: synchronized(this) {
+        sequences ?: (
+            prefs(context).getString(SEQUENCES, null)
+                ?.let { runCatching { Sequences.Library.fromJson(it) }.getOrNull() }
+                ?: Sequences.Library(emptyList())
+            ).also { sequences = it }
+    }
+
+    fun updateSequences(context: Context, change: (Sequences.Library) -> Sequences.Library): Sequences.Library = synchronized(this) {
+        change(sequences(context)).also {
+            sequences = it
+            prefs(context).edit().putString(SEQUENCES, it.toJson()).apply()
+        }
+    }
 
     /** Buzz on a profile switch (the band already buzzes for its gestures). */
     fun vibrate(context: Context) = prefs(context).getBoolean(VIBRATE, false)
