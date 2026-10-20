@@ -40,7 +40,7 @@ class GesturesActivity : Screen() {
         for (gesture in Gesture.entries) {
             val id = prefs.actionId(gesture)
             val action = Action.of(id)
-            rows.addView(gestureRow(action.icon, gesture.label, label(id), action == Action.NONE) { pick(gesture, calls = false) })
+            rows.addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE) { pick(gesture, calls = false) })
         }
         val dial = prefs.dial
         rows.addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE) { pickDial() })
@@ -51,14 +51,14 @@ class GesturesActivity : Screen() {
             val id = prefs.callActionId(gesture)
             val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
             val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
-            callRows.addView(gestureRow(icon, gesture.label, label(id), usual) { pick(gesture, calls = true) })
+            callRows.addView(gestureRow(icon, gesture.label, label(id, calls = true), usual) { pick(gesture, calls = true) })
         }
     }
 
-    /** What a row says for an action id, in either layer. */
-    private fun label(id: String) = when (id) {
-        Mappings.AS_USUAL -> "As usual"
-        Mappings.NOTHING -> "Nothing"
+    /** What a row says for an action id. In the normal layer "" is Nothing, in the call layer As usual. */
+    private fun label(id: String, calls: Boolean) = when {
+        calls && id == Mappings.AS_USUAL -> "As usual"
+        calls && id == Mappings.NOTHING -> "Nothing"
         else -> when (val action = Action.of(id)) {
             Action.OPEN_APP -> "Open ${appName(id.removePrefix(APP_PREFIX))}"
             else -> action.label

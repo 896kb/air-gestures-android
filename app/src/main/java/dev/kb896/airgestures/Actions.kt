@@ -205,27 +205,42 @@ class Actions(private val context: Context) {
             context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(note.packageName, 0)).toString()
         }.getOrDefault(note.packageName)
         val locked = context.getSystemService(KeyguardManager::class.java).isKeyguardLocked
-        speak(Speech.sentence(
+        return speak(Speech.sentence(
             app,
             extras.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
             (extras.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: extras.getCharSequence(Notification.EXTRA_TEXT))?.toString(),
             locked,
         ))
-        return null
     }
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    /** The engine wouldn't start last time; the next read says so and tries again. */
+    private var ttsFailed = false
     private var pendingSpeech: String? = null
 
     /** One engine for the service's life; the first sentence waits for it to start. */
-    private fun speak(text: String) {
-        if (ttsReady) return say(text)
+    private fun speak(text: String): String? {
+        if (ttsFailed) {
+            ttsFailed = false
+            return "text-to-speech didn't start (is a speech engine installed?)"
+        }
+        if (ttsReady) {
+            say(text)
+            return null
+        }
         pendingSpeech = text
         if (tts == null) {
             tts = TextToSpeech(context) { status ->
                 ttsReady = status == TextToSpeech.SUCCESS
-                if (ttsReady) pendingSpeech?.let(::say)
+                if (ttsReady) {
+                    pendingSpeech?.let(::say)
+                } else {
+                    // Dropped so the next read starts a fresh engine.
+                    tts?.shutdown()
+                    tts = null
+                    ttsFailed = true
+                }
                 pendingSpeech = null
             }.apply {
                 setAudioAttributes(
@@ -236,6 +251,7 @@ class Actions(private val context: Context) {
                 )
             }
         }
+        return null
     }
 
     private fun say(text: String) {

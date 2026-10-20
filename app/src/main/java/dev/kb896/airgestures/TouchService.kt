@@ -75,9 +75,9 @@ class TouchService : AccessibilityService() {
 
     private var picker: SpotPicker? = null
 
-    /** Let the user pick a "Tap here" spot over any app; a pick already showing is cancelled. */
+    /** Let the user pick a "Tap here" spot over any app; a pick already showing is replaced. */
     fun pickSpot(start: Pair<Float, Float>?, onPicked: (Pair<Float, Float>?) -> Unit) {
-        picker?.cancel()
+        picker?.drop()
         picker = SpotPicker(this, start) { spot ->
             picker = null
             onPicked(spot)

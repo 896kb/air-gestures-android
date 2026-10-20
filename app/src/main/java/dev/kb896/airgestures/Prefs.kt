@@ -73,8 +73,8 @@ class Prefs(context: Context) {
 
     fun usesNotificationGestures() = allIds().any { it.startsWith("notification.") }
 
-    /** A call action is set in the During calls layer (it needs the Phone calls permission). */
-    fun usesCalls() = Gesture.entries.any { callActionId(it).startsWith("call.") }
+    /** Anything is set in the During calls layer: it needs the phone permissions to know when a call is on. */
+    fun usesCalls() = Gesture.entries.any { callActionId(it) != Mappings.AS_USUAL }
 
     var associationId: Int
         get() = prefs.getInt("association", -1)

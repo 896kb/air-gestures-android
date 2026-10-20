@@ -145,10 +145,10 @@ object Setup {
                     .onFailure { screen.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
             })
         }
-        // Only asked for when a call action is set in During calls (the defaults are).
+        // Only asked for when anything is set in During calls (the defaults are).
         if (prefs.usesCalls()) {
             val calls = callPermissions.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
-            add(Step("Phone calls", if (calls) "Allowed" else "Needed to answer and end calls with gestures", calls, "Allow") {
+            add(Step("Phone calls", if (calls) "Allowed" else "Needed for the During calls gestures", calls, "Allow") {
                 it.requestPermissions(callPermissions, PERMISSIONS)
             })
         }

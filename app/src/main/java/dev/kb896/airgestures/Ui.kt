@@ -36,6 +36,12 @@ abstract class Screen : Activity() {
     fun dp(value: Float) = Cb.dp(this, value)
     fun dpi(value: Float) = dp(value).toInt()
 
+    override fun onResume() {
+        super.onResume()
+        // The phone permission may have been granted in system settings meanwhile.
+        BandService.instance?.watchCalls()
+    }
+
     /** A page's column: 20 dp at the sides, [bottom] dp of room under the last card. */
     fun pageColumn(bottom: Float = 24f) = column(gap = 20f).apply {
         setPadding(dpi(20f), dpi(16f), dpi(20f), dpi(bottom))

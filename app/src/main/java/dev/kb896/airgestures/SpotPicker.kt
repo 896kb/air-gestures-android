@@ -35,8 +35,14 @@ class SpotPicker(
 
     fun show() = put(bubble(), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL, dpi(56f))
 
-    /** Gone without a spot (another pick started, or the service is going away). */
+    /** Gone without a spot (the user cancelled, or the service is going away). */
     fun cancel() = finish(null)
+
+    /** Replaced by a newer pick: gone without telling anyone, so its caller doesn't react. */
+    fun drop() {
+        finished = true
+        remove()
+    }
 
     private fun finish(spot: Pair<Float, Float>?) {
         if (finished) return
