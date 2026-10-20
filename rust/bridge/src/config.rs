@@ -68,6 +68,8 @@ pub struct BandConfig {
     pub toggle: ToggleGesture,
     /// Run after that gesture toggled the controls (`""` = nothing).
     pub on_toggle: String,
+    /// Index / middle triple taps move to the next / previous profile (the app has 2+).
+    pub profile_triples: bool,
 }
 
 impl Default for BandConfig {
@@ -77,6 +79,7 @@ impl Default for BandConfig {
             autostart: true,
             toggle: ToggleGesture::MiddleHold,
             on_toggle: String::new(),
+            profile_triples: false,
         }
     }
 }
@@ -209,9 +212,13 @@ impl Config {
     /// [`GestureConfig::apply_mapping`], `dial_up`/`dial_down` for one
     /// pinch-and-turn step each way (both empty: the dial does nothing), and
     /// `hand=left|right|band` (which wrist the band should be set to; `band`
-    /// accepts whatever it reports).
+    /// accepts whatever it reports), and `triples=profiles` (index / middle triple taps
+    /// switch profiles; absent = off).
     pub fn apply_mapping(&mut self, mapping: &str) {
         self.gestures.apply_mapping(mapping);
+        self.band.profile_triples = mapping
+            .split(';')
+            .any(|pair| pair.split_once('=').is_some_and(|(key, value)| key.trim() == "triples" && value.trim() == "profiles"));
         for pair in mapping.split(';') {
             if let Some(("hand", hand)) = pair.split_once('=') {
                 self.band.hand = match hand.trim() {
@@ -264,6 +271,16 @@ mod tests {
         config.apply_mapping("dial_up=;dial_down=");
         assert_eq!(config.dial.target, DialTarget::Off);
         assert_eq!(config.dial.command(config.dial.target, true), None);
+    }
+
+    #[test]
+    fn profile_triples_come_from_the_mapping() {
+        let mut config = Config::default();
+        config.apply_mapping("swipe_up=media.next;triples=profiles");
+        assert!(config.band.profile_triples);
+        let mut config = Config::default();
+        config.apply_mapping("swipe_up=media.next");
+        assert!(!config.band.profile_triples);
     }
 
     #[test]

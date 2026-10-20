@@ -57,6 +57,15 @@ fn triple_of(tap: Tap) -> ToggleGesture {
     }
 }
 
+/// What a finger's triple tap does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Triple {
+    /// The controls toggle (the configured `toggle`).
+    Toggle,
+    /// Move to another profile: the app action to run.
+    Profile(&'static str),
+}
+
 fn double_of(tap: Tap) -> Option<Tap> {
     match tap {
         Tap::IndexTap => Some(Tap::IndexDoubleTap),
@@ -98,8 +107,10 @@ pub struct Controller {
     dial_ended_at: f64,
     last_dial_action: f64,
     held_tap: Option<HeldTap>,
-    /// Recent single taps of the toggle finger, for the triple tap.
+    /// Recent single taps of one finger, for its triple tap.
     toggle_taps: Vec<f64>,
+    /// The finger [`Self::toggle_taps`] belongs to.
+    toggle_finger: ToggleGesture,
     /// When a triple tap last toggled (its third tap may also report a double).
     toggled_at: f64,
     status: Status,
@@ -134,6 +145,7 @@ impl Controller {
             last_dial_action: f64::NEG_INFINITY,
             held_tap: None,
             toggle_taps: Vec::new(),
+            toggle_finger: ToggleGesture::None,
             toggled_at: f64::NEG_INFINITY,
             status,
         }
@@ -210,6 +222,7 @@ impl Controller {
         self.suspend();
         self.held_tap = None;
         self.toggle_taps.clear();
+        self.toggle_finger = ToggleGesture::None;
         self.router.reset();
         self.status.charging = None;
     }
@@ -287,23 +300,27 @@ impl Controller {
             return self.toggle_by_tap(now);
         }
         if let Recognized::Tap(tap) = gesture
-            && self.config.band.toggle != ToggleGesture::None
-            && triple_of(tap) == self.config.band.toggle
+            && let Some(triple) = self.triple_use(tap)
         {
             if double_of(tap).is_some() {
-                if self
-                    .toggle_taps
-                    .last()
-                    .is_some_and(|&last| now - last > TRIPLE_TAP_GAP)
+                if self.toggle_finger != triple_of(tap)
+                    || self
+                        .toggle_taps
+                        .last()
+                        .is_some_and(|&last| now - last > TRIPLE_TAP_GAP)
                 {
                     self.toggle_taps.clear();
+                    self.toggle_finger = triple_of(tap);
                 }
                 self.toggle_taps.push(now);
                 if self.toggle_taps.len() >= 3 {
                     self.toggle_taps.clear();
                     self.held_tap = None;
                     self.toggled_at = now;
-                    return self.toggle_by_tap(now);
+                    return match triple {
+                        Triple::Toggle => self.toggle_by_tap(now),
+                        Triple::Profile(action) => self.profile_by_tap(action),
+                    };
                 }
             } else if now - self.toggled_at < 0.15 {
                 // The third tap's own double tap: part of the triple.
@@ -327,18 +344,20 @@ impl Controller {
                 self.held_tap = None;
             }
             // A single tap whose double has an action waits to see whether it
-            // is the first half of that double tap.
+            // is the first half of that double tap; so does one whose finger's
+            // triple tap switches profiles (else a triple would run it twice).
             if let Some(double) = double_of(tap)
                 && !self
                     .config
                     .gestures
                     .command(Recognized::Tap(tap))
                     .is_empty()
-                && !self
+                && (!self
                     .config
                     .gestures
                     .command(Recognized::Tap(double))
                     .is_empty()
+                    || matches!(self.triple_use(tap), Some(Triple::Profile(_))))
             {
                 match &mut self.held_tap {
                     // The double's second tap: its double tap comes right with it.
@@ -365,6 +384,36 @@ impl Controller {
         }
         self.status.last_action = Some(command.clone());
         vec![Command::Run(command)]
+    }
+
+    /// What this tap's finger does on a triple tap, if anything.
+    fn triple_use(&self, tap: Tap) -> Option<Triple> {
+        let triple = triple_of(tap);
+        if triple == ToggleGesture::None {
+            return None;
+        }
+        if self.config.band.toggle == triple {
+            return Some(Triple::Toggle);
+        }
+        if !self.config.band.profile_triples {
+            return None;
+        }
+        Some(Triple::Profile(if triple == ToggleGesture::IndexTriple {
+            "profile.next"
+        } else {
+            "profile.previous"
+        }))
+    }
+
+    /// A triple tap that moves to another profile (not while the controls are off).
+    fn profile_by_tap(&mut self, action: &'static str) -> Vec<Command> {
+        if !self.enabled || !self.live {
+            return Vec::new();
+        }
+        self.status.gestures += 1;
+        self.status.last_gesture = Some("triple tap".into());
+        self.status.last_action = Some(action.into());
+        vec![Command::Run(action.into())]
     }
 
     fn toggle_by_tap(&mut self, now: f64) -> Vec<Command> {
@@ -505,5 +554,91 @@ impl Controller {
         self.gate.pause();
         self.reset_dial();
         self.dial_engaged = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use band_core::events::GestureMessage;
+
+    fn controller(mapping: &str) -> Controller {
+        let mut config = Config::default();
+        config.apply_mapping(mapping);
+        let mut controller = Controller::new(config);
+        controller.on_event(&Event::Connected, 0.0);
+        controller
+    }
+
+    /// A fresh band gesture (`action` = tap / doubletap) at `t`, with its own sequence number.
+    fn tap(controller: &mut Controller, finger: &str, action: &str, sequence: u64, t: f64) -> Vec<Command> {
+        let message = GestureMessage {
+            sequence,
+            timestamp_us: sequence * 1_000,
+            finger: finger.into(),
+            action: action.into(),
+            derived_action: String::new(),
+            synthetic: false,
+            received_at: t,
+        };
+        controller.on_event(&Event::Gesture(message), t)
+    }
+
+    /// Three taps the way the band reports them: the 2nd and 3rd also come with a double tap.
+    fn triple(controller: &mut Controller, finger: &str, at: f64) -> Vec<Command> {
+        let mut out = Vec::new();
+        out.extend(tap(controller, finger, "tap", 1, at));
+        out.extend(tap(controller, finger, "tap", 2, at + 0.2));
+        out.extend(tap(controller, finger, "doubletap", 3, at + 0.2));
+        out.extend(tap(controller, finger, "tap", 4, at + 0.4));
+        out.extend(tap(controller, finger, "doubletap", 5, at + 0.4));
+        out.extend(controller.fire_held_tap(at + 1.5));
+        out
+    }
+
+    fn runs(commands: &[Command]) -> Vec<&str> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::Run(action) => Some(action.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_index_triple_tap_is_the_next_profile() {
+        let mut c = controller("index_tap=media.play_pause;index_double=;triples=profiles");
+        assert_eq!(runs(&triple(&mut c, "index", 2.0)), ["profile.next"]);
+    }
+
+    #[test]
+    fn a_middle_triple_tap_is_the_previous_profile() {
+        let mut c = controller("middle_tap=;middle_double=volume.mute;triples=profiles");
+        assert_eq!(runs(&triple(&mut c, "middle", 2.0)), ["profile.previous"]);
+    }
+
+    #[test]
+    fn without_profile_triples_three_taps_are_just_taps() {
+        let mut c = controller("index_tap=media.play_pause;index_double=");
+        let commands = triple(&mut c, "index", 2.0);
+        assert!(!runs(&commands).contains(&"profile.next"));
+        assert!(runs(&commands).contains(&"media.play_pause"));
+    }
+
+    #[test]
+    fn with_profile_triples_a_lone_tap_still_runs_once_after_the_wait() {
+        let mut c = controller("index_tap=media.play_pause;index_double=;triples=profiles");
+        assert!(tap(&mut c, "index", "tap", 1, 2.0).is_empty());
+        assert!(c.fire_held_tap(2.2).is_empty());
+        assert_eq!(runs(&c.fire_held_tap(2.45)), ["media.play_pause"]);
+        assert!(c.fire_held_tap(3.0).is_empty());
+    }
+
+    #[test]
+    fn profile_triples_do_nothing_while_controls_are_off() {
+        let mut c = controller("index_tap=media.play_pause;index_double=;triples=profiles");
+        c.pause();
+        assert!(runs(&triple(&mut c, "index", 2.0)).is_empty());
     }
 }
