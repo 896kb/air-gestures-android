@@ -1,5 +1,6 @@
 package dev.kb896.airgestures
 
+import android.annotation.TargetApi
 import android.app.Activity
 import android.bluetooth.le.ScanFilter
 import android.companion.AssociationInfo
@@ -11,6 +12,7 @@ import android.companion.DevicePresenceEvent
 import android.companion.ObservingDevicePresenceRequest
 import android.content.Context
 import android.content.IntentSender
+import android.os.Build
 import java.util.regex.Pattern
 
 /**
@@ -18,9 +20,9 @@ import java.util.regex.Pattern
  * its service in the background, and wakes it when the band comes into range.
  */
 object Companion {
-    fun linked(activity: Activity): Boolean = Prefs(activity).associationId >= 0 &&
-        activity.getSystemService(CompanionDeviceManager::class.java).myAssociations
-            .any { it.id == Prefs(activity).associationId }
+    fun linked(context: Context): Boolean = Prefs(context).associationId >= 0 &&
+        context.getSystemService(CompanionDeviceManager::class.java).myAssociations
+            .any { it.id == Prefs(context).associationId }
 
     /**
      * Asks again to be woken when the linked band appears. Linking asks once, but a link
@@ -31,9 +33,26 @@ object Companion {
         val id = Prefs(context).associationId
         if (id < 0) return
         val manager = context.getSystemService(CompanionDeviceManager::class.java)
-        if (manager.myAssociations.none { it.id == id }) return
+        val association = manager.myAssociations.firstOrNull { it.id == id } ?: return
+        watch(manager, association)
+    }
+
+    /**
+     * Asks the system to wake the app when [association]'s band appears: by the
+     * association on Android 16, by the band's address before. Fails quietly (the
+     * link may have gone); the service asks again each time it starts.
+     */
+    private fun watch(manager: CompanionDeviceManager, association: AssociationInfo) {
         runCatching {
-            manager.startObservingDevicePresence(ObservingDevicePresenceRequest.Builder().setAssociationId(id).build())
+            if (Build.VERSION.SDK_INT >= 36) {
+                manager.startObservingDevicePresence(
+                    ObservingDevicePresenceRequest.Builder().setAssociationId(association.id).build(),
+                )
+            } else {
+                val address = association.deviceMacAddress ?: return
+                @Suppress("DEPRECATION")
+                manager.startObservingDevicePresence(address.toString())
+            }
         }
     }
 
@@ -66,11 +85,9 @@ object Companion {
 
             override fun onAssociationCreated(association: AssociationInfo) {
                 Prefs(activity).associationId = association.id
-                manager.startObservingDevicePresence(
-                    ObservingDevicePresenceRequest.Builder().setAssociationId(association.id).build(),
-                )
+                watch(manager, association)
                 log("linked ${association.displayName ?: "the band"} as a companion device")
-                val device = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                val device = if (Build.VERSION.SDK_INT >= 34) {
                     association.associatedDevice?.bleDevice?.device
                 } else {
                     null
@@ -88,11 +105,18 @@ object Companion {
 
 /** Woken by the system when the linked band appears: bring the service back if it should run. */
 class BandPresenceService : CompanionDeviceService() {
+    /** Android 16 and newer. */
+    @TargetApi(36)
     override fun onDevicePresenceEvent(event: DevicePresenceEvent) {
-        if (event.event == DevicePresenceEvent.EVENT_BLE_APPEARED && Prefs(this).running &&
-            BandService.instance == null
-        ) {
-            BandService.start(this)
-        }
+        if (event.event == DevicePresenceEvent.EVENT_BLE_APPEARED) appeared()
+    }
+
+    /** Android 13 to 15 (16 calls [onDevicePresenceEvent] instead). */
+    @Deprecated("Deprecated in Java")
+    override fun onDeviceAppeared(associationInfo: AssociationInfo) = appeared()
+
+    /** Only when the band should run and isn't already, so a second call changes nothing. */
+    private fun appeared() {
+        if (Prefs(this).running && BandService.instance == null) BandService.start(this)
     }
 }
