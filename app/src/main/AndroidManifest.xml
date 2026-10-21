@@ -75,6 +75,14 @@
             android:exported="false" />
         <activity android:name=".SetupActivity" android:exported="false" />
         <activity android:name=".ActivityLogActivity" android:exported="false" />
+        <!-- The widget's profile picker: a sheet over the home screen, never in recents. -->
+        <activity
+            android:name=".ProfilePickerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
             android:name=".MetaSignIn"

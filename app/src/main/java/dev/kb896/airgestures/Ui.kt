@@ -255,7 +255,7 @@ abstract class Screen : Activity() {
     class Option(val label: String, val selected: Boolean, val iconRes: Int = 0, val image: android.graphics.drawable.Drawable? = null)
 
     /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
-    fun choose(title: String, options: List<Option>, heading: String = "Gesture", onChoice: (Int) -> Unit) {
+    fun choose(title: String, options: List<Option>, heading: String = "Gesture", onChoice: (Int) -> Unit): android.app.Dialog {
         val dialog = android.app.Dialog(this)
         val list = column(gap = 2f)
         val sheet = column(gap = 12f).apply {
@@ -317,6 +317,7 @@ abstract class Screen : Activity() {
             setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         dialog.show()
+        return dialog
     }
 
     /** A confirmation in the picker's style: title, body, Cancel and the action. */
