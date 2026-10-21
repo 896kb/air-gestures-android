@@ -61,8 +61,9 @@ From the owner's review of the dev build and the news screenshots.
     - **ON** (green: `Cb.Signal.LIVE` fill, its dark label) when the band is connected
     - **OFF** (coral: `Cb.Signal.STOP`) when the connection is off (no service)
     - **DISCONNECTED** (grey: the ink-500 chip) when the connection is on but the band isn't connected (searching, Bluetooth off)
+  - **The battery after the state:** a centred dot, then the band's charge, e.g. **ON · 84 %**. It's shown only while there's a live reading from the band (ON). OFF and DISCONNECTED have no reading, and the widget never shows a stale one.
   - **Below it:** the current profile's name and a ›.
-  - No band name, no battery, no sentence.
+  - No band name, no sentence.
 - **Right:** two round buttons.
   - **Power:** green while the connection is on, coral while it's off.
   - **Gestures (hand):** green while gestures are on, coral while they're off or the connection is off.
@@ -93,11 +94,11 @@ Make it match the site:
 
 ## Out of scope
 
-Anything else on the widget: battery, last gesture, a 2×2 size. The tiles stay as they are.
+Anything else on the widget: last gesture, a 2×2 size. The tiles stay as they are.
 
 ## Testing
 
-- **Unit (JVM):** the widget state mapping, as a pure function `WidgetState.of(running, connected, paused)` → (chip, power colour, hand colour), with tests for every combination.
+- **Unit (JVM):** the widget state mapping, as a pure function `WidgetState.of(running, connected, paused, battery)` → (chip text, chip colour, power colour, hand colour), the chip text including " · 84 %" only when connected with a reading, with tests for every combination.
 - **Emulator:**
   - the before/after screenshots from §1
   - the widget placed on the home screen in each state: OFF, then DISCONNECTED by starting the connection with no band, ON through the debug hook if possible, otherwise its screenshot in the remaining states
