@@ -26,6 +26,9 @@ use crate::identity::{EnrollmentIdentity, trust_digest};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
+/// The stream probe shows this many messages of each kind, then one in [`PROBE_EVERY`].
+const PROBE_SHOWN: usize = 40;
+const PROBE_EVERY: usize = 200;
 /// The channel as the protocol logic knows it: the direction flag and the low
 /// byte. Newer firmware sets extra bits (0x1c00) on channels it answers or
 /// opens: 0x9c01 for 0x8001, 0x9c02 for 0x8002.
@@ -46,6 +49,8 @@ const GESTURE: u32 = 0x0200020d;
 const GYRO: u32 = 0x0200020f;
 const ORIENTATION: u32 = 0x02000212;
 const LINK_SETUP: u32 = 0x02001000;
+/// The firmware's log lines, sent once some stream flag beyond 3/6/8 is on (found by the probe).
+const BAND_LOG: u32 = 0x02000316;
 
 const FINGERS: [&str; 5] = ["unknown", "thumb", "index", "middle", "notApplicable"];
 const ACTIONS: [&str; 21] = [
@@ -171,6 +176,12 @@ pub struct BandSession {
     diagnostics: Vec<String>,
     /// Describe every frame once streaming, too (debug logging).
     log_frames: bool,
+    /// Extra stream flags to request, to find out what else the band sends (see `set_probe`).
+    probe: Vec<u32>,
+    /// The last stream flags the band reported while probing, so only a change is logged.
+    probe_flags: Option<String>,
+    /// Messages of each unknown type seen while probing, to keep the log readable.
+    probe_counts: HashMap<u32, usize>,
     peer_seed: Option<Vec<u8>>,
     pending: Vec<u8>,
     transmitter: Option<AirShieldCipher>,
@@ -236,6 +247,9 @@ impl BandSession {
             guessing: false,
             diagnostics: Vec::new(),
             log_frames: false,
+            probe: Vec::new(),
+            probe_flags: None,
+            probe_counts: HashMap::new(),
             peer_seed: None,
             pending: Vec::new(),
             transmitter: None,
@@ -298,6 +312,31 @@ impl BandSession {
 
     /// Describe what was skipped since the last call (relay/control records,
     /// frames nothing handles), for the log. Types and sizes only, no payloads.
+    /// Also request these stream flags, and describe what comes back: the flags the band
+    /// reports, every gesture message in full, and any message type the session doesn't
+    /// know. For finding streams beyond gestures and motion (handwriting?). Set before
+    /// connecting; the known flags (2 = raw sEMG, 3, 6, 8) are left out.
+    pub fn set_probe(&mut self, fields: Vec<u32>) {
+        self.probe = fields
+            .into_iter()
+            .filter(|field| *field != 0 && *field != 2 && !STREAM_FIELDS.contains(field))
+            .collect();
+    }
+
+    fn probing(&self) -> bool {
+        !self.probe.is_empty()
+    }
+
+    /// The first [`PROBE_SHOWN`] messages of a kind, then every [`PROBE_EVERY`]th, with its count.
+    fn probe_note(&mut self, kind: u32, line: impl FnOnce() -> String) {
+        let count = self.probe_counts.entry(kind).or_default();
+        *count += 1;
+        let count = *count;
+        if count <= PROBE_SHOWN || count % PROBE_EVERY == 0 {
+            self.diagnostics.push(format!("probe #{count} {}", line()));
+        }
+    }
+
     pub fn take_diagnostics(&mut self) -> Vec<String> {
         if let Some(receiver) = self.receiver.as_mut() {
             self.diagnostics.append(&mut receiver.skipped);
@@ -665,6 +704,7 @@ impl BandSession {
         self.raw_requested = true;
         let control: Vec<u8> = std::iter::once(field_int(2, u64::from(enabled)))
             .chain(STREAM_FIELDS.iter().map(|&field| field_int(field, 1)))
+            .chain(self.probe.iter().map(|&field| field_int(field, 1)))
             .flatten()
             .collect();
         let frame = encode_frame(
@@ -732,6 +772,10 @@ impl BandSession {
             return Ok(Vec::new());
         }
         self.hand_request = None;
+        if self.probing() && request.reading {
+            // Every setting the band reports, to find ones beyond the hand (a model choice?).
+            self.diagnostics.push(format!("probe: band config: {}", fields.describe_nested(0)));
+        }
         let failure = |message: &str| vec![Event::HandednessFailure(message.to_owned())];
         if time >= request.deadline {
             self.hand = None;
@@ -1046,6 +1090,7 @@ impl BandSession {
         if enabled == Some(false) && self.raw_requested {
             selected.insert(0, 2);
         }
+        selected.extend(&self.probe);
         let control: Vec<u8> = match enabled {
             Some(on) => selected
                 .iter()
@@ -1163,6 +1208,23 @@ impl BandSession {
         }
         // Ignore unrelated services without trying to interpret their protobuf schema.
         if ![RPC_RESPONSE, RAW_EMG, GESTURE, GYRO, ORIENTATION].contains(&kind) {
+            if self.probing() && self.setup_stage == SetupStage::Input {
+                // The firmware's own log lines (`[time] <inf> module: text`): every one, as text.
+                if kind == BAND_LOG
+                    && let Some(text) = ProtoFields::parse(&frame.payload)
+                        .ok()
+                        .and_then(|fields| ProtoFields::parse(fields.bytes(3).ok()?).ok())
+                        .and_then(|line| String::from_utf8(line.bytes(1).ok()?.to_vec()).ok())
+                {
+                    self.diagnostics.push(format!("band log: {}", text.trim_end()));
+                    return Ok(Vec::new());
+                }
+                let shown = ProtoFields::parse(&frame.payload)
+                    .map_or_else(|_| "not protobuf".to_owned(), |fields| fields.describe());
+                let channel = frame.channel;
+                let size = frame.payload.len();
+                self.probe_note(kind, || format!("unknown kind {kind:08x} ch {channel:#x} {size}B: {shown}"));
+            }
             return Ok(Vec::new());
         }
         if kind == RPC_RESPONSE
@@ -1214,9 +1276,27 @@ impl BandSession {
                     return Ok(Vec::new());
                 }
                 if fields.integer(2)? != 1 {
+                    if self.probing() {
+                        // The extra flags may be what it rejects: subscribe again without them.
+                        self.diagnostics.push(format!(
+                            "probe: the band rejected the subscription with flags {:?} ({}); retrying without",
+                            self.probe,
+                            fields.describe()
+                        ));
+                        self.probe.clear();
+                        outgoing.extend(self.stream_request(3, Some(true))?);
+                        return Ok(Vec::new());
+                    }
                     return Err(perr("The band rejected the input subscription"));
                 }
                 let flags = ProtoFields::parse(fields.bytes(5)?)?;
+                if self.probing() {
+                    let shown = flags.describe();
+                    if self.probe_flags.as_deref() != Some(shown.as_str()) {
+                        self.diagnostics.push(format!("probe: stream flags (request {request}): {shown}"));
+                        self.probe_flags = Some(shown);
+                    }
+                }
                 self.streams_enabled = all_set(&flags, &STREAM_FIELDS, 1)?;
                 if !self.streams_enabled {
                     return Err(perr("The band input subscription stopped"));
@@ -1271,6 +1351,12 @@ impl BandSession {
                 synthetic: fields.integer(12)? != 0,
                 received_at: time,
             };
+            if self.probing() {
+                let shown = fields.describe();
+                let name = format!("{} {} {}", gesture.finger, gesture.action, gesture.derived_action);
+                // Every one: they're few, and the ones during handwriting are the point.
+                self.diagnostics.push(format!("probe gesture {name}: {shown}"));
+            }
             self.dial.gesture(&gesture, time);
             events.push(Event::Gesture(gesture));
             events.extend(self.engagement_events());

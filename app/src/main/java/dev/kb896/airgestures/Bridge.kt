@@ -24,6 +24,8 @@ object Bridge {
     @JvmStatic external fun setDial(handle: Long, dial: String)
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)
+    /** Before [request]: also ask for these stream flags (`1,4,7`) and log what comes back (see Prefs.probe). */
+    @JvmStatic external fun setProbe(handle: Long, fields: String)
     @JvmStatic external fun close(handle: Long)
 
     // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.

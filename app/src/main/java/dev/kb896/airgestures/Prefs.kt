@@ -135,6 +135,14 @@ class Prefs(context: Context) {
         prefs.edit().putString("announced", kept.joinToString(";")).apply()
     }
 
+    /**
+     * Debug: extra stream flags to ask the band for on each connection (`1,4,5,7`), logging
+     * what it sends that the app doesn't know. Empty = off. Set by DebugActions.
+     */
+    var probe: String
+        get() = prefs.getString("probe", "").orEmpty()
+        set(value) = prefs.edit().putString("probe", value).apply()
+
     var associationId: Int
         get() = prefs.getInt("association", -1)
         set(value) = prefs.edit().putInt("association", value).apply()

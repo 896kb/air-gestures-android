@@ -42,6 +42,8 @@ pub struct Connection {
     next_battery: f64,
     actions: Vec<String>,
     log: Vec<String>,
+    /// The stream probe is on: the session's notes go to the log.
+    probing: bool,
 }
 
 #[derive(Serialize)]
@@ -85,6 +87,7 @@ impl Connection {
             next_battery: 0.0,
             actions: Vec::new(),
             log: Vec::new(),
+            probing: false,
         })
     }
 
@@ -144,6 +147,9 @@ impl Connection {
 
     /// Log lines since the last call ("connected", "gesture swipe left", …).
     pub fn take_log(&mut self) -> Vec<String> {
+        if self.probing {
+            self.log.extend(self.session.take_diagnostics());
+        }
         std::mem::take(&mut self.log)
     }
 
@@ -167,6 +173,14 @@ impl Connection {
         if paused {
             self.controller.pause();
         }
+    }
+
+    /// Before the first `request`: also ask the band for these stream flags (comma-separated,
+    /// e.g. `1,4,5,7`) and log what it sends that the session doesn't know. Empty = off.
+    pub fn set_probe(&mut self, fields: &str) {
+        let fields: Vec<u32> = fields.split(',').filter_map(|field| field.trim().parse().ok()).collect();
+        self.probing = !fields.is_empty();
+        self.session.set_probe(fields);
     }
 
     pub fn set_dial(&mut self, dial: &str) {

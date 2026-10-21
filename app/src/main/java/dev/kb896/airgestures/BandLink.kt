@@ -202,7 +202,13 @@ class BandLink(
         val guess = File(dir, "band.json").takeIf { it.exists() }
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
-            synchronized(lock) { handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping()) }
+            synchronized(lock) {
+                handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping())
+                prefs.probe.takeIf { it.isNotEmpty() }?.let {
+                    Bridge.setProbe(handle, it)
+                    log("probing stream flags $it")
+                }
+            }
             true
         } catch (e: Exception) {
             log("owner key: ${e.message}")

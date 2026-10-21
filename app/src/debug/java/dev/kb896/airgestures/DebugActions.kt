@@ -11,10 +11,26 @@ import android.util.Log
  *     adb shell am broadcast -n dev.kb896.airgestures.dev/dev.kb896.airgestures.DebugActions \
  *         -a dev.kb896.airgestures.RUN --es action nav.next
  *
+ * Or probe the band's streams from the next connection on (reconnects now; "" turns it off),
+ * then read `adb logcat -s AirGestures`:
+ *
+ *     adb shell am broadcast -n dev.kb896.airgestures.dev/dev.kb896.airgestures.DebugActions \
+ *         -a dev.kb896.airgestures.RUN --es probe 1,4,5,7,9,10,11,12
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra("probe")?.let { probe ->
+            val prefs = Prefs(context)
+            prefs.probe = probe.trim()
+            Log.i("AirGestures", "debug probe ${prefs.probe.ifEmpty { "off" }}")
+            if (prefs.running) {
+                BandService.stop(context)
+                BandService.start(context)
+            }
+            return
+        }
         val action = intent.getStringExtra("action") ?: return
         val result = runner(context).run(action)
         Log.i("AirGestures", "debug run $action: ${result ?: "ok"}")
