@@ -91,6 +91,7 @@ class SpotPicker(
         val room = FrameLayout(service).apply {
             setPadding(dpi(24f), dpi(24f), dpi(24f), dpi(24f))
             clipToPadding = false
+            clipChildren = false
             addView(view)
         }
         val params = WindowManager.LayoutParams(
@@ -145,12 +146,13 @@ class SpotPicker(
             this.text = text
             isSingleLine = true
             gravity = Gravity.CENTER
-            setPadding(dpi(18f), dpi(12f), dpi(18f), dpi(12f))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(999f)
-                setColor(if (main) Cb.Signal.STOP.fill else Cb.PAGE)
-            }
-            elevation = dp(6f)
+            // Raised the app's way: the drawable draws its own shadow inside its margin, so no
+            // window or parent edge can cut it (elevation shadows don't hold up in overlays).
+            val shape = NeuDrawable(context, 999f, fill = if (main) Cb.Signal.STOP.fill else Cb.PAGE, solid = main, soft = false)
+            background = shape
+            val m = shape.margin
+            setPadding(m + dpi(18f), m + dpi(12f), m + dpi(18f), m + dpi(12f))
+            tag = main
             setOnClickListener { onClick() }
         }
 
@@ -162,15 +164,24 @@ class SpotPicker(
         }
         setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
         clipToPadding = false
+        clipChildren = false
     }
 
     /** The buttons at the bottom, on one raised bar in the page tone. */
     private fun bar(vararg views: TextView) = pills(*views).apply {
-        // Only the bar is raised: shadows of pills on it would be cut by its edge.
-        views.forEach { it.elevation = 0f }
-        setPadding(dpi(6f), dpi(6f), dpi(6f), dpi(6f))
-        background = GradientDrawable().apply { cornerRadius = dp(999f); setColor(Cb.PAGE) }
-        elevation = dp(10f)
+        // Only the bar is raised; the pills on it are flat (coral for the main one).
+        views.forEach { view ->
+            val main = view.tag == true
+            view.background = GradientDrawable().apply {
+                cornerRadius = dp(999f)
+                setColor(if (main) Cb.Signal.STOP.fill else Cb.PAGE)
+            }
+            view.setPadding(dpi(18f), dpi(12f), dpi(18f), dpi(12f))
+        }
+        val shape = NeuDrawable(service, 999f, soft = true)
+        background = shape
+        val m = shape.margin
+        setPadding(m + dpi(6f), m + dpi(6f), m + dpi(6f), m + dpi(6f))
     }
 
     private fun hint(context: Context, text: String) = Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
@@ -186,16 +197,19 @@ class SpotPicker(
         // Transparent room for the shadows: this window is only as big as its content.
         setPadding(dpi(24f), dpi(16f), dpi(24f), dpi(24f))
         clipToPadding = false
+        clipChildren = false
         addView(hint(service, "Open the app first").apply {
             textSize = 12f
             setTextColor(Cb.INK_500)
             setPadding(dpi(12f), dpi(6f), dpi(12f), dpi(6f))
-        })
+        }, LinearLayout.LayoutParams(-2, -2))
         addView(LinearLayout(service).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            // The buttons' shadows reach past this row: don't cut them at its edge.
+            clipChildren = false
             addView(pill(service, mode.bubble, main = true) { start() }.apply { ellipsize = android.text.TextUtils.TruncateAt.END })
-            addView(close(), LinearLayout.LayoutParams(dpi(44f), dpi(44f)).apply { marginStart = dpi(10f) })
+            addView(close(), LinearLayout.LayoutParams(dpi(44f + 16f), dpi(44f + 16f)))
         }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dpi(8f) })
     }
 
@@ -203,12 +217,10 @@ class SpotPicker(
     private fun close() = ImageView(service).apply {
         setImageResource(R.drawable.ic_x)
         imageTintList = android.content.res.ColorStateList.valueOf(Cb.INK_900)
-        setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
-        background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Cb.PAGE)
-        }
-        elevation = dp(6f)
+        val shape = NeuDrawable(service, 999f, soft = false)
+        background = shape
+        val m = shape.margin
+        setPadding(m + dpi(12f), m + dpi(12f), m + dpi(12f), m + dpi(12f))
         contentDescription = "Cancel"
         setOnClickListener { cancel() }
     }
@@ -314,8 +326,8 @@ class SpotPicker(
     /** Swipe here: a coral start orb and a green end orb, the path glowing between them. */
     @SuppressLint("ViewConstructor")
     private inner class SwipeLayer(context: Context) : Layer(context, "Drag coral to start, green to end") {
-        private val from = Orb(Cb.Signal.STOP.fill)
-        private val to = Orb(Cb.Signal.LIVE.fill)
+        private val from = Orb(Cb.Signal.STOP.fill, marked = false)
+        private val to = Orb(Cb.Signal.LIVE.fill, marked = false)
         private val start = current?.takeIf { it.startsWith(Strokes.SWIPE) }?.let(Strokes::parse)
         private var x1 = bounds.width() * (start?.points?.first()?.x ?: .5f)
         private var y1 = bounds.height() * (start?.points?.first()?.y ?: .72f)
@@ -554,8 +566,11 @@ class SpotPicker(
         }
     }
 
-    /** A glowing orb in [color], breathing, bigger and brighter while held. */
-    private inner class Orb(color: Int) {
+    /**
+     * A glowing orb in [color], breathing, bigger and brighter while held. [marked] puts a white
+     * point on its centre, the exact spot (a tap's target; a swipe's ends don't need one).
+     */
+    private inner class Orb(color: Int, private val marked: Boolean = true) {
         val radius = dp(22f)
         var held = false
         private var lift = 0f
@@ -618,8 +633,10 @@ class SpotPicker(
             oval.set(-radius * .62f, -radius * .72f, -radius * .08f, -radius * .36f)
             canvas.drawOval(oval, shine)
             canvas.restore()
-            canvas.drawCircle(0f, 0f, dp(3f), point)
-            canvas.drawCircle(0f, 0f, dp(3f), pointEdge)
+            if (marked) {
+                canvas.drawCircle(0f, 0f, dp(3f), point)
+                canvas.drawCircle(0f, 0f, dp(3f), pointEdge)
+            }
             canvas.restore()
         }
     }
