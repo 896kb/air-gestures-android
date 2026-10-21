@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A widget button that's on: the app's coral. -->
+<!-- A widget button that's on: brand green. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="#FFFF5F5F" />
+    <solid android:color="#FF4DFFA3" />
 </shape>

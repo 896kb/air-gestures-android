@@ -1,67 +1,94 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The 4×1 band widget, in the app's page tone; filled by BandWidget. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+    The 4×1 band widget, in the app's page tone; filled by BandWidget. The band itself sits
+    faintly behind the state chip (ON · 84 %, OFF, DISCONNECTED) and the profile's name.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_background"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingStart="14dp"
-    android:paddingEnd="10dp">
+    android:background="@drawable/widget_background">
 
     <ImageView
-        android:layout_width="32dp"
-        android:layout_height="32dp"
-        android:layout_marginEnd="12dp"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:adjustViewBounds="true"
+        android:alpha="0.28"
         android:importantForAccessibility="no"
-        android:src="@drawable/app_mark" />
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/widget_band" />
 
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="10dp">
 
-        <TextView
-            android:id="@+id/widget_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:fontFamily="sans-serif-medium"
-            android:singleLine="true"
-            android:text="Meta Band · Off"
-            android:textColor="#FF111214"
-            android:textSize="15sp" />
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginEnd="12dp"
+            android:importantForAccessibility="no"
+            android:src="@drawable/app_mark" />
 
-        <TextView
-            android:id="@+id/widget_subtitle"
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:fontFamily="sans-serif"
-            android:singleLine="true"
-            android:text="Tap the power button to connect"
-            android:textColor="#FF5C5E63"
-            android:textSize="12sp" />
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_chip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/widget_chip_stop"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.08"
+                android:paddingStart="8dp"
+                android:paddingTop="2dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="2dp"
+                android:singleLine="true"
+                android:text="OFF"
+                android:textColor="#FF1E0F0E"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/widget_profile"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:contentDescription="Choose a profile"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:singleLine="true"
+                android:text="Profile 1  ›"
+                android:textColor="#FF111214"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/widget_power"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/widget_button_stop"
+            android:contentDescription="Band connection"
+            android:padding="10dp"
+            android:src="@drawable/ic_power" />
+
+        <ImageView
+            android:id="@+id/widget_controls"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/widget_button_stop"
+            android:contentDescription="Gestures"
+            android:padding="10dp"
+            android:src="@drawable/ic_hand" />
     </LinearLayout>
-
-    <ImageView
-        android:id="@+id/widget_power"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:background="@drawable/widget_button"
-        android:contentDescription="Band connection"
-        android:padding="10dp"
-        android:src="@drawable/ic_power" />
-
-    <ImageView
-        android:id="@+id/widget_controls"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_marginStart="8dp"
-        android:background="@drawable/widget_button"
-        android:contentDescription="Controls"
-        android:padding="10dp"
-        android:src="@drawable/ic_hand" />
-</LinearLayout>
+</FrameLayout>

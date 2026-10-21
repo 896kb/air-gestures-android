@@ -148,13 +148,14 @@ class BandWidget : AppWidgetProvider() {
         private fun views(context: Context): RemoteViews {
             val state = BandService.state.value
             val running = BandService.instance != null
+            val ui = WidgetState.of(running, state.phase == Phase.CONNECTED, state.paused, state.battery)
             val views = RemoteViews(context.packageName, R.layout.widget_band)
-            views.setTextViewText(R.id.widget_title, "${state.band ?: "Meta Band"} · ${Surfaces.status(context)}")
-            val details = listOfNotNull(
-                state.profile?.let { "Profile: $it" },
-                if (running) (if (state.paused) "Controls off" else "Controls on") else "Tap the power button to connect",
-            ).joinToString(" · ")
-            views.setTextViewText(R.id.widget_subtitle, details)
+            views.setTextViewText(R.id.widget_chip, ui.chip)
+            views.setInt(R.id.widget_chip, "setBackgroundResource", chipBackground(ui.chipTone))
+            views.setTextColor(R.id.widget_chip, label(ui.chipTone))
+            // The profile in force, from the store: it shows while the connection is off too.
+            views.setTextViewText(R.id.widget_profile, "${Profiles.active(context).name}  ›")
+            views.setOnClickPendingIntent(R.id.widget_profile, picker(context))
             views.setOnClickPendingIntent(R.id.widget, Surfaces.openApp(context))
             views.setOnClickPendingIntent(
                 R.id.widget_power,
@@ -164,18 +165,40 @@ class BandWidget : AppWidgetProvider() {
                     else -> Surfaces.openApp(context)
                 },
             )
-            views.setInt(R.id.widget_power, "setBackgroundResource", if (running) R.drawable.widget_button_on else R.drawable.widget_button)
+            views.setInt(R.id.widget_power, "setBackgroundResource", button(ui.power))
+            views.setInt(R.id.widget_power, "setColorFilter", label(ui.power))
             views.setOnClickPendingIntent(
                 R.id.widget_controls,
                 if (running) Surfaces.service(context, BandService.ACTION_TOGGLE_CONTROLS, 33) else Surfaces.openApp(context),
             )
             views.setImageViewResource(R.id.widget_controls, if (running && state.paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
-            views.setInt(
-                R.id.widget_controls,
-                "setBackgroundResource",
-                if (running && !state.paused) R.drawable.widget_button_on else R.drawable.widget_button,
-            )
+            views.setInt(R.id.widget_controls, "setBackgroundResource", button(ui.hand))
+            views.setInt(R.id.widget_controls, "setColorFilter", label(ui.hand))
             return views
         }
+
+        private fun chipBackground(tone: WidgetState.Tone) = when (tone) {
+            WidgetState.Tone.LIVE -> R.drawable.widget_chip_live
+            WidgetState.Tone.STOP -> R.drawable.widget_chip_stop
+            WidgetState.Tone.GREY -> R.drawable.widget_chip_grey
+        }
+
+        private fun button(tone: WidgetState.Tone) =
+            if (tone == WidgetState.Tone.LIVE) R.drawable.widget_button_live else R.drawable.widget_button_stop
+
+        /** The dark label that goes on each signal colour (white on the grey chip). */
+        private fun label(tone: WidgetState.Tone) = when (tone) {
+            WidgetState.Tone.LIVE -> Cb.Signal.LIVE.label
+            WidgetState.Tone.STOP -> Cb.Signal.STOP.label
+            WidgetState.Tone.GREY -> 0xFFFFFFFF.toInt()
+        }
+
+        /** The profile picker, over the home screen. */
+        private fun picker(context: Context) = PendingIntent.getActivity(
+            context,
+            34,
+            Intent(context, ProfilePickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 }
