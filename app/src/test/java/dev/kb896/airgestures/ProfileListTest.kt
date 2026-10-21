@@ -85,4 +85,16 @@ class ProfileListTest {
         val json = list.toJson()
         assertEquals(list, ProfileList.fromJson(json.first, json.second, list.picked))
     }
+
+    @Test fun pickingMakesAProfileTheManualOne() {
+        val (list, second) = ProfileList.migrated(mapOf(), "volume").added(mapOf(), "volume")
+        val picked = list.picking(second.id)
+        assertEquals(second.id, picked.picked)
+        assertEquals(second, picked.active(null))
+    }
+
+    @Test fun pickingAnUnknownProfileChangesNothing() {
+        val list = ProfileList.migrated(mapOf(), "volume")
+        assertEquals(list, list.picking("nope"))
+    }
 }

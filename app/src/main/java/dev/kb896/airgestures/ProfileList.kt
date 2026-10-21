@@ -28,6 +28,9 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
         return copy(picked = profiles[Math.floorMod(at + by, profiles.size)].id)
     }
 
+    /** [id] becomes the manual profile (the widget's picker); an unknown id changes nothing. */
+    fun picking(id: String) = if (profile(id) == null) this else copy(picked = id)
+
     /** A new profile at the end, with the lowest free number for its id and name. */
     fun added(map: Map<String, String>, dial: String): Pair<ProfileList, Profile> {
         val n = generateSequence(1) { it + 1 }.first { n -> profiles.none { it.id == "p$n" || it.name == "Profile $n" } }

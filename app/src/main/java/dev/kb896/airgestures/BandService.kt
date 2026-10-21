@@ -150,6 +150,13 @@ class BandService : Service(), BandLink.Listener {
         return null
     }
 
+    /** The widget's picker chose a profile: like a triple tap, but straight to [id]. */
+    fun pick(id: String): String? {
+        if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
+        switched(Profiles.update(this) { it.picking(id) }.active(Profiles.foreground))
+        return null
+    }
+
     /** Another profile is in force: the band gets it, and the user is told which. */
     private fun switched(profile: Profile, back: Boolean = false) {
         remap()
@@ -344,6 +351,13 @@ class BandService : Service(), BandLink.Listener {
     }
 
     companion object {
+        /** Pick a profile from outside the service (the widget): through it when it runs, else just stored. */
+        fun pickProfile(context: Context, id: String) {
+            val service = instance
+            if (service != null) service.pick(id) else Profiles.update(context) { it.picking(id) }
+            Surfaces.refresh(context)
+        }
+
         private const val CHANNEL = "band"
         private const val NOTIFICATION = 1
         /** The channel of the removed controls on/off pop-up. */
