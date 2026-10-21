@@ -275,6 +275,9 @@ abstract class Screen : Activity() {
                 }
             }.apply {
                 isVerticalScrollBarEnabled = false
+                // Rows cut by the scroll's edge fade out instead.
+                isVerticalFadingEdgeEnabled = true
+                setFadingEdgeLength(dpi(24f))
                 addView(list)
             })
         }
@@ -307,8 +310,9 @@ abstract class Screen : Activity() {
                 }
             })
         }
+        // Room for the sheet's 24 dp shadow, most of it below: a tighter window cuts it and squares the corners.
         dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
+            setPadding(dpi(16f), dpi(20f), dpi(16f), dpi(36f))
             addView(sheet)
         })
         dialog.window?.apply {
@@ -371,8 +375,9 @@ abstract class Screen : Activity() {
                 addView(pill(action) { if (onAction()) dialog.dismiss() }.first)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
+        // Room for the sheet's 24 dp shadow, most of it below: a tighter window cuts it and squares the corners.
         dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f))
+            setPadding(dpi(16f), dpi(20f), dpi(16f), dpi(36f))
             addView(sheet)
         })
         dialog.window?.apply {

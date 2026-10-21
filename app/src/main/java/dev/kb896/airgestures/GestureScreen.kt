@@ -241,6 +241,8 @@ abstract class GestureScreen : Screen() {
                 setLineSpacing(0f, 1.3f)
             }
         val body = column(gap = 10f).apply {
+            // Room under the last row, so its pills keep their shadow once scrolled to the end.
+            setPadding(0, 0, 0, dpi(10f))
             addView(text(14f, "The gesture sends this to every app listening, and does nothing else itself:", Cb.INK_500))
             addView(row(gap = 8f).apply {
                 setPadding(dpi(12f), dpi(8f), dpi(6f), dpi(8f))
@@ -259,7 +261,7 @@ abstract class GestureScreen : Screen() {
             addView(Cb.label(context, "MacroDroid"))
             addView(text(14f, "Trigger: Intent Received, the same action. Tick the extras gesture and steps to get them as variables."))
             addView(Cb.label(context, "Home Assistant"))
-            addView(text(14f, "In its app: Settings, Companion app, Manage sensors, Last update trigger: turn it on and add the action as a new intent, then force-stop the app once. Automations can then trigger on the event android.intent_received; the extras are in its data."))
+            addView(text(14f, "Needs the Home Assistant app 2026.8.4 or newer. In it: Settings, Companion app, Manage sensors, Last update trigger: enable it and turn on Add new intent, then check the new intent reads the line above (the switch saves the next broadcast it gets) and force-stop the app once. Automations then trigger on the event android.intent_received; the extras are in its data."))
             addView(row(gap = 10f).apply {
                 addView(pill("Send a test") {
                     sendBroadcast(android.content.Intent(Actions.AUTOMATION_ACTION).putExtra("gesture", "test"))
@@ -273,11 +275,14 @@ abstract class GestureScreen : Screen() {
         // Long on a small screen: the body scrolls inside the sheet.
         val scroll = object : android.widget.ScrollView(this) {
             override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-                val most = (resources.displayMetrics.heightPixels * .62f).toInt()
+                val most = (resources.displayMetrics.heightPixels * .66f).toInt()
                 super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(most, MeasureSpec.AT_MOST))
             }
         }.apply {
             isVerticalScrollBarEnabled = false
+            // What the scroll's edge cuts fades out instead of ending in a hard line.
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(dpi(24f))
             addView(body)
         }
         sheet("Send to automation", scroll, "Close", cancel = false) { true }
