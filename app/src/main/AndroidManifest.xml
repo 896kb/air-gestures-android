@@ -73,6 +73,15 @@
         <receiver
             android:name=".SequenceRunner"
             android:exported="false" />
+
+        <!-- An app saying it is in front (its own profile) or left; see ProfileReceiver. -->
+        <receiver
+            android:name=".ProfileReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.kb896.airgestures.SET_PROFILE" />
+            </intent-filter>
+        </receiver>
         <activity android:name=".SetupActivity" android:exported="false" />
         <activity android:name=".ActivityLogActivity" android:exported="false" />
         <!-- The widget's profile picker: a sheet over the home screen, never in recents. -->

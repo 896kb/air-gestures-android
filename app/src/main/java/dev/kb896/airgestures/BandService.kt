@@ -108,6 +108,7 @@ class BandService : Service(), BandLink.Listener {
         state.update { copy(paused = paused) }
         refreshNotification()
         watchIdle()
+        broadcastStatus()
     }
 
     private val idleCheck = Runnable { if (idleNow()) Alerts.idle(this) }
@@ -192,6 +193,7 @@ class BandService : Service(), BandLink.Listener {
         state.update { copy(phase = phase, band = band ?: this.band) }
         refreshNotification()
         watchIdle()
+        broadcastStatus()
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
@@ -227,7 +229,36 @@ class BandService : Service(), BandLink.Listener {
             Alerts.battery(this, now.band, level, now.charging)
         }
         refreshNotification()
+        broadcastStatus()
     }.let {}
+
+    /** What [broadcastStatus] last sent, so an unchanged state sends nothing. */
+    private var sent: List<Any?>? = null
+
+    /**
+     * Tell the apps that announced themselves how the band is: from their side a flat battery
+     * and a lost connection look the same (the gestures stop). Only those apps, so the band's
+     * state isn't sent to the whole phone. [force]: send even if nothing changed (a new app).
+     */
+    private fun broadcastStatus(force: Boolean = false) {
+        val s = state.value
+        val connected = s.phase == Phase.CONNECTED
+        val now = listOf(s.battery, s.charging, connected, s.paused)
+        if (now == sent && !force) return
+        sent = now
+        for (pkg in prefs.announced) {
+            runCatching {
+                sendBroadcast(
+                    Intent(ACTION_STATUS)
+                        .setPackage(pkg)
+                        .putExtra(EXTRA_BATTERY, s.battery ?: -1)
+                        .putExtra(EXTRA_CHARGING, s.charging)
+                        .putExtra(EXTRA_CONNECTED, connected)
+                        .putExtra(EXTRA_CONTROLS, !s.paused),
+                )
+            }
+        }
+    }
 
     override fun onActions(actions: List<String>) = main.post {
         // In a lesson nothing runs; the lesson sees what would have.
@@ -367,6 +398,18 @@ class BandService : Service(), BandLink.Listener {
         const val ACTION_STOP = "dev.kb896.airgestures.STOP"
         const val ACTION_START = "dev.kb896.airgestures.START"
 
+        /** From an app: `profile` = its package as it comes to the front, "" as it leaves. */
+        const val ACTION_SET_PROFILE = "dev.kb896.airgestures.SET_PROFILE"
+        const val EXTRA_PROFILE = "profile"
+
+        /** The band's state, sent to the apps that have announced themselves. */
+        const val ACTION_STATUS = "dev.kb896.airgestures.STATUS"
+        const val EXTRA_BATTERY = "battery"
+        const val EXTRA_CHARGING = "charging"
+        const val EXTRA_CONNECTED = "connected"
+        /** The controls are on (false while the middle hold, a tile or the app turned them off). */
+        const val EXTRA_CONTROLS = "controls"
+
         val state = Observable(State())
         var instance: BandService? = null
             private set
@@ -397,11 +440,27 @@ class BandService : Service(), BandLink.Listener {
          * The accessibility service saw [pkg] come to the front: if that changes the profile
          * in force (into or out of an app's own), the band gets it and the user is told.
          */
-        fun foreground(context: Context, pkg: String?) {
+        fun foreground(context: Context, pkg: String?) = front(context) { Profiles.seen = pkg }
+
+        /**
+         * An app said it came to the front ([pkg]) or left (null): its own profile applies until
+         * it leaves, wherever the accessibility service thinks the user is. It also gets the
+         * band's state from now on ([ACTION_STATUS]), and once right away.
+         */
+        fun announce(context: Context, pkg: String?) {
+            front(context) { Profiles.announced = pkg }
+            if (pkg == null) return
+            val prefs = Prefs(context)
+            val first = pkg !in prefs.announced
+            prefs.recordAnnounced(pkg)
+            if (first) instance?.broadcastStatus(force = true)
+        }
+
+        private fun front(context: Context, change: () -> Unit) {
             val list = Profiles.load(context)
             val before = list.active(Profiles.foreground)
-            Profiles.foreground = pkg
-            val after = list.active(pkg)
+            change()
+            val after = list.active(Profiles.foreground)
             if (after.id != before.id) instance?.switched(after)
         }
 

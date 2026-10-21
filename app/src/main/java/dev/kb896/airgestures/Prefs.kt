@@ -2,6 +2,9 @@ package dev.kb896.airgestures
 
 import android.content.Context
 
+/** How many announced apps get the band's state. */
+private const val ANNOUNCED_KEPT = 8
+
 /** The few settings that outlive a connection. */
 class Prefs(context: Context) {
     private val context = context.applicationContext
@@ -122,6 +125,15 @@ class Prefs(context: Context) {
 
     /** Anything is set in the During calls layer: it needs the phone permissions to know when a call is on. */
     fun usesCalls() = Gesture.entries.any { callActionId(it) != Mappings.AS_USUAL }
+
+    /** The apps that announced themselves ([ProfileReceiver]), newest first: they get the band's state. */
+    val announced: List<String>
+        get() = prefs.getString("announced", "").orEmpty().split(";").filter { it.isNotEmpty() }
+
+    fun recordAnnounced(pkg: String) {
+        val kept = (listOf(pkg) + announced.filter { it != pkg }).take(ANNOUNCED_KEPT)
+        prefs.edit().putString("announced", kept.joinToString(";")).apply()
+    }
 
     var associationId: Int
         get() = prefs.getInt("association", -1)

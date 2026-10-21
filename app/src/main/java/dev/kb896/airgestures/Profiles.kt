@@ -20,7 +20,18 @@ object Profiles {
 
     /** The app in front, as the accessibility service last saw it (null = unknown). */
     @Volatile
-    var foreground: String? = null
+    var seen: String? = null
+
+    /**
+     * The app that said it's in front ([ProfileReceiver]), null once it says it left. It wins
+     * over [seen]: it knows, e.g. while it shows on an external screen with the phone folded.
+     */
+    @Volatile
+    var announced: String? = null
+
+    /** The app whose own profile counts: the one that announced itself, else the one seen. */
+    val foreground: String?
+        get() = announced ?: seen
 
     private fun prefs(context: Context) = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
 
