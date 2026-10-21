@@ -90,6 +90,7 @@ class SpotPicker(
         // bar's shadow is drawn outside the bar.
         val room = FrameLayout(service).apply {
             setPadding(dpi(24f), dpi(24f), dpi(24f), dpi(24f))
+            clipToPadding = false
             addView(view)
         }
         val params = WindowManager.LayoutParams(
@@ -160,6 +161,7 @@ class SpotPicker(
             addView(view, LinearLayout.LayoutParams(-2, -2).apply { if (index > 0) marginStart = dpi(10f) })
         }
         setPadding(dpi(8f), dpi(8f), dpi(8f), dpi(8f))
+        clipToPadding = false
     }
 
     /** The buttons at the bottom, on one raised bar in the page tone. */
@@ -183,6 +185,7 @@ class SpotPicker(
         gravity = Gravity.CENTER_HORIZONTAL
         // Transparent room for the shadows: this window is only as big as its content.
         setPadding(dpi(24f), dpi(16f), dpi(24f), dpi(24f))
+        clipToPadding = false
         addView(hint(service, "Open the app first").apply {
             textSize = 12f
             setTextColor(Cb.INK_500)

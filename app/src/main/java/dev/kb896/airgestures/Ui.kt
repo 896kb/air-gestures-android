@@ -310,18 +310,44 @@ abstract class Screen : Activity() {
                 }
             })
         }
-        // Room for the sheet's 24 dp shadow, most of it below: a tighter window cuts it and squares the corners.
-        dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(20f), dpi(16f), dpi(36f))
-            addView(sheet)
-        })
-        dialog.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
-            setDimAmount(.55f)
-            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        dialog.setContentView(scrim(dialog, sheet))
+        sheetWindow(dialog)
         dialog.show()
         return dialog
+    }
+
+    /**
+     * A sheet's window: the whole screen, the sheet centred in it, so its 24 dp shadow never
+     * meets a window edge (a window the sheet's size cuts it and squares the corners). A tap
+     * beside the sheet closes it, as outside a smaller window would.
+     */
+    private fun scrim(dialog: android.app.Dialog, sheet: View) = FrameLayout(this).apply {
+        // Children are clipped to inside the padding by default: the shadow is drawn in it.
+        clipToPadding = false
+        // The window spans the system bars too (see sheetWindow), so the sheet keeps clear of them.
+        setOnApplyWindowInsetsListener { view, insets ->
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.ime())
+            view.setPadding(bars.left + dpi(16f), bars.top + dpi(16f), bars.right + dpi(16f), bars.bottom + dpi(16f))
+            insets
+        }
+        setOnClickListener { dialog.cancel() }
+        addView(sheet, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        // The sheet takes its own taps, so they don't reach the scrim.
+        sheet.isClickable = true
+    }
+
+    /** A sheet's window: the whole screen under the system bars, dimmed, with no frame of its own. */
+    @Suppress("DEPRECATION")
+    private fun sheetWindow(dialog: android.app.Dialog) = dialog.window?.apply {
+        setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
+        setDimAmount(.55f)
+        setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        setDecorFitsSystemWindows(false)
+        // Over the navigation bar too: without this the window stops above it and the bar shows black.
+        addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        statusBarColor = 0
+        navigationBarColor = 0
+        isNavigationBarContrastEnforced = false
     }
 
     /** A confirmation in the picker's style: title, body, Cancel and the action. */
@@ -375,16 +401,8 @@ abstract class Screen : Activity() {
                 addView(pill(action) { if (onAction()) dialog.dismiss() }.first)
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        // Room for the sheet's 24 dp shadow, most of it below: a tighter window cuts it and squares the corners.
-        dialog.setContentView(FrameLayout(this).apply {
-            setPadding(dpi(16f), dpi(20f), dpi(16f), dpi(36f))
-            addView(sheet)
-        })
-        dialog.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0))
-            setDimAmount(.55f)
-            setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        dialog.setContentView(scrim(dialog, sheet))
+        sheetWindow(dialog)
         dialog.show()
         return dialog
     }
