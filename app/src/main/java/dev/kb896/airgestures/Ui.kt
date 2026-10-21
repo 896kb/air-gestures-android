@@ -343,8 +343,8 @@ abstract class Screen : Activity() {
         setDimAmount(.55f)
         setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
         setDecorFitsSystemWindows(false)
-        // Over the navigation bar too: without this the window stops above it and the bar shows black.
-        addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        // Over the navigation bar too, drawing its (transparent) background: otherwise the system puts a black bar there.
+        addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         statusBarColor = 0
         navigationBarColor = 0
         isNavigationBarContrastEnforced = false
