@@ -38,7 +38,8 @@ object Surfaces {
     }
 
     fun refresh(context: Context) {
-        val now = listOf(status(context), controls(), BandService.state.value.profile, BandService.state.value.band, ready(context))
+        // The stored profile too: the widget shows it while the connection is off, when the state has none.
+        val now = listOf(status(context), controls(), Profiles.active(context).name, BandService.state.value.band, ready(context))
             .joinToString("|")
         if (now == shown) return
         shown = now

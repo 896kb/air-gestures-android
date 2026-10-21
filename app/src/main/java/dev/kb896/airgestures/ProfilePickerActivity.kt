@@ -6,6 +6,14 @@ import android.os.Bundle
 class ProfilePickerActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Over the home screen, bars and all: no black status bar above the sheet.
+        @Suppress("DEPRECATION")
+        window.apply {
+            setDecorFitsSystemWindows(false)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            statusBarColor = 0
+            navigationBarColor = 0
+        }
         val list = Profiles.load(this)
         val active = list.active(Profiles.foreground)
         val locked = list.locked(Profiles.foreground)

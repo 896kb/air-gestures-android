@@ -9,16 +9,14 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_background">
 
+    <!-- The band composed into the picture itself (150 % of the height, 10 % right, 40 % down):
+         widgets can't place an image like that, a picture that fills them can. -->
     <ImageView
-        android:layout_width="wrap_content"
+        android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_gravity="center"
-        android:adjustViewBounds="true"
         android:alpha="0.28"
         android:importantForAccessibility="no"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:scaleType="fitCenter"
+        android:scaleType="centerCrop"
         android:src="@drawable/widget_band" />
 
     <LinearLayout
@@ -72,23 +70,30 @@
                 android:textSize="15sp" />
         </LinearLayout>
 
-        <ImageView
-            android:id="@+id/widget_power"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="@drawable/widget_button_stop"
-            android:contentDescription="Band connection"
-            android:padding="10dp"
-            android:src="@drawable/ic_power" />
+        <!-- Power above, gestures below: a column, so the text keeps the width. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
-        <ImageView
-            android:id="@+id/widget_controls"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginStart="8dp"
-            android:background="@drawable/widget_button_stop"
-            android:contentDescription="Gestures"
-            android:padding="10dp"
-            android:src="@drawable/ic_hand" />
+            <ImageView
+                android:id="@+id/widget_power"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/widget_button_stop"
+                android:contentDescription="Band connection"
+                android:padding="8dp"
+                android:src="@drawable/ic_power" />
+
+            <ImageView
+                android:id="@+id/widget_controls"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/widget_button_stop"
+                android:contentDescription="Gestures"
+                android:padding="8dp"
+                android:src="@drawable/ic_hand" />
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>
