@@ -146,6 +146,8 @@ struct HandRequest {
     hand: Option<Hand>,
     reading: bool,
     deadline: f64,
+    /// A probe's config write ([`BandSession::probe_config`]), not the hand.
+    probe: bool,
 }
 
 /// What one `feed` produced: bytes to write to the band and events to act on.
@@ -755,6 +757,34 @@ impl BandSession {
             hand,
             reading,
             deadline: time + 5.0,
+            probe: false,
+        });
+        Ok(bytes)
+    }
+
+    /// Probe only: write `body` as a ConfigReq (the fields of the config read, e.g. 46 =
+    /// `{3=1}`), log the band's answer, then read the whole config back into the log.
+    pub fn probe_config(&mut self, body: &[u8], time: f64) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        ProtoFields::parse(body)?;
+        let id = self.configuration_id + 1;
+        let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            words,
+            &[field_int(1, id), field_bytes(5, body)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        self.diagnostics.push(format!("probe: writing config {}", ProtoFields::parse(body)?.describe_nested(0)));
+        self.hand_request = Some(HandRequest {
+            id,
+            hand: None,
+            reading: false,
+            deadline: time + 5.0,
+            probe: true,
         });
         Ok(bytes)
     }
@@ -772,6 +802,11 @@ impl BandSession {
             return Ok(Vec::new());
         }
         self.hand_request = None;
+        if request.probe {
+            self.diagnostics.push(format!("probe: config write answer: {}", fields.describe_nested(0)));
+            outgoing.extend(self.request_hand(None, true, time)?);
+            return Ok(Vec::new());
+        }
         if self.probing() && request.reading {
             // Every setting the band reports, to find ones beyond the hand (a model choice?).
             self.diagnostics.push(format!("probe: band config: {}", fields.describe_nested(0)));

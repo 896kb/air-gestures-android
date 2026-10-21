@@ -181,6 +181,9 @@ class BandService : Service(), BandLink.Listener {
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
     fun watchCalls() = calls.start()
 
+    /** Debug: write a raw ConfigReq (hex) to the band; the answer goes to the log. */
+    fun probeConfig(hex: String) = link.probeConfig(hex)
+
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
         prefs.hand = hand

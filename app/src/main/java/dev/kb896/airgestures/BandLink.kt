@@ -81,6 +81,18 @@ class BandLink(
         if (handle != 0L) Bridge.setMapping(handle, mapping)
     }
 
+    /** Debug: write a ConfigReq given as hex to the band (see Bridge.probeConfig); off the main thread. */
+    fun probeConfig(hex: String) = thread(name = "band-probe") {
+        try {
+            val out = synchronized(lock) { if (handle == 0L) null else Bridge.probeConfig(handle, hex, now()) }
+            val stream = socket?.outputStream
+            if (out == null || stream == null) log("probe: not connected") else synchronized(stream) { stream.write(out) }
+            drain()
+        } catch (e: Exception) {
+            log("probe: ${e.message}")
+        }
+    }
+
     private fun connect() {
         if (!wanted) return
         val scanner = adapter?.takeIf { it.isEnabled }?.bluetoothLeScanner

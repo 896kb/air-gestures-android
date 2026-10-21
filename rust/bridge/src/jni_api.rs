@@ -202,6 +202,21 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProbe<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_probeConfig<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    hex: JString<'local>,
+    now: jdouble,
+) -> jbyteArray {
+    let result = match env.get_string(&hex) {
+        Ok(hex) => unsafe { connection(handle) }.probe_config(&String::from(hex), now),
+        Err(error) => Err(error.to_string()),
+    };
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_close<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,

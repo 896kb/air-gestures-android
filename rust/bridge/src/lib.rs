@@ -183,6 +183,21 @@ impl Connection {
         self.session.set_probe(fields);
     }
 
+    /// Probe only: write a ConfigReq given as hex (see `BandSession::probe_config`); returns
+    /// the bytes to write. The answer and the config read back go to the log.
+    pub fn probe_config(&mut self, hex: &str, now: f64) -> Result<Vec<u8>, String> {
+        let hex: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        if hex.len() % 2 != 0 {
+            return Err("odd number of hex digits".into());
+        }
+        let body = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| e.to_string()))
+            .collect::<Result<Vec<u8>, String>>()?;
+        self.probing = true;
+        self.session.probe_config(&body, now).map_err(|e| e.to_string())
+    }
+
     pub fn set_dial(&mut self, dial: &str) {
         self.controller.set_dial_target(DialTarget::from_name(dial));
     }

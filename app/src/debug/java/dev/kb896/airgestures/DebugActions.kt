@@ -17,6 +17,10 @@ import android.util.Log
  *     adb shell am broadcast -n dev.kb896.airgestures.dev/dev.kb896.airgestures.DebugActions \
  *         -a dev.kb896.airgestures.RUN --es probe 1,4,5,7,9,10,11,12
  *
+ * Or write a ConfigReq (hex, the config read's fields) to the connected band, e.g. field 46:
+ *
+ *     ... --es config f202080800102018022809   # 46 = {1=0 2=32 3=2 5=9}
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
@@ -29,6 +33,10 @@ class DebugActions : BroadcastReceiver() {
                 BandService.stop(context)
                 BandService.start(context)
             }
+            return
+        }
+        intent.getStringExtra("config")?.let { hex ->
+            BandService.instance?.probeConfig(hex) ?: Log.i("AirGestures", "debug config: the band service isn't running")
             return
         }
         val action = intent.getStringExtra("action") ?: return
