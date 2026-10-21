@@ -9,8 +9,8 @@ fails without one.
 - Needs Android 13 or newer. Below that the app didn't work properly before either.
 - On Android 13 to 15, linking the band no longer closes the app, and the band coming
   into range wakes the app again (that wake-up worked on Android 16 only).
-- New gesture actions: tap a spot on the screen you pick (drag a target over the app
-  it's for), open the voice assistant, read the newest notification aloud (only the app
+- New gesture actions: tap a spot on the screen you pick (drag a glowing orb over the
+  app it's for), open the voice assistant, read the newest notification aloud (only the app
   and title while the phone is locked) or dismiss it, and send the gesture to Tasker,
   MacroDroid or Home Assistant (broadcast `dev.kb896.airgestures.GESTURE`, extra
   `gesture`). Picking it shows how to set each of them up, with a test to try it, and
@@ -24,7 +24,7 @@ fails without one.
   (the triple taps don't switch there). Every switch shows the profile's name, and can
   say it. With more than one profile, index and middle taps wait a moment so a triple
   tap can be told apart.
-- Swipe here: place a swipe with a coral start orb and a blue end orb (quick or slow),
+- Swipe here: place a swipe with a coral start orb and a green end orb (quick or slow),
   or draw it with your finger, curves and timing included.
 - Sequences: a gesture can run a list of actions with waits between them, built step by
   step or recorded (each tap and swipe goes on to the app as you make it; don't type while
@@ -39,8 +39,9 @@ fails without one.
   under Setup. The owner key isn't in it; it has its own export.
 - Two Quick Settings tiles: Air Gestures (connect or release the band, with its status
   and battery) and Gesture controls (on or off). Long-press either to open the app.
-- A home-screen widget: the band, its status, battery and profile, with a power and a
-  controls button.
+- A home-screen widget: ON with the battery, OFF or DISCONNECTED at a glance, the
+  profile in use (tap it to pick another), and a connection and a gestures button, green
+  when on and coral when off.
 - Battery notifications: at 20 % and 10 %, when it's charged, and at 21:00 when the last
   reading was below half. When the controls have been off for 15 minutes, a notification
   offers to disconnect the band (it goes away once the controls are back on).
@@ -54,6 +55,8 @@ fails without one.
   many Setup steps are left.
 - A debug build installs beside the release (as "Air Gestures (dev)") instead of over it.
 - The update card shows the whole first line of the release notes.
+- Sheets, dialogs and the buttons shown over other apps keep their whole shadow; long
+  lists fade at their edge instead of being cut.
 
 ## 0.4.0
 
