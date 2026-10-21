@@ -18,6 +18,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.PI
@@ -41,10 +42,10 @@ class SpotPicker(
     private val done: (List<String>?) -> Unit,
 ) {
     enum class Mode(val bubble: String) {
-        TAP("Open the app, then tap here"),
-        SWIPE("Open the app, then tap here to place the swipe"),
-        DRAW("Open the app, then tap here to draw the swipe"),
-        RECORD("Open the app, then tap here to record"),
+        TAP("Place the tap"),
+        SWIPE("Place the swipe"),
+        DRAW("Draw the swipe"),
+        RECORD("Start recording"),
     }
 
     private val windows = service.getSystemService(WindowManager::class.java)
@@ -56,7 +57,7 @@ class SpotPicker(
     private fun dp(value: Float) = Cb.dp(service, value)
     private fun dpi(value: Float) = dp(value).toInt()
 
-    fun show() = put(bubble(), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL, dpi(56f))
+    fun show() = put(bubble(), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL, dpi(40f))
 
     /** Gone without a result (the user cancelled, or the service is going away). */
     fun cancel() = finish(null)
@@ -85,6 +86,12 @@ class SpotPicker(
     private var controls: View? = null
 
     private fun putControls(view: View) {
+        // Transparent room around the bar: the window is only as big as its content, and the
+        // bar's shadow is drawn outside the bar.
+        val room = FrameLayout(service).apply {
+            setPadding(dpi(24f), dpi(24f), dpi(24f), dpi(24f))
+            addView(view)
+        }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -93,10 +100,10 @@ class SpotPicker(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dpi(56f)
+            y = dpi(32f)
         }
-        windows.addView(view, params)
-        controls = view
+        windows.addView(room, params)
+        controls = room
     }
 
     private fun put(view: View, size: Int, gravity: Int, y: Int = 0) {
@@ -157,6 +164,8 @@ class SpotPicker(
 
     /** The buttons at the bottom, on one raised bar in the page tone. */
     private fun bar(vararg views: TextView) = pills(*views).apply {
+        // Only the bar is raised: shadows of pills on it would be cut by its edge.
+        views.forEach { it.elevation = 0f }
         setPadding(dpi(6f), dpi(6f), dpi(6f), dpi(6f))
         background = GradientDrawable().apply { cornerRadius = dp(999f); setColor(Cb.PAGE) }
         elevation = dp(10f)
@@ -168,20 +177,49 @@ class SpotPicker(
         background = GradientDrawable().apply { cornerRadius = dp(999f); setColor(Cb.PAGE) }
     }
 
-    private fun bubble() = pills(
-        pill(service, mode.bubble, main = true) {
-            put(
-                when (mode) {
-                    Mode.TAP -> TapLayer(service)
-                    Mode.SWIPE -> SwipeLayer(service)
-                    Mode.DRAW -> DrawLayer(service)
-                    Mode.RECORD -> RecordLayer(service)
-                },
-                WindowManager.LayoutParams.MATCH_PARENT,
-                Gravity.TOP or Gravity.START,
-            )
+    /** The first step, over the app: a short coral button for the mode and a round ✕ that never shrinks. */
+    private fun bubble() = LinearLayout(service).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        // Transparent room for the shadows: this window is only as big as its content.
+        setPadding(dpi(24f), dpi(16f), dpi(24f), dpi(24f))
+        addView(hint(service, "Open the app first").apply {
+            textSize = 12f
+            setTextColor(Cb.INK_500)
+            setPadding(dpi(12f), dpi(6f), dpi(12f), dpi(6f))
+        })
+        addView(LinearLayout(service).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(pill(service, mode.bubble, main = true) { start() }.apply { ellipsize = android.text.TextUtils.TruncateAt.END })
+            addView(close(), LinearLayout.LayoutParams(dpi(44f), dpi(44f)).apply { marginStart = dpi(10f) })
+        }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dpi(8f) })
+    }
+
+    /** A round ✕: cancels the pick. */
+    private fun close() = ImageView(service).apply {
+        setImageResource(R.drawable.ic_x)
+        imageTintList = android.content.res.ColorStateList.valueOf(Cb.INK_900)
+        setPadding(dpi(12f), dpi(12f), dpi(12f), dpi(12f))
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Cb.PAGE)
+        }
+        elevation = dp(6f)
+        contentDescription = "Cancel"
+        setOnClickListener { cancel() }
+    }
+
+    /** The bubble's button: over to the layer for the mode. */
+    private fun start() = put(
+        when (mode) {
+            Mode.TAP -> TapLayer(service)
+            Mode.SWIPE -> SwipeLayer(service)
+            Mode.DRAW -> DrawLayer(service)
+            Mode.RECORD -> RecordLayer(service)
         },
-        pill(service, "Cancel", main = false) { cancel() },
+        WindowManager.LayoutParams.MATCH_PARENT,
+        Gravity.TOP or Gravity.START,
     )
 
     /** Screen pixels to fractions of the screen. */
@@ -270,11 +308,11 @@ class SpotPicker(
         }
     }
 
-    /** Swipe here: a coral start orb and a blue end orb, the path glowing between them. */
+    /** Swipe here: a coral start orb and a green end orb, the path glowing between them. */
     @SuppressLint("ViewConstructor")
-    private inner class SwipeLayer(context: Context) : Layer(context, "Drag the coral start and the blue end") {
+    private inner class SwipeLayer(context: Context) : Layer(context, "Drag coral to start, green to end") {
         private val from = Orb(Cb.Signal.STOP.fill)
-        private val to = Orb(Cb.Signal.INFO.fill)
+        private val to = Orb(Cb.Signal.LIVE.fill)
         private val start = current?.takeIf { it.startsWith(Strokes.SWIPE) }?.let(Strokes::parse)
         private var x1 = bounds.width() * (start?.points?.first()?.x ?: .5f)
         private var y1 = bounds.height() * (start?.points?.first()?.y ?: .72f)
@@ -316,7 +354,7 @@ class SpotPicker(
         }
 
         override fun paint(canvas: Canvas) {
-            val shader = LinearGradient(x1, y1, x2, y2, Cb.Signal.STOP.fill, Cb.Signal.INFO.fill, Shader.TileMode.CLAMP)
+            val shader = LinearGradient(x1, y1, x2, y2, Cb.Signal.STOP.fill, Cb.Signal.LIVE.fill, Shader.TileMode.CLAMP)
             line.shader = shader
             glow.shader = shader
             canvas.drawLine(x1, y1, x2, y2, glow)
