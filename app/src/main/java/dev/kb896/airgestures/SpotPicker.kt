@@ -585,8 +585,8 @@ class SpotPicker(
         private val core = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             shader = RadialGradient(
                 -radius * .35f, -radius * .4f, radius * 1.45f,
-                intArrayOf(withAlpha(lighter(color), .95f), withAlpha(color, .92f), withAlpha(darker(color), .9f)),
-                floatArrayOf(0f, .55f, 1f),
+                intArrayOf(lighter(color), color, darker(color)),
+                floatArrayOf(0f, .35f, 1f),
                 Shader.TileMode.CLAMP,
             )
         }
@@ -645,11 +645,11 @@ class SpotPicker(
 /** [color] with its alpha set to [alpha] (0…1). */
 private fun withAlpha(color: Int, alpha: Float) = (color and 0x00FFFFFF) or ((alpha * 255).toInt() shl 24)
 
-/** Halfway to white: the orb's lit side. */
-private fun lighter(color: Int) = mix(color, 0xFFFFFFFF.toInt(), .55f)
+/** A touch towards white: the orb's lit side (a little, so the brand colour still reads). */
+private fun lighter(color: Int) = mix(color, 0xFFFFFFFF.toInt(), .25f)
 
 /** A little towards black: the orb's far side. */
-private fun darker(color: Int) = mix(color, 0xFF000000.toInt(), .12f)
+private fun darker(color: Int) = mix(color, 0xFF000000.toInt(), .06f)
 
 private fun mix(a: Int, b: Int, t: Float): Int {
     fun channel(shift: Int) = ((((a shr shift) and 0xFF) * (1 - t)) + (((b shr shift) and 0xFF) * t)).toInt() shl shift
