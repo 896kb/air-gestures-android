@@ -107,6 +107,28 @@ class BandLink(
     /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
     fun rawEmg(on: Boolean) = debugSend { Bridge.setRawEmg(it, on, now()) }
 
+    /** Debug: start recording raw sEMG and marks into [dir]; false when the band isn't connected. */
+    fun recordStart(dir: String): Boolean = synchronized(lock) {
+        if (handle == 0L) return false
+        Bridge.recordStart(handle, dir)
+        true
+    }
+
+    fun recordMark(event: String, label: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.recordMark(handle, event, label, now())
+    }
+
+    /** The recording's counts, or null when none runs (e.g. the band reconnected meanwhile). */
+    fun recordStats(): org.json.JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        org.json.JSONObject(Bridge.recordStats(handle)).takeIf { it.length() > 0 }
+    }
+
+    fun recordStop() = synchronized(lock) {
+        if (handle != 0L) Bridge.recordStop(handle)
+        drain()
+    }
+
     /** Send what [request] returns for the open session, off the main thread; problems go to the log. */
     private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") {
         try {

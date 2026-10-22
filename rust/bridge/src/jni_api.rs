@@ -229,6 +229,58 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setRawEmg<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    dir: JString<'local>,
+) {
+    let result = get_string(&mut env, &dir).and_then(|dir| unsafe { connection(handle) }.record_start(&dir));
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordMark<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    event: JString<'local>,
+    label: JString<'local>,
+    now: jdouble,
+) {
+    let result = get_string(&mut env, &event).and_then(|event| {
+        let label = get_string(&mut env, &label)?;
+        unsafe { connection(handle) }.record_mark(&event, &label, now)
+    });
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStats<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let stats = unsafe { connection(handle) }.record_stats();
+    json_out(&mut env, Ok(stats))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStop<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    if let Err(message) = unsafe { connection(handle) }.record_stop() {
+        throw(&mut env, &message);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_close<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,

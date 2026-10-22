@@ -1,0 +1,183 @@
+package dev.kb896.airgestures
+
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.Gravity
+import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Debug builds only: record handwriting for a letter recogniser. Each letter is shown, then a
+ * timed window to write it on a table with the index finger; the band's raw sEMG and the
+ * prompts go to a folder (emg.bin, marks.csv; see rust/bridge/src/recorder.rs) to pull with
+ * adb. Nothing runs while it records (the service is in practice mode).
+ */
+class RecordActivity : Screen() {
+    private val main = Handler(Looper.getMainLooper())
+    private var prompts = emptyList<String>()
+    private var at = 0
+    private var running = false
+    private var paused = false
+    private var folder: File? = null
+    /** What the last recording ended with, and where it is. */
+    private var saved: String? = null
+    private var reps = 5
+    private var windowMs = 3000L
+
+    private lateinit var count: TextView
+    private lateinit var letter: TextView
+    private lateinit var cue: TextView
+    private lateinit var stats: TextView
+    private lateinit var buttons: LinearLayout
+
+    /** Gestures still reach the recording (as marks); nothing runs meanwhile. */
+    private val quiet = object : BandService.Practice {
+        override fun gesture(label: String) = Unit
+        override fun action(id: String) = Unit
+        override fun held() = Unit
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        count = Cb.label(this, "")
+        letter = Cb.text(this, 120f, R.font.geist_bold, Cb.INK_900, -.02f).apply { gravity = Gravity.CENTER }
+        cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
+        stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
+        buttons = row(gap = 10f).apply { gravity = Gravity.END }
+        show(pageColumn().apply {
+            addView(card(null, column(gap = 12f).apply {
+                addView(count)
+                addView(letter, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                addView(cue, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                addView(stats)
+            }))
+            addView(buttons, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }, title = "Handwriting")
+        render()
+    }
+
+    override fun onPause() {
+        // Leaving the screen ends the recording; what was written is kept.
+        if (running) stop("Stopped: the screen was left.")
+        super.onPause()
+    }
+
+    private fun service() = BandService.instance?.takeIf { BandService.state.value.phase == Phase.CONNECTED }
+
+    private fun render() {
+        buttons.removeAllViews()
+        when {
+            running -> {
+                buttons.addView(pill(if (paused) "Resume" else "Pause") { paused = !paused; if (!paused) next() else cue.text = "Paused" }.first)
+                if (at > 0) buttons.addView(pill("Redo last") { redo() }.first)
+                buttons.addView(pill("Stop") { stop("Stopped.") }.first)
+            }
+            else -> {
+                val last = saved
+                if (last != null) {
+                    count.text = "SAVED"
+                    letter.text = "✓"
+                    letter.setTextColor(Cb.INK_900)
+                    cue.text = last
+                } else {
+                    count.text = "RECORD HANDWRITING"
+                    letter.text = "a"
+                    cue.text = if (service() == null) "Connect the band first." else
+                        "Each letter is shown, then you get ${windowMs / 1000.0} s to write it with your index finger on the table. $reps of each letter, in random order."
+                }
+                buttons.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; render() }.first)
+                buttons.addView(pill("Window: ${windowMs / 1000.0} s") { windowMs = if (windowMs >= 5000) 1500 else windowMs + 500; render() }.first)
+                buttons.addView(pill("Start", R.drawable.ic_check) { start() }.first)
+            }
+        }
+    }
+
+    private fun start() {
+        val service = service() ?: return run { cue.text = "Connect the band first." }
+        val name = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
+        val dir = File(getExternalFilesDir("handwriting"), name)
+        if (!service.recording.recordStart(dir.path)) return run { cue.text = "The band isn't connected." }
+        folder = dir
+        service.startPractice(quiet)
+        service.rawEmg(true)
+        service.recording.recordMark("session", "reps=$reps window_ms=$windowMs gap_ms=$GAP_MS")
+        prompts = ('a'..'z').flatMap { c -> List(reps) { c.toString() } }.shuffled()
+        at = 0
+        running = true
+        paused = false
+        render()
+        main.postDelayed(::next, GAP_MS)
+        main.post(statsTick)
+    }
+
+    /** Show the next letter, then open its writing window. */
+    private fun next() {
+        if (!running || paused) return
+        if (at >= prompts.size) return stop("Done: all ${prompts.size} letters.")
+        val shown = prompts[at]
+        val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
+        count.text = "LETTER ${at + 1} OF ${prompts.size}"
+        letter.text = shown
+        letter.setTextColor(Cb.INK_400)
+        cue.text = "Get ready…"
+        recording.recordMark("prompt", shown)
+        main.postDelayed({
+            if (!running || paused) return@postDelayed
+            recording.recordMark("start", shown)
+            letter.setTextColor(Cb.INK_900)
+            cue.text = "Write it now"
+            main.postDelayed({
+                if (!running) return@postDelayed
+                recording.recordMark("end", shown)
+                at++
+                next()
+            }, windowMs)
+        }, GAP_MS)
+    }
+
+    /** The last letter was written wrong: mark it to be left out, and ask for it again. */
+    private fun redo() {
+        val last = prompts.getOrNull(at - 1) ?: return
+        BandService.instance?.recording?.recordMark("discard", last)
+        prompts = prompts.toMutableList().apply { add(at, last) }
+        cue.text = "“$last” will come again"
+    }
+
+    private val statsTick: Runnable = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val counts = BandService.instance?.recording?.recordStats()
+                ?: return stop("Stopped: the band reconnected, so the recording ended. What was written is kept.")
+            val batches = counts.optLong("batches")
+            val missing = counts.optLong("missing")
+            val lost = if (batches + missing > 0) 100.0 * missing / (batches + missing) else 0.0
+            stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks", batches, lost, counts.optLong("marks"))
+            main.postDelayed(this, 1000)
+        }
+    }
+
+    private fun stop(why: String) {
+        running = false
+        main.removeCallbacksAndMessages(null)
+        BandService.instance?.let {
+            it.rawEmg(false)
+            it.recording.recordStop()
+            it.endPractice()
+        }
+        saved = "$why\n\nadb pull ${folder?.path}"
+        folder = null
+        render()
+    }
+
+    companion object {
+        /** From a letter appearing to its writing window. */
+        const val GAP_MS = 1500L
+    }
+}

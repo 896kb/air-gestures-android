@@ -190,6 +190,9 @@ class BandService : Service(), BandLink.Listener {
     /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
     fun rawEmg(on: Boolean) = link.rawEmg(on)
 
+    /** Debug: a handwriting recording (see BandLink.recordStart). */
+    val recording get() = link
+
     private val unlocked = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = nudge()
     }

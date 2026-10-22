@@ -30,6 +30,12 @@ object Bridge {
     @JvmStatic external fun probeConfig(handle: Long, hex: String, now: Double): ByteArray
     /** Debug: the raw sEMG stream on or off; returns bytes to write. Its rate goes to the log. */
     @JvmStatic external fun setRawEmg(handle: Long, on: Boolean, now: Double): ByteArray
+    /** Debug: record raw sEMG and marks into `dir` (emg.bin, marks.csv) until [recordStop]. */
+    @JvmStatic external fun recordStart(handle: Long, dir: String)
+    @JvmStatic external fun recordMark(handle: Long, event: String, label: String, now: Double)
+    /** `{"batches", "missing", "unreadable", "marks"}`, or `{}` when no recording runs. */
+    @JvmStatic external fun recordStats(handle: Long): String
+    @JvmStatic external fun recordStop(handle: Long)
     @JvmStatic external fun close(handle: Long)
 
     // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.

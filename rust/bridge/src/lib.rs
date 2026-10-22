@@ -17,6 +17,7 @@ pub mod controller;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
+pub mod recorder;
 pub mod status;
 
 use config::{Config, DIAL_TOGGLE, DialTarget};
@@ -50,6 +51,10 @@ pub struct Connection {
     emg_frames: usize,
     emg_bytes: usize,
     emg_since: f64,
+    /// The band's sEMG layout, once it reported one.
+    emg_config: Option<band_core::events::EmgConfig>,
+    /// A handwriting recording in progress (debug).
+    recorder: Option<recorder::Recorder>,
 }
 
 #[derive(Serialize)]
@@ -97,6 +102,8 @@ impl Connection {
             emg_frames: 0,
             emg_bytes: 0,
             emg_since: 0.0,
+            emg_config: None,
+            recorder: None,
         })
     }
 
@@ -217,6 +224,41 @@ impl Connection {
         self.session.set_raw_emg_enabled(on, now).map_err(|e| e.to_string())
     }
 
+    /// Debug: record raw sEMG and marks into `dir` until [`record_stop`](Self::record_stop)
+    /// (see `recorder`). Turn the sEMG stream on with [`set_raw_emg`](Self::set_raw_emg).
+    pub fn record_start(&mut self, dir: &str) -> Result<(), String> {
+        let mut recorder = recorder::Recorder::create(dir)?;
+        if let Some(config) = self.emg_config {
+            recorder.configure(config)?;
+        }
+        self.recorder = Some(recorder);
+        self.log.push(format!("recording to {dir}"));
+        Ok(())
+    }
+
+    /// A labelled moment in the recording (nothing when none runs).
+    pub fn record_mark(&mut self, event: &str, label: &str, now: f64) -> Result<(), String> {
+        match &mut self.recorder {
+            Some(recorder) => recorder.mark(event, label, now),
+            None => Ok(()),
+        }
+    }
+
+    /// The recording's counts as JSON (`{}` when none runs).
+    pub fn record_stats(&self) -> String {
+        self.recorder
+            .as_ref()
+            .map_or_else(|| "{}".into(), |recorder| serde_json::to_string(recorder.stats()).expect("stats serialize"))
+    }
+
+    pub fn record_stop(&mut self) -> Result<(), String> {
+        if let Some(recorder) = self.recorder.take() {
+            let stats = recorder.finish()?;
+            self.log.push(format!("recording saved: {stats:?}"));
+        }
+        Ok(())
+    }
+
     pub fn set_dial(&mut self, dial: &str) {
         self.controller.set_dial_target(DialTarget::from_name(dial));
     }
@@ -238,10 +280,25 @@ impl Connection {
                 self.log.push("connected".into());
             }
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
-            Event::RawEmgConfiguration(config) => self.log.push(format!("emg: {config:?}")),
+            Event::RawEmgConfiguration(config) => {
+                self.log.push(format!("emg: {config:?}"));
+                self.emg_config = Some(*config);
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.configure(*config)?;
+                }
+            }
+            Event::Gesture(message) => {
+                if let Some(recorder) = &mut self.recorder {
+                    let label = format!("{} {} {}", message.finger, message.action, message.derived_action);
+                    recorder.mark("gesture", &label, now)?;
+                }
+            }
             Event::RawEmgState(on) => self.log.push(format!("emg: raw sEMG {}", if *on { "on" } else { "off" })),
             Event::RawEmgFailure(message) => self.log.push(format!("emg: {message}")),
             Event::RawEmgFrame(bytes) => {
+                if let Some(recorder) = &mut self.recorder {
+                    recorder.batch(bytes, now)?;
+                }
                 self.emg_frames += 1;
                 self.emg_bytes += bytes.len();
                 let span = now - self.emg_since;
