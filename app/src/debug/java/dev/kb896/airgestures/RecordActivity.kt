@@ -59,6 +59,7 @@ class RecordActivity : Screen() {
     private lateinit var cue: TextView
     private lateinit var reading: TextView
     private lateinit var stats: TextView
+    private lateinit var fit: TextView
     private lateinit var buttons: LinearLayout
     private lateinit var settings: LinearLayout
 
@@ -84,9 +85,11 @@ class RecordActivity : Screen() {
         cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
         reading = Cb.text(this, 15f, R.font.geist_semibold, Cb.INK_700).apply { gravity = Gravity.CENTER }
         stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
+        fit = Fit.view(this)
         buttons = row(gap = 10f).apply { gravity = Gravity.END }
         settings = row(gap = 10f).apply { gravity = Gravity.END }
         show(pageColumn().apply {
+            addView(fit, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(card(null, column(gap = 12f).apply {
                 addView(count)
                 addView(letter, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -365,12 +368,14 @@ class RecordActivity : Screen() {
             val lost = if (batches + missing > 0) 100.0 * missing / (batches + missing) else 0.0
             val reader = if (counts.optBoolean("model")) "read by the trained model" else "${counts.optLong("known")} letters known"
             stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks · %s", batches, lost, counts.optLong("marks"), reader)
+            Fit.show(fit, counts)
             main.postDelayed(this, 1000)
         }
     }
 
     private fun stop(why: String) {
         running = false
+        fit.visibility = android.view.View.GONE
         main.removeCallbacksAndMessages(null)
         BandService.instance?.let {
             it.rawEmg(false)

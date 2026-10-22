@@ -53,6 +53,8 @@ pub struct Stats {
     /// Letters known to read new ones against, and whether a trained model reads them instead.
     pub known: usize,
     pub model: bool,
+    /// Sensors (1-8) resting far noisier than the others: poor skin contact, fix the fit.
+    pub noisy: Vec<usize>,
 }
 
 impl Recorder {
@@ -128,6 +130,9 @@ impl Recorder {
         }
         self.stats.active = self.detector.active;
         self.stats.level = self.detector.level();
+        if !self.detector.active {
+            self.stats.noisy = self.detector.noisy();
+        }
         if let Some(features) = &mut self.features {
             features.push(&batch.values, now);
         }
@@ -272,6 +277,9 @@ const DRIFT_S: f64 = 0.02;
 const ENVELOPE_S: f64 = 0.05;
 const REST_S: f64 = 3.0;
 const STUCK_S: f64 = 4.0;
+/// A sensor resting this many times noisier than the middle one has poor contact (a good fit
+/// keeps them within about 3).
+const NOISY: f64 = 6.0;
 
 impl Detector {
     /// One batch (sample-major); `Some(true)` when writing started, `Some(false)` when it stopped.
@@ -327,6 +335,17 @@ impl Detector {
             }
         }
         None
+    }
+
+    /// The sensors (numbered from 1) resting [`NOISY`] times above the middle one.
+    fn noisy(&self) -> Vec<usize> {
+        let mut rest = self.rest.clone();
+        if rest.is_empty() {
+            return Vec::new();
+        }
+        rest.sort_by(f64::total_cmp);
+        let middle = (rest[(rest.len() - 1) / 2] + rest[rest.len() / 2]) / 2.0;
+        self.rest.iter().enumerate().filter(|(_, r)| **r > middle * NOISY).map(|(i, _)| i + 1).collect()
     }
 
     /// The middle channel's activity over its resting level.
@@ -402,5 +421,6 @@ mod tests {
             }
         }
         assert_eq!(changes, vec![true, false]);
+        assert_eq!(detector.noisy(), vec![7]);
     }
 }

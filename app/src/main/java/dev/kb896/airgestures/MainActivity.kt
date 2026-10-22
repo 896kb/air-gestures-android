@@ -37,6 +37,7 @@ class MainActivity : Screen() {
     private lateinit var lastGesture: TextView
     private lateinit var profile: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
+    private var handwriting: Pair<TextView, NeuDrawable>? = null
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
     private var player: MediaPlayer? = null
@@ -302,6 +303,10 @@ class MainActivity : Screen() {
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
         addView(settingRow("Controls", "Or hold the middle finger", controls.first))
+        if (Handwriting.available(context)) {
+            handwriting = pill("Handwriting off", R.drawable.ic_pencil) { Handwriting.toggle(context); render(BandService.state.value) }
+                .also { addView(settingRow("Handwriting", "Write letters on a table with a finger", it.first)) }
+        }
         wristLeft = segment("Left") { setHand("left") }
         wristRight = segment("Right") { setHand("right") }
         addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
@@ -374,6 +379,10 @@ class MainActivity : Screen() {
                 setTint(Cb.INK_900)
             }, null, null, null,
         )
+        handwriting?.let { (view, shape) ->
+            view.text = if (Handwriting.on) "Handwriting on" else "Handwriting off"
+            if ((shape.pressed > .5f) != Handwriting.on) shape.press(Handwriting.on)
+        }
         // The wrist chosen here, else what the band reports.
         val wrist = Prefs(this).hand.takeIf { it != "band" } ?: state.hand
         for ((view, name) in listOf(wristLeft to "left", wristRight to "right")) {

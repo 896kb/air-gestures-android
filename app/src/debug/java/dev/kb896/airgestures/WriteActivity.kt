@@ -27,7 +27,9 @@ import kotlin.concurrent.thread
  * with the recorder's "+ space, delete" and "+ punctuation" sets). The band's gestures also edit:
  * swipe right (or an index tap) takes the highlighted word and a space, swipe left deletes,
  * swipe up and down move through the suggestions. Everything is recorded like the recorder's
- * sessions; words taken whole label their letters for training.
+ * sessions; words taken whole label their letters for training. Home's Handwriting switch opens
+ * it writing and ends it; writing carries on while it's in the background. A warning shows when
+ * a sensor's noise says the band doesn't fit well.
  */
 class WriteActivity : Screen() {
     private val main = Handler(Looper.getMainLooper())
@@ -48,6 +50,7 @@ class WriteActivity : Screen() {
     private lateinit var suggestions: LinearLayout
     private lateinit var hint: TextView
     private lateinit var stats: TextView
+    private lateinit var fit: TextView
     private lateinit var buttons: LinearLayout
 
     private val gestures = object : BandService.Practice {
@@ -70,9 +73,11 @@ class WriteActivity : Screen() {
                 "Or gestures: swipe right or index tap = take the word + space · swipe left = delete · swipe up/down = choose a suggestion"
         }
         stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
+        fit = Fit.view(this)
         buttons = row(gap = 10f).apply { gravity = Gravity.END }
         val wide = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         show(pageColumn().apply {
+            addView(fit, wide)
             addView(card(null, column(gap = 12f).apply {
                 addView(Cb.label(this@WriteActivity, "Write"))
                 addView(prompt, wide)
@@ -85,11 +90,13 @@ class WriteActivity : Screen() {
             addView(buttons, wide)
         }, title = "Handwriting: words")
         render(null)
+        if (intent.getBooleanExtra(Handwriting.EXTRA_START, false)) start()
     }
 
-    override fun onPause() {
+    /** Writing carries on in the background (Home's Handwriting switch, or Stop, ends it). */
+    override fun onDestroy() {
         if (running) stop()
-        super.onPause()
+        super.onDestroy()
     }
 
     private fun recording() = BandService.instance?.recording
@@ -105,6 +112,8 @@ class WriteActivity : Screen() {
         service.rawEmg(true)
         service.recording.recordMark("session", "words still_ms=$stillMs")
         running = true
+        Handwriting.on = true
+        Handwriting.stop = { main.post { if (running) stop() } }
         writingAt = Double.NaN
         lastEnd = service.recording.clock()
         render(service.recording.recordEdit("clear"))
@@ -114,6 +123,9 @@ class WriteActivity : Screen() {
 
     private fun stop() {
         running = false
+        Handwriting.on = false
+        Handwriting.stop = null
+        fit.visibility = android.view.View.GONE
         main.removeCallbacksAndMessages(null)
         BandService.instance?.let {
             it.rawEmg(false)
@@ -225,6 +237,7 @@ class WriteActivity : Screen() {
             val reader = if (counts.optBoolean("model")) "trained model" else "${counts.optLong("known")} letters known"
             val words = if (wordCount > 0) "$wordCount words" else "no dictionary"
             stats.text = String.format(Locale.ROOT, "%.1f %% lost · %s · %s", lost, reader, words)
+            Fit.show(fit, counts)
             main.postDelayed(this, 1000)
         }
     }
