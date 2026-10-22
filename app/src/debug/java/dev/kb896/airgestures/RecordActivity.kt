@@ -28,9 +28,10 @@ class RecordActivity : Screen() {
     /** What the last recording ended with, and where it is. */
     private var saved: String? = null
     private var reps = 5
-    private var windowMs = 3000L
+    private val settingsStore by lazy { getSharedPreferences("recorder", MODE_PRIVATE) }
+    private var windowMs = 2000L
     /** From a letter appearing to its writing window. */
-    private var gapMs = 2500L
+    private var gapMs = 500L
 
     private lateinit var count: TextView
     private lateinit var letter: TextView
@@ -49,6 +50,10 @@ class RecordActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // The last session's settings.
+        reps = settingsStore.getInt("reps", reps)
+        windowMs = settingsStore.getLong("write_ms", windowMs)
+        gapMs = settingsStore.getLong("ready_ms", gapMs)
         count = Cb.label(this, "")
         letter = Cb.text(this, 120f, R.font.geist_bold, Cb.INK_900, -.02f).apply { gravity = Gravity.CENTER }
         cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
@@ -105,11 +110,11 @@ class RecordActivity : Screen() {
                     count.text = "RECORD HANDWRITING"
                     letter.text = "a"
                     cue.text = if (service() == null) "Connect the band first." else
-                        "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${gapMs / 1000.0} s, then turns dark: write it within ${windowMs / 1000.0} s. $reps of each letter, in random order."
+                        "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${seconds(gapMs)}, then turns dark: write it within ${seconds(windowMs)}. $reps of each letter, in random order."
                 }
-                settings.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; render() }.first)
-                settings.addView(pill("Write: ${windowMs / 1000.0} s") { windowMs = if (windowMs >= 5000) 1500 else windowMs + 500; render() }.first)
-                settings.addView(pill("Ready: ${gapMs / 1000.0} s") { gapMs = if (gapMs >= 4000) 1500 else gapMs + 500; render() }.first)
+                settings.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; remember() }.first)
+                settings.addView(pill("Write: ${seconds(windowMs)}") { windowMs = following(WRITE_MS, windowMs); remember() }.first)
+                settings.addView(pill("Ready: ${seconds(gapMs)}") { gapMs = following(READY_MS, gapMs); remember() }.first)
                 buttons.addView(pill("Start", R.drawable.ic_check) { start() }.first)
             }
         }
@@ -157,6 +162,16 @@ class RecordActivity : Screen() {
             }, windowMs)
         }, gapMs)
     }
+
+    private fun remember() {
+        settingsStore.edit().putInt("reps", reps).putLong("write_ms", windowMs).putLong("ready_ms", gapMs).apply()
+        render()
+    }
+
+    /** The choice after [current] in [choices], wrapping round. */
+    private fun following(choices: List<Long>, current: Long) = choices.firstOrNull { it > current } ?: choices.first()
+
+    private fun seconds(ms: Long) = "${java.math.BigDecimal(ms).movePointLeft(3).stripTrailingZeros().toPlainString()} s"
 
     /** "Starting in N…", then the next letter. */
     private fun countdown(seconds: Int) {
@@ -222,5 +237,8 @@ class RecordActivity : Screen() {
     companion object {
         /** Seconds of "get ready" before the first letter. */
         const val COUNTDOWN = 5
+        /** What the Write and Ready buttons step through. */
+        val WRITE_MS = listOf(1000L, 1500L, 2000L, 2500L, 3000L, 4000L, 5000L)
+        val READY_MS = listOf(250L, 500L, 1000L, 1500L, 2000L, 3000L)
     }
 }
