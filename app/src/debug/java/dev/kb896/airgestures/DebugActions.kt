@@ -21,6 +21,8 @@ import android.util.Log
  *
  *     ... --es config f202080800102018022809   # 46 = {1=0 2=32 3=2 5=9}
  *
+ * Or stream raw sEMG alongside gestures (its rate goes to the log): `--ez emg true` / `false`.
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
@@ -33,6 +35,11 @@ class DebugActions : BroadcastReceiver() {
                 BandService.stop(context)
                 BandService.start(context)
             }
+            return
+        }
+        if (intent.hasExtra("emg")) {
+            val on = intent.getBooleanExtra("emg", false)
+            BandService.instance?.rawEmg(on) ?: Log.i("AirGestures", "debug emg: the band service isn't running")
             return
         }
         intent.getStringExtra("config")?.let { hex ->

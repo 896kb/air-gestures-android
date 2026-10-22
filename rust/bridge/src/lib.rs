@@ -32,6 +32,8 @@ fn config_with(mapping: &str) -> Config {
 /// Battery query period and the quiet time before a stream-state query.
 const BATTERY_EVERY: f64 = 5.0;
 const QUIET_QUERY: f64 = 2.0;
+/// How often the raw sEMG rate goes to the log while it streams (debug).
+const EMG_RATE_EVERY: f64 = 5.0;
 
 pub struct Connection {
     session: BandSession,
@@ -44,6 +46,10 @@ pub struct Connection {
     log: Vec<String>,
     /// The stream probe is on: the session's notes go to the log.
     probing: bool,
+    /// Raw sEMG frames and bytes since the last rate line, and when that was (debug).
+    emg_frames: usize,
+    emg_bytes: usize,
+    emg_since: f64,
 }
 
 #[derive(Serialize)]
@@ -88,6 +94,9 @@ impl Connection {
             actions: Vec::new(),
             log: Vec::new(),
             probing: false,
+            emg_frames: 0,
+            emg_bytes: 0,
+            emg_since: 0.0,
         })
     }
 
@@ -198,6 +207,16 @@ impl Connection {
         self.session.probe_config(&body, now).map_err(|e| e.to_string())
     }
 
+    /// Debug: turn the band's raw sEMG stream on or off (alongside gestures); returns the
+    /// bytes to write. While it runs, the log gets its rate every [`EMG_RATE_EVERY`] s.
+    pub fn set_raw_emg(&mut self, on: bool, now: f64) -> Result<Vec<u8>, String> {
+        self.emg_frames = 0;
+        self.emg_bytes = 0;
+        self.emg_since = now;
+        self.log.push(format!("emg: asking for raw sEMG {}", if on { "on" } else { "off" }));
+        self.session.set_raw_emg_enabled(on, now).map_err(|e| e.to_string())
+    }
+
     pub fn set_dial(&mut self, dial: &str) {
         self.controller.set_dial_target(DialTarget::from_name(dial));
     }
@@ -219,6 +238,25 @@ impl Connection {
                 self.log.push("connected".into());
             }
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
+            Event::RawEmgConfiguration(config) => self.log.push(format!("emg: {config:?}")),
+            Event::RawEmgState(on) => self.log.push(format!("emg: raw sEMG {}", if *on { "on" } else { "off" })),
+            Event::RawEmgFailure(message) => self.log.push(format!("emg: {message}")),
+            Event::RawEmgFrame(bytes) => {
+                self.emg_frames += 1;
+                self.emg_bytes += bytes.len();
+                let span = now - self.emg_since;
+                if span >= EMG_RATE_EVERY {
+                    self.log.push(format!(
+                        "emg: {:.0} frames/s, {:.1} kB/s, {} gestures so far",
+                        self.emg_frames as f64 / span,
+                        self.emg_bytes as f64 / span / 1000.0,
+                        self.controller.status().gestures,
+                    ));
+                    self.emg_frames = 0;
+                    self.emg_bytes = 0;
+                    self.emg_since = now;
+                }
+            }
             _ => {}
         }
         let gestures = self.controller.status().gestures;

@@ -187,6 +187,9 @@ class BandService : Service(), BandLink.Listener {
     /** Debug: write a raw ConfigReq (hex) to the band; the answer goes to the log. */
     fun probeConfig(hex: String) = link.probeConfig(hex)
 
+    /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
+    fun rawEmg(on: Boolean) = link.rawEmg(on)
+
     private val unlocked = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = nudge()
     }

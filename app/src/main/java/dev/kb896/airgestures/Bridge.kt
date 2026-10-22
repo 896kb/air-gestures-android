@@ -28,6 +28,8 @@ object Bridge {
     @JvmStatic external fun setProbe(handle: Long, fields: String)
     /** Debug: a ConfigReq as hex to write to the band; returns bytes to write. The answer goes to the log. */
     @JvmStatic external fun probeConfig(handle: Long, hex: String, now: Double): ByteArray
+    /** Debug: the raw sEMG stream on or off; returns bytes to write. Its rate goes to the log. */
+    @JvmStatic external fun setRawEmg(handle: Long, on: Boolean, now: Double): ByteArray
     @JvmStatic external fun close(handle: Long)
 
     // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.

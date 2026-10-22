@@ -101,15 +101,21 @@ class BandLink(
         }
     }
 
-    /** Debug: write a ConfigReq given as hex to the band (see Bridge.probeConfig); off the main thread. */
-    fun probeConfig(hex: String) = thread(name = "band-probe") {
+    /** Debug: write a ConfigReq given as hex to the band (see Bridge.probeConfig). */
+    fun probeConfig(hex: String) = debugSend { Bridge.probeConfig(it, hex, now()) }
+
+    /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
+    fun rawEmg(on: Boolean) = debugSend { Bridge.setRawEmg(it, on, now()) }
+
+    /** Send what [request] returns for the open session, off the main thread; problems go to the log. */
+    private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") {
         try {
-            val out = synchronized(lock) { if (handle == 0L) null else Bridge.probeConfig(handle, hex, now()) }
+            val out = synchronized(lock) { if (handle == 0L) null else request(handle) }
             val stream = socket?.outputStream
-            if (out == null || stream == null) log("probe: not connected") else synchronized(stream) { stream.write(out) }
+            if (out == null || stream == null) log("debug: not connected") else synchronized(stream) { stream.write(out) }
             drain()
         } catch (e: Exception) {
-            log("probe: ${e.message}")
+            log("debug: ${e.message}")
         }
     }
 

@@ -217,6 +217,18 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_probeConfig<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setRawEmg<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+    now: jdouble,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.set_raw_emg(on != 0, now);
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_close<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,
