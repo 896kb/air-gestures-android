@@ -268,6 +268,16 @@ fn dtw(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
 
 /// The letters written in one recording (see `recorder`), those marked "discard" left out.
 fn read_recording(folder: &Path) -> Result<Vec<(String, Letter)>, String> {
+    let (features, windows) = read_windows(folder)?;
+    Ok(windows
+        .into_iter()
+        .map(|(label, start, end)| (label, features.letter(start, end)))
+        .filter(|(_, letter)| !letter.is_empty())
+        .collect())
+}
+
+/// A recording's features, and its letters' windows (label, start, end).
+fn read_windows(folder: &Path) -> Result<(Features, Vec<(String, f64, f64)>), String> {
     let data = fs::read(folder.join("emg.bin")).map_err(|e| e.to_string())?;
     let end = data.iter().position(|&b| b == b'\n').ok_or("no header")?;
     let header = std::str::from_utf8(&data[..end]).map_err(|e| e.to_string())?;
@@ -316,11 +326,7 @@ fn read_recording(folder: &Path) -> Result<Vec<(String, Letter)>, String> {
             _ => {}
         }
     }
-    Ok(windows
-        .into_iter()
-        .map(|(label, start, end)| (label, features.letter(start, end)))
-        .filter(|(_, letter)| !letter.is_empty())
-        .collect())
+    Ok((features, windows))
 }
 
 #[cfg(test)]
@@ -385,5 +391,32 @@ mod recordings {
         }
         let n = all.len().max(1);
         println!("{} letters: {} % first, {} % in the first three", all.len(), 100 * first / n, 100 * three / n);
+    }
+
+    /// Every letter's features as JSON lines, for analysis: `HANDWRITING=<folder> OUT=<file>`.
+    #[test]
+    #[ignore]
+    fn dump() {
+        let root = std::env::var("HANDWRITING").expect("HANDWRITING=<folder>");
+        let mut out = String::new();
+        let mut all = Vec::new();
+        let mut folders: Vec<_> = fs::read_dir(&root).unwrap().flatten().map(|e| e.path()).collect();
+        folders.sort();
+        for folder in folders {
+            let Ok((features, windows)) = read_windows(&folder) else { continue };
+            for (label, start, end) in windows {
+                let letter = features.letter(start, end);
+                all.push(letter.clone());
+                let line = serde_json::json!({
+                    "session": folder.file_name().unwrap().to_string_lossy(),
+                    "label": label, "start": start, "end": end, "frames": letter,
+                });
+                out += &format!("{line}\n");
+            }
+        }
+        let out_path = std::env::var("OUT").expect("OUT=<file>");
+        fs::write(&out_path, out).unwrap();
+        let distances: Vec<Vec<f32>> = all.iter().map(|a| all.iter().map(|b| dtw(a, b)).collect()).collect();
+        fs::write(format!("{out_path}.distances"), serde_json::to_string(&distances).unwrap()).unwrap();
     }
 }
