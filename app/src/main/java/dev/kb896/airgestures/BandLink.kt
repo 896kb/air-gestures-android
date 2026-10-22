@@ -104,6 +104,9 @@ class BandLink(
     /** Debug: write a ConfigReq given as hex to the band (see Bridge.probeConfig). */
     fun probeConfig(hex: String) = debugSend { Bridge.probeConfig(it, hex, now()) }
 
+    /** Debug: ask the band's update status, read only (see Bridge.otaStatus). */
+    fun otaStatus() = debugSend { Bridge.otaStatus(it) }
+
     /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
     fun rawEmg(on: Boolean) {
         // Raw sEMG needs most of the link: ask for the shortest connection interval while it runs

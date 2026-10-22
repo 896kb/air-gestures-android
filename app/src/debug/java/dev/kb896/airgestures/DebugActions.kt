@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import org.json.JSONObject
 import kotlin.concurrent.thread
 
 /**
@@ -25,9 +26,22 @@ import kotlin.concurrent.thread
  * Or stream raw sEMG alongside gestures (its rate goes to the log): `--ez emg true` / `false`.
  *
  * Or keep a copy of the firmware Meta offers the connected band (with the Meta sign-in; the
- * value is the version to report, "1" for the full current build), into files/firmware:
+ * value is the version to report: "1" for a full build, "band" for what the band runs; "rest"
+ * asks the glasses' REST check instead), into files/firmware:
  *
  *     ... --es firmware 1
+ *
+ * which needs the Meta sign-in; this opens it alone (no claim afterwards):
+ *
+ *     ... --ez signin true
+ *
+ * The band's update status (read only; the answer goes to the log):
+ *
+ *     ... --ez ota_status true
+ *
+ * (The sign-in, again:)
+ *
+ *     ... --ez signin true
  *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
@@ -52,14 +66,29 @@ class DebugActions : BroadcastReceiver() {
             BandService.instance?.probeConfig(hex) ?: Log.i("AirGestures", "debug config: the band service isn't running")
             return
         }
+        if (intent.getBooleanExtra("ota_status", false)) {
+            BandService.instance?.otaStatus() ?: Log.i("AirGestures", "debug ota: the band service isn't running")
+            return
+        }
+        if (intent.getBooleanExtra("signin", false)) {
+            context.startActivity(Intent(context, MetaSignIn::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        }
         intent.getStringExtra("firmware")?.let { version ->
             val session = SessionStore.load(context) ?: return run { Log.i("AirGestures", "debug firmware: not signed in to Meta") }
-            val serial = BandService.instance?.recording?.deviceInfo()?.optString("serial")?.takeIf { it.isNotEmpty() }
+            val info = BandService.instance?.recording?.deviceInfo()
+            val serial = info?.optString("serial")?.takeIf { it.isNotEmpty() }
                 ?: return run { Log.i("AirGestures", "debug firmware: the band hasn't said its serial yet (connect it)") }
+            // What the band runs, without its serial.
+            Log.i("AirGestures", "debug firmware: the band runs ${JSONObject(info.toString()).apply { remove("serial") }}")
             val dir = context.getExternalFilesDir("firmware")?.path ?: return
             val result = goAsync()
             thread(name = "firmware") {
-                val summary = runCatching { Bridge.firmwareArchive(session, serial, version.ifBlank { "1" }, dir) }
+                val summary = runCatching { Bridge.firmwareArchive(session, serial, when (version) {
+                    "band" -> info.optString("software")
+                    "rest" -> "rest:" + info.optString("software")
+                    else -> version.ifBlank { "1" }
+                }, dir) }
                 Log.i("AirGestures", "debug firmware: ${summary.getOrElse { "failed: ${it.message}" }}")
                 result.finish()
             }

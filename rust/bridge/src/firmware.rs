@@ -86,9 +86,10 @@ fn offer(json: &Value) -> Option<&Value> {
     }
 }
 
-/// Ask for this band's firmware the ways the app does, until one gives an offer. Returns the
-/// offer's response and a note of what was asked.
-fn check(session: &MetaSession, serial: &str, version: &str) -> Result<(Value, Value), String> {
+/// Ask for this band's firmware every way the app does: each offer's response with a note of
+/// what was asked (the ways can offer different builds), and what the others answered.
+fn check(session: &MetaSession, serial: &str, version: &str) -> (Vec<(Value, Value)>, Vec<String>) {
+    let mut offers = Vec::new();
     let mut tried = Vec::new();
     for host in HOSTS {
         let legacy = json!({"fetch_request": {"topology_fetch_update_info": [{
@@ -120,7 +121,7 @@ fn check(session: &MetaSession, serial: &str, version: &str) -> Result<(Value, V
             match graphql(session, host, name, id, variables) {
                 Ok(json) if offer(&json).is_some() => {
                     let asked = json!({"host": host, "query": name, "version": version, "at": now()});
-                    return Ok((json, asked));
+                    offers.push((json, asked));
                 }
                 Ok(json) if json.get("errors").is_some() => tried.push(format!("{host} {name}: {}", errors(&json))),
                 Ok(_) => tried.push(format!("{host} {name}: no update offered")),
@@ -128,7 +129,7 @@ fn check(session: &MetaSession, serial: &str, version: &str) -> Result<(Value, V
             }
         }
     }
-    Err(tried.join("\n"))
+    (offers, tried)
 }
 
 fn now() -> u64 {
@@ -157,8 +158,7 @@ fn download(url: &str, path: &Path) -> Result<(u64, String), String> {
     }
     file.flush().map_err(|e| e.to_string())?;
     fs::rename(&partial, path).map_err(|e| e.to_string())?;
-    let hex = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    Ok((size, hex))
+    Ok((size, hex(&hash.finalize())))
 }
 
 fn text(value: &Value) -> Option<String> {
@@ -169,32 +169,58 @@ fn text(value: &Value) -> Option<String> {
     }
 }
 
-/// Check, download and keep the firmware offered for `serial` (reporting `version` as the
-/// band's current one; "1" asks for the full current build) under `dir`. A summary as JSON.
+/// Check, download and keep every firmware offered for `serial` (reporting `version` as the
+/// band's current one; "1" asks for a full build) under `dir`. A summary as JSON.
 pub fn archive(session_json: &str, serial: &str, version: &str, dir: &str) -> Result<String, String> {
     let session: MetaSession = serde_json::from_str(session_json).map_err(|_| "no Meta sign-in".to_owned())?;
-    let (response, asked) = check(&session, serial, version)?;
-    let offer = offer(&response).ok_or("no update offered")?.clone();
-    let target = offer.get("target_version").and_then(text).unwrap_or_else(|| "unknown".into());
-    let folder = Path::new(dir).join(&target);
+    if let Some(version) = version.strip_prefix("rest:") {
+        return rest(&session, serial, version, dir);
+    }
+    let (offers, tried) = check(&session, serial, version);
+    if offers.is_empty() {
+        return Err(tried.join("\n"));
+    }
+    let mut kept = Vec::new();
+    let mut seen = Vec::new();
+    for (response, asked) in offers {
+        let offer = offer(&response).expect("an offer").clone();
+        let target = offer.get("target_version").and_then(text).unwrap_or_else(|| "unknown".into());
+        if seen.contains(&target) {
+            kept.push(json!({"target_version": target, "asked": asked, "same_as_above": true}));
+            continue;
+        }
+        seen.push(target.clone());
+        kept.push(keep(&session, serial, dir, &response, &offer, &target, asked)?);
+    }
+    Ok(json!({"offers": kept, "not_offered": tried}).to_string())
+}
+
+/// One offer into `<dir>/<target>/`; an archived package with the right checksum isn't fetched again.
+fn keep(session: &MetaSession, serial: &str, dir: &str, response: &Value, offer: &Value, target: &str, asked: Value) -> Result<Value, String> {
+    let folder = Path::new(dir).join(target);
     fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let save = |name: &str, value: &Value| {
         fs::write(folder.join(name), serde_json::to_string_pretty(value).expect("JSON")).map_err(|e| e.to_string())
     };
-    save("response.json", &response)?;
+    save("response.json", response)?;
     save("check.json", &asked)?;
 
     let zip = folder.join("ota.zip");
-    let url = offer.get("file_uri").and_then(Value::as_str).ok_or("the offer has no link")?;
-    let (size, sha256) = download(url, &zip)?;
     let checksum = offer.get("file_checksum").and_then(text).unwrap_or_default();
-    let matches = checksum.eq_ignore_ascii_case(&sha256);
+    let (size, matches) = match fs::read(&zip) {
+        Ok(bytes) if hex(&Sha256::digest(&bytes)).eq_ignore_ascii_case(&checksum) => (bytes.len() as u64, true),
+        _ => {
+            let url = offer.get("file_uri").and_then(Value::as_str).ok_or("the offer has no link")?;
+            let (size, sha256) = download(url, &zip)?;
+            (size, checksum.eq_ignore_ascii_case(&sha256))
+        }
+    };
 
     let kek = match offer.get("kek_id").and_then(Value::as_i64) {
         Some(kek_id) => {
             let variables = json!({"request": {"device_serial_number": serial, "kek_id": kek_id}});
             let host = asked["host"].as_str().unwrap_or(HOSTS[0]);
-            match graphql(&session, host, "FetchEncryptedKEKInfoByKEKId", FETCH_KEK, &variables) {
+            match graphql(session, host, "FetchEncryptedKEKInfoByKEKId", FETCH_KEK, &variables) {
                 Ok(json) => {
                     save("kek.json", &json)?;
                     json!({"kek_id": kek_id, "saved": json.get("errors").is_none()})
@@ -207,14 +233,64 @@ pub fn archive(session_json: &str, serial: &str, version: &str, dir: &str) -> Re
     Ok(json!({
         "folder": folder.to_string_lossy(),
         "target_version": target,
+        "base_version": offer.get("base_version"),
         "name": offer.get("build_number_display_name"),
         "release_tag": offer.get("release_tag"),
         "size": size,
         "checksum_matches": matches,
         "kek": kek,
         "asked": asked,
-    })
-    .to_string())
+    }))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The glasses' REST check (`/firmware_ota_update`, seen in the app's glasses updater), asked
+/// for the band: what each host and device type answers, saved under `<dir>/rest/`.
+fn rest(session: &MetaSession, serial: &str, version: &str, dir: &str) -> Result<String, String> {
+    const FIELDS: &str = "update_interval,ota{download_uri,target_version,base_version,file_size,release_channel_id,\
+        file_checksum,release_tag,release_notes_cms,extra_install_options,build_number_display_name},\
+        metadata{release_notes,build_number_display_name}";
+    let folder = Path::new(dir).join("rest");
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let client = http(60)?;
+    let mut answers = Vec::new();
+    for host in HOSTS {
+        for device_type in ["ota.ceres.user", "ota.ceres_p1.user"] {
+            let response = client
+                .get(format!("https://{host}/firmware_ota_update"))
+                .query(&[
+                    ("access_token", session.access_token.as_str()),
+                    ("device_type", device_type),
+                    ("version", version),
+                    ("device_serial", serial),
+                    ("full_update_only", "true"),
+                    ("fields", FIELDS),
+                ])
+                .send();
+            let answer = match response {
+                Err(e) => json!({"host": host, "device_type": device_type, "error": format!("couldn't reach Meta: {}", e.without_url())}),
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let text = response.text().unwrap_or_default();
+                    let text = text.trim_start().trim_start_matches("for (;;);");
+                    let _ = fs::write(folder.join(format!("{host}-{device_type}.json")), text);
+                    let json: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+                    let ota = &json["ota"];
+                    json!({
+                        "host": host, "device_type": device_type, "status": status,
+                        "target_version": ota.get("target_version"), "name": ota.get("build_number_display_name"),
+                        "keys": json.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()),
+                        "errors": if status == 200 { Value::Null } else { errors(&json).into() },
+                    })
+                }
+            };
+            answers.push(answer);
+        }
+    }
+    Ok(json!({"rest": answers}).to_string())
 }
 
 #[cfg(test)]

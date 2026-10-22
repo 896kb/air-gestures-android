@@ -201,6 +201,17 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProbe<'local>(
     }
 }
 
+/// Debug: the band's update status, read only; bytes to write (answer in the log).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_otaStatus<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.ota_status();
+    bytes_out(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_probeConfig<'local>(
     mut env: JNIEnv<'local>,

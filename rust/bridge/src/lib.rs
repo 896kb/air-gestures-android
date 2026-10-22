@@ -217,6 +217,13 @@ impl Connection {
         self.session.probe_config(&body, now).map_err(|e| e.to_string())
     }
 
+    /// Debug: ask the band's update status, read only (see `BandSession::ota_status`); returns
+    /// the bytes to write. The answer goes to the log.
+    pub fn ota_status(&mut self) -> Result<Vec<u8>, String> {
+        self.probing = true;
+        self.session.ota_status().map_err(|e| e.to_string())
+    }
+
     /// Debug: turn the band's raw sEMG stream on or off (alongside gestures); returns the
     /// bytes to write. While it runs, the log gets its rate every [`EMG_RATE_EVERY`] s.
     pub fn set_raw_emg(&mut self, on: bool, now: f64) -> Result<Vec<u8>, String> {

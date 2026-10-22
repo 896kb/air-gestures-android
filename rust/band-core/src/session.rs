@@ -223,6 +223,8 @@ pub struct BandSession {
     configuration_id: u64,
     hand_request: Option<HandRequest>,
     hand: Option<Hand>,
+    /// The id of an asked update status ([`BandSession::ota_status`]) not yet answered.
+    ota_request: Option<u64>,
 }
 
 impl BandSession {
@@ -292,6 +294,7 @@ impl BandSession {
             configuration_id: 0,
             hand_request: None,
             hand: None,
+            ota_request: None,
         }
     }
 
@@ -797,6 +800,29 @@ impl BandSession {
         Ok(bytes)
     }
 
+    /// Debug: ask the band's update service for its status, read only: an empty
+    /// `OtaReq.deviceInfoRequest` (field 7 of the RPC request, beside ConfigReq's 5, on the
+    /// same service). The answer (`OtaResp.deviceInfoResponse`: protocol version, state,
+    /// firmware and model versions, key version) goes to the log.
+    pub fn ota_status(&mut self) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() || self.ota_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        let id = self.configuration_id + 1;
+        let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+        let ota = field_bytes(1, &[]);
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            words,
+            &[field_int(1, id), field_bytes(7, &ota)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        self.ota_request = Some(id);
+        self.diagnostics.push(format!("ota: asking the band's update status (request {id})"));
+        Ok(bytes)
+    }
+
     fn receive_hand(
         &mut self,
         fields: &ProtoFields,
@@ -1240,6 +1266,10 @@ impl BandSession {
                     "The band rejected the input subscription. Try reconnecting.",
                 ));
             }
+            if route(frame.channel) == 6 && self.ota_request.take().is_some() {
+                self.diagnostics.push("ota: the band rejected the update status request".into());
+                return Ok(Vec::new());
+            }
             if route(frame.channel) == 6 && self.hand_request.is_some() {
                 self.hand_request = None;
                 self.hand = None;
@@ -1304,6 +1334,11 @@ impl BandSession {
                 return Ok(Vec::new());
             }
             let fields = ProtoFields::parse(&frame.payload)?;
+            if self.ota_request.is_some() && self.ota_request == fields.integer(1).ok() {
+                self.ota_request = None;
+                self.diagnostics.push(format!("ota: update status: {}", fields.describe_nested(0)));
+                return Ok(Vec::new());
+            }
             return self.receive_hand(&fields, time, outgoing);
         }
         if kind == RPC_RESPONSE
