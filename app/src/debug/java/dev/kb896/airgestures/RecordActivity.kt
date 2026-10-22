@@ -29,12 +29,15 @@ class RecordActivity : Screen() {
     private var saved: String? = null
     private var reps = 5
     private var windowMs = 3000L
+    /** From a letter appearing to its writing window. */
+    private var gapMs = 2500L
 
     private lateinit var count: TextView
     private lateinit var letter: TextView
     private lateinit var cue: TextView
     private lateinit var stats: TextView
     private lateinit var buttons: LinearLayout
+    private lateinit var settings: LinearLayout
 
     /** Gestures still reach the recording (as marks); nothing runs meanwhile. */
     private val quiet = object : BandService.Practice {
@@ -51,6 +54,7 @@ class RecordActivity : Screen() {
         cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
         stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
         buttons = row(gap = 10f).apply { gravity = Gravity.END }
+        settings = row(gap = 10f).apply { gravity = Gravity.END }
         show(pageColumn().apply {
             addView(card(null, column(gap = 12f).apply {
                 addView(count)
@@ -58,12 +62,22 @@ class RecordActivity : Screen() {
                 addView(cue, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                 addView(stats)
             }))
+            addView(settings, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(buttons, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }, title = "Handwriting")
         render()
     }
 
+    /** Before starting: the text follows the band connecting. */
+    private val watch: (BandService.State) -> Unit = { if (!running) render() }
+
+    override fun onResume() {
+        super.onResume()
+        BandService.state.observe(watch)
+    }
+
     override fun onPause() {
+        BandService.state.remove(watch)
         // Leaving the screen ends the recording; what was written is kept.
         if (running) stop("Stopped: the screen was left.")
         super.onPause()
@@ -73,9 +87,10 @@ class RecordActivity : Screen() {
 
     private fun render() {
         buttons.removeAllViews()
+        settings.removeAllViews()
         when {
             running -> {
-                buttons.addView(pill(if (paused) "Resume" else "Pause") { paused = !paused; if (!paused) next() else cue.text = "Paused" }.first)
+                buttons.addView(pill(if (paused) "Resume" else "Pause") { if (paused) resume() else pause() }.first)
                 if (at > 0) buttons.addView(pill("Redo last") { redo() }.first)
                 buttons.addView(pill("Stop") { stop("Stopped.") }.first)
             }
@@ -90,10 +105,11 @@ class RecordActivity : Screen() {
                     count.text = "RECORD HANDWRITING"
                     letter.text = "a"
                     cue.text = if (service() == null) "Connect the band first." else
-                        "Each letter is shown, then you get ${windowMs / 1000.0} s to write it with your index finger on the table. $reps of each letter, in random order."
+                        "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${gapMs / 1000.0} s, then turns dark: write it within ${windowMs / 1000.0} s. $reps of each letter, in random order."
                 }
-                buttons.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; render() }.first)
-                buttons.addView(pill("Window: ${windowMs / 1000.0} s") { windowMs = if (windowMs >= 5000) 1500 else windowMs + 500; render() }.first)
+                settings.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; render() }.first)
+                settings.addView(pill("Write: ${windowMs / 1000.0} s") { windowMs = if (windowMs >= 5000) 1500 else windowMs + 500; render() }.first)
+                settings.addView(pill("Ready: ${gapMs / 1000.0} s") { gapMs = if (gapMs >= 4000) 1500 else gapMs + 500; render() }.first)
                 buttons.addView(pill("Start", R.drawable.ic_check) { start() }.first)
             }
         }
@@ -107,13 +123,13 @@ class RecordActivity : Screen() {
         folder = dir
         service.startPractice(quiet)
         service.rawEmg(true)
-        service.recording.recordMark("session", "reps=$reps window_ms=$windowMs gap_ms=$GAP_MS")
+        service.recording.recordMark("session", "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
         prompts = ('a'..'z').flatMap { c -> List(reps) { c.toString() } }.shuffled()
         at = 0
         running = true
         paused = false
         render()
-        main.postDelayed(::next, GAP_MS)
+        countdown(COUNTDOWN)
         main.post(statsTick)
     }
 
@@ -139,7 +155,34 @@ class RecordActivity : Screen() {
                 at++
                 next()
             }, windowMs)
-        }, GAP_MS)
+        }, gapMs)
+    }
+
+    /** "Starting in N…", then the next letter. */
+    private fun countdown(seconds: Int) {
+        if (!running || paused) return
+        if (seconds == 0) return next()
+        count.text = "GET READY"
+        letter.text = seconds.toString()
+        letter.setTextColor(Cb.INK_400)
+        cue.text = "Rest your index finger on the table"
+        main.postDelayed({ countdown(seconds - 1) }, 1000)
+    }
+
+    private fun pause() {
+        paused = true
+        // The letter on screen (if its window was open) is asked again after the pause.
+        main.removeCallbacksAndMessages(null)
+        main.post(statsTick)
+        BandService.instance?.recording?.recordMark("pause", prompts.getOrNull(at) ?: "")
+        cue.text = "Paused"
+        render()
+    }
+
+    private fun resume() {
+        paused = false
+        render()
+        countdown(3)
     }
 
     /** The last letter was written wrong: mark it to be left out, and ask for it again. */
@@ -177,7 +220,7 @@ class RecordActivity : Screen() {
     }
 
     companion object {
-        /** From a letter appearing to its writing window. */
-        const val GAP_MS = 1500L
+        /** Seconds of "get ready" before the first letter. */
+        const val COUNTDOWN = 5
     }
 }
