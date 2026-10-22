@@ -258,8 +258,9 @@ impl Recorder {
 #[derive(Default)]
 struct Detector {
     mean: Vec<f64>,
-    envelope: f64,
-    rest: f64,
+    /// Each channel's activity, and its resting level.
+    envelope: Vec<f64>,
+    rest: Vec<f64>,
     active: bool,
     /// How long the muscles have been active (s).
     active_for: f64,
@@ -274,37 +275,43 @@ const STUCK_S: f64 = 4.0;
 
 impl Detector {
     /// One batch (sample-major); `Some(true)` when writing started, `Some(false)` when it stopped.
+    /// Each channel is measured against its own resting level and the middle of those counts,
+    /// so one electrode with poor contact (noise many times the others) can't hide the writing.
     fn batch(&mut self, values: &[u16], channels: usize, rate: f64, gap: bool) -> Option<bool> {
         if channels == 0 || values.len() < channels {
             return None;
         }
         let samples = values.len() / channels;
-        let first = self.mean.is_empty();
+        let first = self.mean.len() != channels;
         if first || gap {
             self.mean = values[..channels].iter().map(|&v| f64::from(v)).collect();
         }
         let drift = 1.0 - (-1.0 / (rate * DRIFT_S)).exp();
-        let mut energy = 0.0;
+        let mut energy = vec![0.0; channels];
         for sample in values.chunks_exact(channels) {
-            for (mean, &value) in self.mean.iter_mut().zip(sample) {
+            for ((mean, &value), energy) in self.mean.iter_mut().zip(sample).zip(&mut energy) {
                 let value = f64::from(value);
                 *mean += (value - *mean) * drift;
-                energy += (value - *mean).abs();
+                *energy += (value - *mean).abs();
             }
         }
-        energy /= (samples * channels) as f64;
+        energy.iter_mut().for_each(|e| *e /= samples as f64);
         let dt = samples as f64 / rate;
         if first {
+            self.rest = energy.iter().map(|e| e.max(1e-6)).collect();
             self.envelope = energy;
-            self.rest = energy.max(1e-6);
             return None;
         }
-        self.envelope += (energy - self.envelope) * (1.0 - (-dt / ENVELOPE_S).exp());
-        if !self.active && self.envelope < self.rest * 1.2 {
-            self.rest += (self.envelope - self.rest) * (1.0 - (-dt / REST_S).exp());
-            self.rest = self.rest.max(1e-6);
+        let follow = 1.0 - (-dt / ENVELOPE_S).exp();
+        let settle = 1.0 - (-dt / REST_S).exp();
+        for ((envelope, rest), energy) in self.envelope.iter_mut().zip(&mut self.rest).zip(&energy) {
+            *envelope += (energy - *envelope) * follow;
+            if !self.active && *envelope < *rest * 1.2 {
+                *rest = (*rest + (*envelope - *rest) * settle).max(1e-6);
+            }
         }
-        if !self.active && self.envelope > self.rest * ON {
+        let level = self.level();
+        if !self.active && level > ON {
             self.active = true;
             self.active_for = 0.0;
             return Some(true);
@@ -312,9 +319,9 @@ impl Detector {
         if self.active {
             self.active_for += dt;
             if self.active_for > STUCK_S {
-                self.rest = self.envelope.max(1e-6);
+                self.rest = self.envelope.iter().map(|e| e.max(1e-6)).collect();
             }
-            if self.envelope < self.rest * OFF {
+            if self.level() < OFF {
                 self.active = false;
                 return Some(false);
             }
@@ -322,8 +329,15 @@ impl Detector {
         None
     }
 
+    /// The middle channel's activity over its resting level.
     fn level(&self) -> f64 {
-        if self.rest > 0.0 { self.envelope / self.rest } else { 0.0 }
+        let mut ratios: Vec<f64> = self.envelope.iter().zip(&self.rest).map(|(e, r)| e / r).collect();
+        if ratios.is_empty() {
+            return 0.0;
+        }
+        ratios.sort_by(f64::total_cmp);
+        let n = ratios.len();
+        (ratios[(n - 1) / 2] + ratios[n / 2]) / 2.0
     }
 }
 
@@ -366,5 +380,27 @@ mod tests {
         }
         // Stuck on, then let go; writing over the new level is still seen.
         assert_eq!(changes, vec![true, false, true, false]);
+    }
+
+    #[test]
+    fn one_noisy_channel_does_not_hide_the_writing() {
+        // Channel 7 with poor contact: noise 50 times the others all along.
+        let noisy = |swing: u16, phase: usize| -> Vec<u16> {
+            let mut values = batch(swing, phase);
+            for (i, value) in values.iter_mut().enumerate().filter(|(i, _)| i % 8 == 6) {
+                *value = if (i / 8 + phase) % 2 == 0 { 1500 } else { 500 };
+            }
+            values
+        };
+        let mut detector = Detector::default();
+        let mut changes = Vec::new();
+        for (swing, batches) in [(10, 400), (80, 60), (10, 200)] {
+            for i in 0..batches {
+                if let Some(change) = detector.batch(&noisy(swing, i), 8, 2048.0, false) {
+                    changes.push(change);
+                }
+            }
+        }
+        assert_eq!(changes, vec![true, false]);
     }
 }
