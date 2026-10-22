@@ -7,7 +7,9 @@
 //! `marks.csv`: `time,event,label` (host time on the same clock): prompts, the writing window,
 //! gestures the band reported.
 //! Letters written are also read as they end (see `letters`), against the earlier recordings
-//! beside this one and those written since.
+//! beside this one and those written since. In words mode they go to a [`Writer`]; when a
+//! word is taken whole its letters are marked `wstart`/`wend` with the word's letters, so
+//! free writing labels itself.
 
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -17,6 +19,7 @@ use band_core::events::{EmgBatch, EmgConfig};
 use serde::Serialize;
 
 use crate::letters::{Features, Guess, Letters};
+use crate::words::{Dictionary, Writer, WriterState};
 
 pub struct Recorder {
     detector: Detector,
@@ -27,6 +30,9 @@ pub struct Recorder {
     last_sequence: Option<u64>,
     features: Option<Features>,
     letters: Letters,
+    writer: Writer,
+    /// When each letter of the word under way was written.
+    word_windows: Vec<(f64, f64)>,
 }
 
 /// What the recording screen shows: how much arrived and how much the band dropped.
@@ -71,6 +77,8 @@ impl Recorder {
             last_sequence: None,
             features: None,
             letters,
+            writer: Writer::default(),
+            word_windows: Vec::new(),
         })
     }
 
@@ -158,6 +166,51 @@ impl Recorder {
             self.stats.known = self.letters.len();
         }
         guesses
+    }
+
+    /// Words mode: the letter written in `start..end` joins the word under way.
+    pub fn write(&mut self, start: f64, end: f64, words: Option<&Dictionary>) -> WriterState {
+        if let Some(features) = &self.features {
+            let letter = features.letter(start, end);
+            if !letter.is_empty() {
+                self.writer.letter(self.letters.odds(&letter), words);
+                self.word_windows.push((start, end));
+            }
+        }
+        self.writer.state()
+    }
+
+    /// Words mode: `space`, `backspace`, `next`, `previous` or `clear` (anything else: nothing).
+    pub fn edit(&mut self, edit: &str, now: f64, words: Option<&Dictionary>) -> WriterState {
+        let _ = self.mark("edit", edit, now);
+        match edit {
+            "space" => {
+                let word = self.writer.state().word;
+                if !word.is_empty() {
+                    let _ = self.mark("word", &word, now);
+                }
+                if word.len() == self.word_windows.len() {
+                    for (letter, (start, end)) in word.chars().zip(std::mem::take(&mut self.word_windows)) {
+                        let _ = self.mark("wstart", &letter.to_string(), start);
+                        let _ = self.mark("wend", &letter.to_string(), end);
+                    }
+                }
+                self.word_windows.clear();
+                self.writer.space(words);
+            }
+            "backspace" => {
+                self.word_windows.pop();
+                self.writer.backspace(words);
+            }
+            "next" => self.writer.step(true),
+            "previous" => self.writer.step(false),
+            "clear" => {
+                self.word_windows.clear();
+                self.writer.clear();
+            }
+            _ => {}
+        }
+        self.writer.state()
     }
 
     pub fn stats(&self) -> &Stats {

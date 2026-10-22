@@ -40,6 +40,15 @@ object Bridge {
      * `[{"letter", "distance"}…]`, nearest first. With a [label] it's known from then on.
      */
     @JvmStatic external fun recordGuess(handle: Long, label: String, start: Double, end: Double): String
+    /**
+     * Words mode: the letter written between [start] and [end] joins the word under way. The
+     * writer's state: `{"text", "word", "suggestions", "highlight", "letters"}` (`{}`: no recording).
+     */
+    @JvmStatic external fun recordWrite(handle: Long, start: Double, end: Double): String
+    /** Words mode: "space", "backspace", "next", "previous" or "clear"; the state as for [recordWrite]. */
+    @JvmStatic external fun recordEdit(handle: Long, edit: String, now: Double): String
+    /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
+    @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun recordStop(handle: Long)
     @JvmStatic external fun close(handle: Long)
 

@@ -20,6 +20,7 @@ pub mod metaauth;
 pub mod letters;
 pub mod recorder;
 pub mod status;
+pub mod words;
 
 use config::{Config, DIAL_TOGGLE, DialTarget};
 use controller::{Command, Controller};
@@ -258,6 +259,22 @@ impl Connection {
     pub fn record_guess(&mut self, label: &str, start: f64, end: f64) -> String {
         let guesses = self.recorder.as_mut().map(|recorder| recorder.guess(label, start, end)).unwrap_or_default();
         serde_json::to_string(&guesses).expect("guesses serialize")
+    }
+
+    /// Words mode: the letter written in `start..end` joins the word under way. The writer's
+    /// state as JSON (`{}` when no recording runs).
+    pub fn record_write(&mut self, start: f64, end: f64) -> String {
+        let words = words::dictionary();
+        let state = self.recorder.as_mut().map(|recorder| recorder.write(start, end, words.as_deref()));
+        state.map_or_else(|| "{}".into(), |state| serde_json::to_string(&state).expect("state serializes"))
+    }
+
+    /// Words mode: `space`, `backspace`, `next`, `previous` or `clear`; the writer's state as
+    /// for [`record_write`](Self::record_write).
+    pub fn record_edit(&mut self, edit: &str, now: f64) -> String {
+        let words = words::dictionary();
+        let state = self.recorder.as_mut().map(|recorder| recorder.edit(edit, now, words.as_deref()));
+        state.map_or_else(|| "{}".into(), |state| serde_json::to_string(&state).expect("state serializes"))
     }
 
     pub fn record_stop(&mut self) -> Result<(), String> {

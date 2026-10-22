@@ -283,6 +283,46 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordGuess<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordWrite<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    start: jdouble,
+    end: jdouble,
+) -> jstring {
+    let state = unsafe { connection(handle) }.record_write(start, end);
+    json_out(&mut env, Ok(state))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordEdit<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    edit: JString<'local>,
+    now: jdouble,
+) -> jstring {
+    let state = get_string(&mut env, &edit).map(|edit| unsafe { connection(handle) }.record_edit(&edit, now));
+    json_out(&mut env, state)
+}
+
+/// The handwriting dictionary (`word count` lines); how many words it has.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_wordsLoad<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    text: JString<'local>,
+) -> jint {
+    match get_string(&mut env, &text) {
+        Ok(text) => crate::words::load_dictionary(&text) as jint,
+        Err(message) => {
+            throw(&mut env, &message);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStop<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,

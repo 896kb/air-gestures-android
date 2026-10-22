@@ -18,6 +18,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::words::LetterOdds;
+
 const FRAMES_PER_S: usize = 25;
 const BANDS: [(f64, f64); 2] = [(20.0, 120.0), (120.0, 450.0)];
 /// Live frames kept for the letter being written.
@@ -26,6 +28,9 @@ const KEEP_S: f64 = 30.0;
 const MARGIN: usize = 3;
 /// How many guesses a letter gets.
 const GUESSES: usize = 5;
+/// Without a model: a letter whose closest copy is this much (of the nearest's distance)
+/// further away is e times less likely.
+const NEAR_SPREAD: f32 = 0.2;
 
 /// A letter: its frames, each a value per band and channel.
 pub type Letter = Vec<Vec<f32>>;
@@ -235,6 +240,39 @@ impl Letters {
         if let Some(model) = &self.model {
             return model.read(letter);
         }
+        let mut best = self.nearest(letter);
+        best.truncate(GUESSES);
+        best
+    }
+
+    /// How likely `letter` is each of a–z: the model's probabilities, or else from how near
+    /// each letter's closest copy is.
+    pub fn odds(&self, letter: &[Vec<f32>]) -> LetterOdds {
+        let mut odds = [0.0; 26];
+        let mut put = |label: &str, p: f32| {
+            if let [b @ b'a'..=b'z'] = label.as_bytes() {
+                odds[(b - b'a') as usize] = p;
+            }
+        };
+        if let Some(model) = &self.model {
+            for (label, p) in model.letters.iter().zip(model.probabilities(letter)) {
+                put(label, p);
+            }
+            return odds;
+        }
+        let nearest = self.nearest(letter);
+        let Some(best) = nearest.first().map(|guess| guess.distance.max(1e-6)) else { return [1.0 / 26.0; 26] };
+        let weights: Vec<f32> =
+            nearest.iter().map(|guess| (-(guess.distance - best) / (NEAR_SPREAD * best)).exp()).collect();
+        let total: f32 = weights.iter().sum();
+        for (guess, weight) in nearest.iter().zip(weights) {
+            put(&guess.letter, weight / total);
+        }
+        odds
+    }
+
+    /// Every known letter, nearest first, each by its closest copy.
+    fn nearest(&self, letter: &[Vec<f32>]) -> Vec<Guess> {
         let mut best: Vec<Guess> = Vec::new();
         for (label, known) in &self.known {
             let distance = dtw(letter, known);
@@ -244,7 +282,6 @@ impl Letters {
             }
         }
         best.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-        best.truncate(GUESSES);
         best
     }
 
@@ -443,8 +480,9 @@ fn read_windows(folder: &Path) -> Result<(Features, Vec<Window>), String> {
         };
         let Ok(time) = time.parse::<f64>() else { continue };
         match event {
-            "start" => started.push((label.to_owned(), time)),
-            "end" => {
+            // Prompted letters, and those of words taken whole in words mode.
+            "start" | "wstart" => started.push((label.to_owned(), time)),
+            "end" | "wend" => {
                 if let Some(i) = started.iter().position(|(l, _)| l == label) {
                     let (_, start) = started.remove(i);
                     windows.push((label.to_owned(), start, time));
