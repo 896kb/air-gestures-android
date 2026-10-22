@@ -30,6 +30,8 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this, ::onLog)
         link = BandLink(this, this)
+        // Unlocking the phone: the band is likely near and about to be used.
+        registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
         calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
@@ -78,6 +80,7 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(unlocked) }
         main.removeCallbacks(updateCheck)
         main.removeCallbacks(idleCheck)
         Alerts.notIdle(this)
@@ -183,6 +186,13 @@ class BandService : Service(), BandLink.Listener {
 
     /** Debug: write a raw ConfigReq (hex) to the band; the answer goes to the log. */
     fun probeConfig(hex: String) = link.probeConfig(hex)
+
+    private val unlocked = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = nudge()
+    }
+
+    /** The band is probably near: connect directly if still waiting for it. */
+    fun nudge() = link.nudge()
 
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {

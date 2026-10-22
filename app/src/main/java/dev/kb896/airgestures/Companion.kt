@@ -115,8 +115,9 @@ class BandPresenceService : CompanionDeviceService() {
     @Deprecated("Deprecated in Java")
     override fun onDeviceAppeared(associationInfo: AssociationInfo) = appeared()
 
-    /** Only when the band should run and isn't already, so a second call changes nothing. */
+    /** Start the service if the band should run; if it runs, have it connect directly now. */
     private fun appeared() {
-        if (Prefs(this).running && BandService.instance == null) BandService.start(this)
+        if (!Prefs(this).running) return
+        BandService.instance?.nudge() ?: BandService.start(this)
     }
 }
