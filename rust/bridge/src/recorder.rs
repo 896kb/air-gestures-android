@@ -6,6 +6,8 @@
 //! then samples × channels `u16`, sample-major, all little-endian.
 //! `marks.csv`: `time,event,label` (host time on the same clock): prompts, the writing window,
 //! gestures the band reported.
+//! Letters written are also read as they end (see `letters`), against the earlier recordings
+//! beside this one and those written since.
 
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
@@ -14,6 +16,8 @@ use std::path::Path;
 use band_core::events::{EmgBatch, EmgConfig};
 use serde::Serialize;
 
+use crate::letters::{Features, Guess, Letters};
+
 pub struct Recorder {
     detector: Detector,
     emg: BufWriter<File>,
@@ -21,6 +25,8 @@ pub struct Recorder {
     config: Option<EmgConfig>,
     stats: Stats,
     last_sequence: Option<u64>,
+    features: Option<Features>,
+    letters: Letters,
 }
 
 /// What the recording screen shows: how much arrived and how much the band dropped.
@@ -38,12 +44,15 @@ pub struct Stats {
     pub level: f64,
     pub onset: Option<f64>,
     pub offset: Option<f64>,
+    /// Letters known to read new ones against.
+    pub known: usize,
 }
 
 impl Recorder {
     /// Start a recording in `dir` (created if needed).
     pub fn create(dir: &str) -> Result<Self, String> {
         let dir = Path::new(dir);
+        let letters = dir.parent().map(Letters::load).unwrap_or_default();
         create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let open = |name: &str| {
             File::create(dir.join(name))
@@ -57,8 +66,10 @@ impl Recorder {
             emg: open("emg.bin")?,
             marks,
             config: None,
-            stats: Stats::default(),
+            stats: Stats { known: letters.len(), ..Stats::default() },
             last_sequence: None,
+            features: None,
+            letters,
         })
     }
 
@@ -71,6 +82,9 @@ impl Recorder {
                 config.sample_rate, config.channels, config.samples_per_batch
             )
             .map_err(|e| e.to_string())?;
+        }
+        if self.config != Some(config) {
+            self.features = Some(Features::live(config.sample_rate as f64, config.channels as usize));
         }
         self.config = Some(config);
         Ok(())
@@ -104,6 +118,9 @@ impl Recorder {
         }
         self.stats.active = self.detector.active;
         self.stats.level = self.detector.level();
+        if let Some(features) = &mut self.features {
+            features.push(&batch.values, now);
+        }
         let mut record = Vec::with_capacity(24 + batch.values.len() * 2);
         record.extend(now.to_le_bytes());
         record.extend(batch.sequence.to_le_bytes());
@@ -117,8 +134,28 @@ impl Recorder {
     /// A labelled moment: `prompt a`, `start a`, `end a`, `gesture index tap`, …
     pub fn mark(&mut self, event: &str, label: &str, now: f64) -> Result<(), String> {
         self.stats.marks += 1;
+        if event == "discard" {
+            self.letters.forget(label);
+            self.stats.known = self.letters.len();
+        }
         let clean = |text: &str| text.replace([',', '\n', '\r'], " ");
         writeln!(self.marks, "{now:.6},{},{}", clean(event), clean(label)).map_err(|e| e.to_string())
+    }
+
+    /// Read the letter written in `start..end` (host time): the nearest known letters, nearest
+    /// first (none when too little arrived). With a `label` it's known from then on.
+    pub fn guess(&mut self, label: &str, start: f64, end: f64) -> Vec<Guess> {
+        let Some(features) = &self.features else { return Vec::new() };
+        let letter = features.letter(start, end);
+        if letter.is_empty() {
+            return Vec::new();
+        }
+        let guesses = self.letters.rank(&letter);
+        if !label.is_empty() {
+            self.letters.learn(label, letter);
+            self.stats.known = self.letters.len();
+        }
+        guesses
     }
 
     pub fn stats(&self) -> &Stats {

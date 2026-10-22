@@ -18,7 +18,8 @@ import java.util.Locale
  * muscles have been still for a moment, so an i's dot still counts) or in timed windows. The
  * band's raw sEMG and the marks go to a folder (emg.bin, marks.csv; see
  * rust/bridge/src/recorder.rs) to pull with adb. Nothing runs while it records (the service
- * is in practice mode).
+ * is in practice mode). Each letter is also read as it ends, against those in earlier
+ * recordings and written since (rust/bridge/src/letters.rs), with a running score.
  */
 class RecordActivity : Screen() {
     private val main = Handler(Looper.getMainLooper())
@@ -41,10 +42,19 @@ class RecordActivity : Screen() {
     /** Self-paced: when the letter on screen appeared, and when its writing began (NaN: not yet). */
     private var promptAt = 0.0
     private var writingAt = Double.NaN
+    /** Timed: when the letter's window opened. */
+    private var windowAt = 0.0
+
+    /** Letters read so far, how many right first time and in the first three, and the last one's result. */
+    private var read = 0
+    private var right = 0
+    private var inThree = 0
+    private var lastRead: Pair<Boolean, Boolean>? = null
 
     private lateinit var count: TextView
     private lateinit var letter: TextView
     private lateinit var cue: TextView
+    private lateinit var reading: TextView
     private lateinit var stats: TextView
     private lateinit var buttons: LinearLayout
     private lateinit var settings: LinearLayout
@@ -68,6 +78,7 @@ class RecordActivity : Screen() {
         count = Cb.label(this, "")
         letter = Cb.text(this, 120f, R.font.geist_bold, Cb.INK_900, -.02f).apply { gravity = Gravity.CENTER }
         cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
+        reading = Cb.text(this, 15f, R.font.geist_semibold, Cb.INK_700).apply { gravity = Gravity.CENTER }
         stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
         buttons = row(gap = 10f).apply { gravity = Gravity.END }
         settings = row(gap = 10f).apply { gravity = Gravity.END }
@@ -76,6 +87,7 @@ class RecordActivity : Screen() {
                 addView(count)
                 addView(letter, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                 addView(cue, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                addView(reading, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
                 addView(stats)
             }))
             addView(settings, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -150,6 +162,11 @@ class RecordActivity : Screen() {
         service.recording.recordMark("session", if (auto) "reps=$reps self_paced still_ms=$stillMs" else "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
         prompts = ('a'..'z').flatMap { c -> List(reps) { c.toString() } }.shuffled()
         at = 0
+        read = 0
+        right = 0
+        inThree = 0
+        lastRead = null
+        reading.text = ""
         running = true
         paused = false
         render()
@@ -171,12 +188,15 @@ class RecordActivity : Screen() {
         recording.recordMark("prompt", shown)
         main.postDelayed({
             if (!running || paused) return@postDelayed
-            recording.recordMark("start", shown)
+            windowAt = recording.clock()
+            recording.recordMark("start", shown, windowAt)
             letter.setTextColor(Cb.INK_900)
             cue.text = "Write it now"
             main.postDelayed({
                 if (!running) return@postDelayed
-                recording.recordMark("end", shown)
+                val end = recording.clock()
+                recording.recordMark("end", shown, end)
+                judge(shown, windowAt, end)
                 at++
                 next()
             }, windowMs)
@@ -226,8 +246,10 @@ class RecordActivity : Screen() {
                 val still = !active && offset > writingAt && now - offset >= stillMs / 1000.0
                 if (still || now - writingAt > MAX_LETTER_S) {
                     val shown = prompts[at]
+                    val end = if (still) minOf(now, offset + POST_S) else now
                     recording.recordMark("start", shown, writingAt)
-                    recording.recordMark("end", shown, if (still) minOf(now, offset + POST_S) else now)
+                    recording.recordMark("end", shown, end)
+                    judge(shown, writingAt, end)
                     at++
                     return nextSelfPaced()
                 }
@@ -235,6 +257,25 @@ class RecordActivity : Screen() {
             main.postDelayed(this, POLL_MS)
         }
     }
+
+    /** Read the letter just written ([shown]) and keep score. */
+    private fun judge(shown: String, start: Double, end: Double) {
+        val guesses = BandService.instance?.recording?.recordGuess(shown, start, end).orEmpty()
+        if (guesses.isEmpty()) {
+            lastRead = null
+            reading.text = "“$shown”: nothing to compare with yet; it's learnt for next time."
+            return
+        }
+        val result = Pair(guesses.first() == shown, shown in guesses.take(3))
+        lastRead = result
+        read++
+        if (result.first) right++
+        if (result.second) inThree++
+        reading.text = "“$shown” read as ${guesses.first()} ${if (result.first) "✓" else "✗"}   then ${guesses.drop(1).take(2).joinToString(", ")}\n" + score()
+    }
+
+    private fun score() = if (read == 0) "" else
+        "$right of $read right first time (${100 * right / read} %), $inThree in the first three (${100 * inThree / read} %)"
 
     private fun remember() {
         settingsStore.edit().putInt("reps", reps).putLong("write_ms", windowMs).putLong("ready_ms", gapMs)
@@ -278,6 +319,13 @@ class RecordActivity : Screen() {
     private fun redo() {
         val last = prompts.getOrNull(at - 1) ?: return
         BandService.instance?.recording?.recordMark("discard", last)
+        lastRead?.let { (first, three) ->
+            read--
+            if (first) right--
+            if (three) inThree--
+            lastRead = null
+            reading.text = score()
+        }
         // Right after the letter on screen, which keeps its place.
         prompts = prompts.toMutableList().apply { add(minOf(at + 1, size), last) }
         cue.text = "“$last” will come again"
@@ -291,7 +339,7 @@ class RecordActivity : Screen() {
             val batches = counts.optLong("batches")
             val missing = counts.optLong("missing")
             val lost = if (batches + missing > 0) 100.0 * missing / (batches + missing) else 0.0
-            stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks", batches, lost, counts.optLong("marks"))
+            stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks · %d letters known", batches, lost, counts.optLong("marks"), counts.optLong("known"))
             main.postDelayed(this, 1000)
         }
     }
@@ -304,7 +352,7 @@ class RecordActivity : Screen() {
             it.recording.recordStop()
             it.endPractice()
         }
-        saved = "$why\n\nadb pull ${folder?.path}"
+        saved = listOf(why, score(), "adb pull ${folder?.path}").filter { it.isNotEmpty() }.joinToString("\n\n")
         folder = null
         render()
     }

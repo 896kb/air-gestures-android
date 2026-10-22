@@ -17,6 +17,7 @@ pub mod controller;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
+pub mod letters;
 pub mod recorder;
 pub mod status;
 
@@ -249,6 +250,14 @@ impl Connection {
         self.recorder
             .as_ref()
             .map_or_else(|| "{}".into(), |recorder| serde_json::to_string(recorder.stats()).expect("stats serialize"))
+    }
+
+    /// The letter written in `start..end` read against the known ones, as JSON
+    /// (`[{"letter", "distance"}…]`, nearest first; `[]` when none runs). With a `label`
+    /// it's known from then on.
+    pub fn record_guess(&mut self, label: &str, start: f64, end: f64) -> String {
+        let guesses = self.recorder.as_mut().map(|recorder| recorder.guess(label, start, end)).unwrap_or_default();
+        serde_json::to_string(&guesses).expect("guesses serialize")
     }
 
     pub fn record_stop(&mut self) -> Result<(), String> {

@@ -35,6 +35,11 @@ object Bridge {
     @JvmStatic external fun recordMark(handle: Long, event: String, label: String, now: Double)
     /** `{"batches", "missing", "unreadable", "marks"}`, or `{}` when no recording runs. */
     @JvmStatic external fun recordStats(handle: Long): String
+    /**
+     * The letter written between [start] and [end] read against the known ones:
+     * `[{"letter", "distance"}…]`, nearest first. With a [label] it's known from then on.
+     */
+    @JvmStatic external fun recordGuess(handle: Long, label: String, start: Double, end: Double): String
     @JvmStatic external fun recordStop(handle: Long)
     @JvmStatic external fun close(handle: Long)
 

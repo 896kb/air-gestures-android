@@ -128,6 +128,13 @@ class BandLink(
         org.json.JSONObject(Bridge.recordStats(handle)).takeIf { it.length() > 0 }
     }
 
+    /** The letters nearest to the one written in [start]..[end], nearest first (see Bridge.recordGuess). */
+    fun recordGuess(label: String, start: Double, end: Double): List<String> = synchronized(lock) {
+        if (handle == 0L) return emptyList()
+        val guesses = org.json.JSONArray(Bridge.recordGuess(handle, label, start, end))
+        List(guesses.length()) { guesses.getJSONObject(it).getString("letter") }
+    }
+
     fun recordStop() = synchronized(lock) {
         if (handle != 0L) Bridge.recordStop(handle)
         drain()

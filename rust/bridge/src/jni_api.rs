@@ -270,6 +270,19 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStats<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordGuess<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    label: JString<'local>,
+    start: jdouble,
+    end: jdouble,
+) -> jstring {
+    let guesses = get_string(&mut env, &label).map(|label| unsafe { connection(handle) }.record_guess(&label, start, end));
+    json_out(&mut env, guesses)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordStop<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
