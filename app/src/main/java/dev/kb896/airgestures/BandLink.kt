@@ -114,9 +114,13 @@ class BandLink(
         true
     }
 
-    fun recordMark(event: String, label: String) = synchronized(lock) {
-        if (handle != 0L) Bridge.recordMark(handle, event, label, now())
+    /** A labelled moment, at [at] on the [clock] (default: now). */
+    fun recordMark(event: String, label: String, at: Double = now()) = synchronized(lock) {
+        if (handle != 0L) Bridge.recordMark(handle, event, label, at)
     }
+
+    /** The clock the recording's times are on (seconds). */
+    fun clock() = now()
 
     /** The recording's counts, or null when none runs (e.g. the band reconnected meanwhile). */
     fun recordStats(): org.json.JSONObject? = synchronized(lock) {

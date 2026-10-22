@@ -13,10 +13,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Debug builds only: record handwriting for a letter recogniser. Each letter is shown, then a
- * timed window to write it on a table with the index finger; the band's raw sEMG and the
- * prompts go to a folder (emg.bin, marks.csv; see rust/bridge/src/recorder.rs) to pull with
- * adb. Nothing runs while it records (the service is in practice mode).
+ * Debug builds only: record handwriting for a letter recogniser. Each letter is shown and
+ * written on a table with the index finger: self-paced (the next letter comes once the
+ * muscles have been still for a moment, so an i's dot still counts) or in timed windows. The
+ * band's raw sEMG and the marks go to a folder (emg.bin, marks.csv; see
+ * rust/bridge/src/recorder.rs) to pull with adb. Nothing runs while it records (the service
+ * is in practice mode).
  */
 class RecordActivity : Screen() {
     private val main = Handler(Looper.getMainLooper())
@@ -32,6 +34,13 @@ class RecordActivity : Screen() {
     private var windowMs = 2000L
     /** From a letter appearing to its writing window. */
     private var gapMs = 500L
+    /** Self-paced: a letter is done once the muscles have been still this long. */
+    private var auto = true
+    private var stillMs = 700L
+
+    /** Self-paced: when the letter on screen appeared, and when its writing began (NaN: not yet). */
+    private var promptAt = 0.0
+    private var writingAt = Double.NaN
 
     private lateinit var count: TextView
     private lateinit var letter: TextView
@@ -54,6 +63,8 @@ class RecordActivity : Screen() {
         reps = settingsStore.getInt("reps", reps)
         windowMs = settingsStore.getLong("write_ms", windowMs)
         gapMs = settingsStore.getLong("ready_ms", gapMs)
+        auto = settingsStore.getBoolean("auto", auto)
+        stillMs = settingsStore.getLong("still_ms", stillMs)
         count = Cb.label(this, "")
         letter = Cb.text(this, 120f, R.font.geist_bold, Cb.INK_900, -.02f).apply { gravity = Gravity.CENTER }
         cue = Cb.text(this, 20f, R.font.geist_semibold, Cb.INK_500).apply { gravity = Gravity.CENTER }
@@ -109,12 +120,20 @@ class RecordActivity : Screen() {
                 } else {
                     count.text = "RECORD HANDWRITING"
                     letter.text = "a"
-                    cue.text = if (service() == null) "Connect the band first." else
-                        "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${seconds(gapMs)}, then turns dark: write it within ${seconds(windowMs)}. $reps of each letter, in random order."
+                    cue.text = when {
+                        service() == null -> "Connect the band first."
+                        auto -> "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Write each letter as it shows; the next comes once your finger has been still for ${seconds(stillMs)}. $reps of each letter, in random order."
+                        else -> "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${seconds(gapMs)}, then turns dark: write it within ${seconds(windowMs)}. $reps of each letter, in random order."
+                    }
                 }
                 settings.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; remember() }.first)
-                settings.addView(pill("Write: ${seconds(windowMs)}") { windowMs = following(WRITE_MS, windowMs); remember() }.first)
-                settings.addView(pill("Ready: ${seconds(gapMs)}") { gapMs = following(READY_MS, gapMs); remember() }.first)
+                if (auto) {
+                    settings.addView(pill("Still: ${seconds(stillMs)}") { stillMs = following(STILL_MS, stillMs); remember() }.first)
+                } else {
+                    settings.addView(pill("Write: ${seconds(windowMs)}") { windowMs = following(WRITE_MS, windowMs); remember() }.first)
+                    settings.addView(pill("Ready: ${seconds(gapMs)}") { gapMs = following(READY_MS, gapMs); remember() }.first)
+                }
+                buttons.addView(pill(if (auto) "Self-paced" else "Timed") { auto = !auto; remember() }.first)
                 buttons.addView(pill("Start", R.drawable.ic_check) { start() }.first)
             }
         }
@@ -128,7 +147,7 @@ class RecordActivity : Screen() {
         folder = dir
         service.startPractice(quiet)
         service.rawEmg(true)
-        service.recording.recordMark("session", "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
+        service.recording.recordMark("session", if (auto) "reps=$reps self_paced still_ms=$stillMs" else "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
         prompts = ('a'..'z').flatMap { c -> List(reps) { c.toString() } }.shuffled()
         at = 0
         running = true
@@ -141,6 +160,7 @@ class RecordActivity : Screen() {
     /** Show the next letter, then open its writing window. */
     private fun next() {
         if (!running || paused) return
+        if (auto) return nextSelfPaced()
         if (at >= prompts.size) return stop("Done: all ${prompts.size} letters.")
         val shown = prompts[at]
         val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
@@ -163,8 +183,62 @@ class RecordActivity : Screen() {
         }, gapMs)
     }
 
+    /** Self-paced: show the letter at once and watch for it being written. */
+    private fun nextSelfPaced() {
+        if (at >= prompts.size) return stop("Done: all ${prompts.size} letters.")
+        val shown = prompts[at]
+        val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
+        count.text = "LETTER ${at + 1} OF ${prompts.size}"
+        letter.text = shown
+        letter.setTextColor(Cb.INK_900)
+        cue.text = "Write it"
+        promptAt = recording.clock()
+        writingAt = Double.NaN
+        recording.recordMark("prompt", shown, promptAt)
+        main.postDelayed(watchWriting, POLL_MS)
+    }
+
+    /**
+     * Self-paced, every [POLL_MS]: the letter starts when the muscles become active after it
+     * appeared (or are active already), and is done once they've been still for [stillMs], or
+     * after [MAX_LETTER_S] at most. Its window runs from just before the start to just after.
+     */
+    private val watchWriting: Runnable = object : Runnable {
+        override fun run() {
+            if (!running || paused || !auto) return
+            val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
+            val counts = recording.recordStats() ?: return stop("Stopped: the band reconnected, so the recording ended. What was written is kept.")
+            val now = recording.clock()
+            val active = counts.optBoolean("active")
+            val onset = counts.optDouble("onset", Double.NaN)
+            val offset = counts.optDouble("offset", Double.NaN)
+            if (writingAt.isNaN()) {
+                when {
+                    onset > promptAt -> writingAt = maxOf(promptAt, onset - PRE_S)
+                    active -> writingAt = promptAt
+                    now - promptAt > 10 -> cue.text = "Waiting for you to write it…"
+                }
+                if (!writingAt.isNaN()) {
+                    cue.text = "…"
+                    letter.setTextColor(Cb.INK_400)
+                }
+            } else {
+                val still = !active && offset > writingAt && now - offset >= stillMs / 1000.0
+                if (still || now - writingAt > MAX_LETTER_S) {
+                    val shown = prompts[at]
+                    recording.recordMark("start", shown, writingAt)
+                    recording.recordMark("end", shown, if (still) minOf(now, offset + POST_S) else now)
+                    at++
+                    return nextSelfPaced()
+                }
+            }
+            main.postDelayed(this, POLL_MS)
+        }
+    }
+
     private fun remember() {
-        settingsStore.edit().putInt("reps", reps).putLong("write_ms", windowMs).putLong("ready_ms", gapMs).apply()
+        settingsStore.edit().putInt("reps", reps).putLong("write_ms", windowMs).putLong("ready_ms", gapMs)
+            .putBoolean("auto", auto).putLong("still_ms", stillMs).apply()
         render()
     }
 
@@ -204,7 +278,8 @@ class RecordActivity : Screen() {
     private fun redo() {
         val last = prompts.getOrNull(at - 1) ?: return
         BandService.instance?.recording?.recordMark("discard", last)
-        prompts = prompts.toMutableList().apply { add(at, last) }
+        // Right after the letter on screen, which keeps its place.
+        prompts = prompts.toMutableList().apply { add(minOf(at + 1, size), last) }
         cue.text = "“$last” will come again"
     }
 
@@ -240,5 +315,13 @@ class RecordActivity : Screen() {
         /** What the Write and Ready buttons step through. */
         val WRITE_MS = listOf(1000L, 1500L, 2000L, 2500L, 3000L, 4000L, 5000L)
         val READY_MS = listOf(250L, 500L, 1000L, 1500L, 2000L, 3000L)
+        /** What the Still button steps through: long enough for an i's dot, short enough to flow. */
+        val STILL_MS = listOf(400L, 500L, 700L, 1000L, 1500L)
+        const val POLL_MS = 50L
+        /** A letter's window starts this long before the muscles became active, and ends this long after. */
+        const val PRE_S = 0.15
+        const val POST_S = 0.1
+        /** The most a self-paced letter can take. */
+        const val MAX_LETTER_S = 6.0
     }
 }
