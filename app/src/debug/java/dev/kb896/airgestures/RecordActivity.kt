@@ -18,8 +18,9 @@ import java.util.Locale
  * muscles have been still for a moment, so an i's dot still counts) or in timed windows. The
  * band's raw sEMG and the marks go to a folder (emg.bin, marks.csv; see
  * rust/bridge/src/recorder.rs) to pull with adb. Nothing runs while it records (the service
- * is in practice mode). Each letter is also read as it ends, against those in earlier
- * recordings and written since (rust/bridge/src/letters.rs), with a running score.
+ * is in practice mode). Each letter is also read as it ends, by the trained model when one is
+ * in the recordings folder or else against the letters in earlier recordings and written since
+ * (rust/bridge/src/letters.rs), with a running score.
  */
 class RecordActivity : Screen() {
     private val main = Handler(Looper.getMainLooper())
@@ -339,7 +340,8 @@ class RecordActivity : Screen() {
             val batches = counts.optLong("batches")
             val missing = counts.optLong("missing")
             val lost = if (batches + missing > 0) 100.0 * missing / (batches + missing) else 0.0
-            stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks · %d letters known", batches, lost, counts.optLong("marks"), counts.optLong("known"))
+            val reader = if (counts.optBoolean("model")) "read by the trained model" else "${counts.optLong("known")} letters known"
+            stats.text = String.format(Locale.ROOT, "%d batches · %.1f %% lost · %d marks · %s", batches, lost, counts.optLong("marks"), reader)
             main.postDelayed(this, 1000)
         }
     }

@@ -105,7 +105,14 @@ class BandLink(
     fun probeConfig(hex: String) = debugSend { Bridge.probeConfig(it, hex, now()) }
 
     /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
-    fun rawEmg(on: Boolean) = debugSend { Bridge.setRawEmg(it, on, now()) }
+    fun rawEmg(on: Boolean) {
+        // Raw sEMG needs most of the link: ask for the shortest connection interval while it runs
+        // (other Bluetooth devices, e.g. glasses, otherwise crowd it out and batches are lost).
+        runCatching {
+            gatt?.requestConnectionPriority(if (on) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED)
+        }
+        debugSend { Bridge.setRawEmg(it, on, now()) }
+    }
 
     /** Debug: start recording raw sEMG and marks into [dir]; false when the band isn't connected. */
     fun recordStart(dir: String): Boolean = synchronized(lock) {

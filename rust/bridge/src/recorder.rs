@@ -44,8 +44,9 @@ pub struct Stats {
     pub level: f64,
     pub onset: Option<f64>,
     pub offset: Option<f64>,
-    /// Letters known to read new ones against.
+    /// Letters known to read new ones against, and whether a trained model reads them instead.
     pub known: usize,
+    pub model: bool,
 }
 
 impl Recorder {
@@ -66,7 +67,7 @@ impl Recorder {
             emg: open("emg.bin")?,
             marks,
             config: None,
-            stats: Stats { known: letters.len(), ..Stats::default() },
+            stats: Stats { known: letters.len(), model: letters.has_model(), ..Stats::default() },
             last_sequence: None,
             features: None,
             letters,
@@ -100,8 +101,9 @@ impl Recorder {
             self.stats.unreadable += 1;
             return Ok(());
         };
+        let gap = self.last_sequence.is_some_and(|last| batch.sequence > last + 1);
         if let Some(last) = self.last_sequence
-            && batch.sequence > last + 1
+            && gap
         {
             self.stats.missing += batch.sequence - last - 1;
         }
@@ -109,7 +111,7 @@ impl Recorder {
         self.stats.batches += 1;
         let rate = config.sample_rate as f64;
         let channels = config.channels as usize;
-        if let Some(change) = self.detector.batch(&batch.values, channels, rate) {
+        if let Some(change) = self.detector.batch(&batch.values, channels, rate, gap) {
             if change {
                 self.stats.onset = Some(now);
             } else {
@@ -174,12 +176,17 @@ impl Recorder {
 /// the resting level follows it slowly (3 s) while nothing is written. Writing starts when the
 /// envelope passes [`ON`] × the resting level and ends below [`OFF`] ×. Tuned offline on
 /// recorded sessions: every letter seen, active during ~3 % of the waits between them.
+/// After batches went missing the drift restarts from the next sample (the jump across the
+/// gap isn't muscle), and activity lasting over [`STUCK_S`] is taken as the new resting level
+/// (the band shifting on the wrist, not a letter).
 #[derive(Default)]
 struct Detector {
     mean: Vec<f64>,
     envelope: f64,
     rest: f64,
     active: bool,
+    /// How long the muscles have been active (s).
+    active_for: f64,
 }
 
 const ON: f64 = 2.5;
@@ -187,16 +194,17 @@ const OFF: f64 = 1.6;
 const DRIFT_S: f64 = 0.02;
 const ENVELOPE_S: f64 = 0.05;
 const REST_S: f64 = 3.0;
+const STUCK_S: f64 = 4.0;
 
 impl Detector {
     /// One batch (sample-major); `Some(true)` when writing started, `Some(false)` when it stopped.
-    fn batch(&mut self, values: &[u16], channels: usize, rate: f64) -> Option<bool> {
+    fn batch(&mut self, values: &[u16], channels: usize, rate: f64, gap: bool) -> Option<bool> {
         if channels == 0 || values.len() < channels {
             return None;
         }
         let samples = values.len() / channels;
         let first = self.mean.is_empty();
-        if first {
+        if first || gap {
             self.mean = values[..channels].iter().map(|&v| f64::from(v)).collect();
         }
         let drift = 1.0 - (-1.0 / (rate * DRIFT_S)).exp();
@@ -222,11 +230,18 @@ impl Detector {
         }
         if !self.active && self.envelope > self.rest * ON {
             self.active = true;
+            self.active_for = 0.0;
             return Some(true);
         }
-        if self.active && self.envelope < self.rest * OFF {
-            self.active = false;
-            return Some(false);
+        if self.active {
+            self.active_for += dt;
+            if self.active_for > STUCK_S {
+                self.rest = self.envelope.max(1e-6);
+            }
+            if self.envelope < self.rest * OFF {
+                self.active = false;
+                return Some(false);
+            }
         }
         None
     }
@@ -251,7 +266,7 @@ mod tests {
         let mut changes = Vec::new();
         let mut feed = |swing, batches| {
             for i in 0..batches {
-                if let Some(change) = detector.batch(&batch(swing, i), 8, 2048.0) {
+                if let Some(change) = detector.batch(&batch(swing, i), 8, 2048.0, false) {
                     changes.push(change);
                 }
             }
@@ -260,5 +275,20 @@ mod tests {
         feed(80, 60); // half a second of writing
         feed(10, 200); // rest again
         assert_eq!(changes, vec![true, false]);
+    }
+
+    #[test]
+    fn activity_that_never_ends_becomes_the_resting_level() {
+        let mut detector = Detector::default();
+        let mut changes = Vec::new();
+        for (swing, batches) in [(10, 400), (80, 1200), (80, 200), (240, 60), (80, 200)] {
+            for i in 0..batches {
+                if let Some(change) = detector.batch(&batch(swing, i), 8, 2048.0, false) {
+                    changes.push(change);
+                }
+            }
+        }
+        // Stuck on, then let go; writing over the new level is still seen.
+        assert_eq!(changes, vec![true, false, true, false]);
     }
 }

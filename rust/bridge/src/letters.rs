@@ -7,12 +7,16 @@
 //! so the pattern across channels counts rather than how hard it was written. Tuned offline
 //! (`scripts/handwriting.py` recordings): with 3 earlier copies of each letter, 51 % read right
 //! first time and 68 % among the first three.
+//!
+//! When the recordings folder has a `model.json` (`scripts/train_letters.py`), a small CNN
+//! trained on all the recordings reads letters instead: 63 % right first time and 84 % among
+//! the first three, on sessions it wasn't trained on.
 
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const FRAMES_PER_S: usize = 25;
 const BANDS: [(f64, f64); 2] = [(20.0, 120.0), (120.0, 450.0)];
@@ -182,6 +186,7 @@ impl Biquad {
 #[derive(Debug, Clone, Serialize)]
 pub struct Guess {
     pub letter: String,
+    /// Lower is nearer: the DTW distance, or 1 − the model's probability.
     pub distance: f32,
 }
 
@@ -191,6 +196,7 @@ pub struct Letters {
     known: Vec<(String, Letter)>,
     /// Where the letters written since start (to forget the latest of one).
     first_new: usize,
+    model: Option<Model>,
 }
 
 impl Letters {
@@ -207,7 +213,13 @@ impl Letters {
             }
         }
         let first_new = known.len();
-        Self { known, first_new }
+        let model = fs::read(root.join("model.json")).ok().and_then(|json| serde_json::from_slice(&json).ok());
+        Self { known, first_new, model }
+    }
+
+    /// Whether a trained model reads the letters (rather than the nearest known copy).
+    pub fn has_model(&self) -> bool {
+        self.model.is_some()
     }
 
     pub fn len(&self) -> usize {
@@ -220,6 +232,9 @@ impl Letters {
 
     /// The nearest letters to `letter`, nearest first, each by its closest copy.
     pub fn rank(&self, letter: &[Vec<f32>]) -> Vec<Guess> {
+        if let Some(model) = &self.model {
+            return model.read(letter);
+        }
         let mut best: Vec<Guess> = Vec::new();
         for (label, known) in &self.known {
             let distance = dtw(letter, known);
@@ -244,6 +259,120 @@ impl Letters {
         if let Some(i) = (self.first_new..self.known.len()).rev().find(|&i| self.known[i].0 == label) {
             self.known.remove(i);
         }
+    }
+}
+
+/// The letter reader trained by `scripts/train_letters.py` (its `Cnn`): three 1-D convolutions
+/// over the frames (the second followed by a max-pool of 2), then the mean and the maximum of
+/// each over time into a linear layer. Several, from different seeds; their probabilities averaged.
+#[derive(Deserialize)]
+struct Model {
+    letters: Vec<String>,
+    models: Vec<Cnn>,
+}
+
+#[derive(Deserialize)]
+struct Cnn {
+    c1: Conv,
+    c2: Conv,
+    c3: Conv,
+    out: Dense,
+}
+
+#[derive(Deserialize)]
+struct Conv {
+    /// [output][input][tap]
+    weight: Vec<Vec<Vec<f32>>>,
+    bias: Vec<f32>,
+}
+
+#[derive(Deserialize)]
+struct Dense {
+    /// [output][input]
+    weight: Vec<Vec<f32>>,
+    bias: Vec<f32>,
+}
+
+impl Model {
+    fn read(&self, letter: &[Vec<f32>]) -> Vec<Guess> {
+        let probabilities = self.probabilities(letter);
+        let mut guesses: Vec<Guess> = self
+            .letters
+            .iter()
+            .zip(probabilities)
+            .map(|(letter, p)| Guess { letter: letter.clone(), distance: 1.0 - p })
+            .collect();
+        guesses.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        guesses.truncate(GUESSES);
+        guesses
+    }
+
+    fn probabilities(&self, letter: &[Vec<f32>]) -> Vec<f32> {
+        let mut sum = vec![0.0; self.letters.len()];
+        for cnn in &self.models {
+            for (total, p) in sum.iter_mut().zip(cnn.probabilities(letter)) {
+                *total += p / self.models.len() as f32;
+            }
+        }
+        sum
+    }
+}
+
+impl Cnn {
+    fn probabilities(&self, letter: &[Vec<f32>]) -> Vec<f32> {
+        // Channels × time.
+        let x: Vec<Vec<f32>> = (0..letter.first().map_or(0, Vec::len))
+            .map(|c| letter.iter().map(|frame| frame[c]).collect())
+            .collect();
+        let x = self.c2.apply(&self.c1.apply(&x));
+        let pooled: Vec<Vec<f32>> = x
+            .iter()
+            .map(|row| row.chunks(2).map(|pair| pair.iter().copied().fold(f32::MIN, f32::max)).collect())
+            .collect();
+        let x = self.c3.apply(&pooled);
+        let features: Vec<f32> = x
+            .iter()
+            .map(|row| row.iter().sum::<f32>() / row.len() as f32)
+            .chain(x.iter().map(|row| row.iter().copied().fold(f32::MIN, f32::max)))
+            .collect();
+        let logits: Vec<f32> = self
+            .out
+            .weight
+            .iter()
+            .zip(&self.out.bias)
+            .map(|(weights, bias)| bias + weights.iter().zip(&features).map(|(w, f)| w * f).sum::<f32>())
+            .collect();
+        let top = logits.iter().copied().fold(f32::MIN, f32::max);
+        let exp: Vec<f32> = logits.iter().map(|l| (l - top).exp()).collect();
+        let total: f32 = exp.iter().sum();
+        exp.into_iter().map(|e| e / total).collect()
+    }
+}
+
+impl Conv {
+    /// Same-length convolution (zero padding), then ReLU.
+    fn apply(&self, x: &[Vec<f32>]) -> Vec<Vec<f32>> {
+        let frames = x.first().map_or(0, Vec::len);
+        self.weight
+            .iter()
+            .zip(&self.bias)
+            .map(|(kernels, bias)| {
+                let pad = kernels[0].len() / 2;
+                (0..frames)
+                    .map(|t| {
+                        let mut sum = *bias;
+                        for (row, kernel) in x.iter().zip(kernels) {
+                            for (tap, w) in kernel.iter().enumerate() {
+                                if let Some(v) = (t + tap).checked_sub(pad).and_then(|i| row.get(i)) {
+                                    sum += w * v;
+                                }
+                            }
+                        }
+                        sum.max(0.0)
+                    })
+                    .collect()
+            })
+            .collect()
     }
 }
 
@@ -276,8 +405,11 @@ fn read_recording(folder: &Path) -> Result<Vec<(String, Letter)>, String> {
         .collect())
 }
 
-/// A recording's features, and its letters' windows (label, start, end).
-fn read_windows(folder: &Path) -> Result<(Features, Vec<(String, f64, f64)>), String> {
+/// A letter's label and when it was written (host time: start, end).
+type Window = (String, f64, f64);
+
+/// A recording's features, and its letters' windows.
+fn read_windows(folder: &Path) -> Result<(Features, Vec<Window>), String> {
     let data = fs::read(folder.join("emg.bin")).map_err(|e| e.to_string())?;
     let end = data.iter().position(|&b| b == b'\n').ok_or("no header")?;
     let header = std::str::from_utf8(&data[..end]).map_err(|e| e.to_string())?;
@@ -302,7 +434,7 @@ fn read_windows(folder: &Path) -> Result<(Features, Vec<(String, f64, f64)>), St
     }
 
     let marks = fs::read_to_string(folder.join("marks.csv")).map_err(|e| e.to_string())?;
-    let mut windows: Vec<(String, f64, f64)> = Vec::new();
+    let mut windows: Vec<Window> = Vec::new();
     let mut started: Vec<(String, f64)> = Vec::new();
     for line in marks.lines().skip(1) {
         let mut parts = line.splitn(3, ',');
@@ -384,7 +516,7 @@ mod recordings {
         let all = Letters::load(Path::new(&root)).known;
         let (mut first, mut three) = (0, 0);
         for (i, (label, letter)) in all.iter().enumerate() {
-            let others = Letters { known: all.iter().enumerate().filter(|&(j, _)| j != i).map(|(_, k)| k.clone()).collect(), first_new: 0 };
+            let others = Letters { known: all.iter().enumerate().filter(|&(j, _)| j != i).map(|(_, k)| k.clone()).collect(), first_new: 0, model: None };
             let guesses: Vec<String> = others.rank(letter).into_iter().map(|g| g.letter).collect();
             first += usize::from(guesses.first() == Some(label));
             three += usize::from(guesses.iter().take(3).any(|g| g == label));
@@ -418,5 +550,21 @@ mod recordings {
         fs::write(&out_path, out).unwrap();
         let distances: Vec<Vec<f32>> = all.iter().map(|a| all.iter().map(|b| dtw(a, b)).collect()).collect();
         fs::write(format!("{out_path}.distances"), serde_json::to_string(&distances).unwrap()).unwrap();
+    }
+
+    /// The phone reads the trained model's worked example as PyTorch did:
+    /// `MODEL=<model.json> cargo test -p bridge --lib -- --ignored model_matches`.
+    #[test]
+    #[ignore]
+    fn model_matches_training() {
+        let json = fs::read(std::env::var("MODEL").expect("MODEL=<model.json>")).unwrap();
+        let model: Model = serde_json::from_slice(&json).unwrap();
+        let check: serde_json::Value = serde_json::from_slice::<serde_json::Value>(&json).unwrap()["check"].clone();
+        let frames: Letter = serde_json::from_value(check["frames"].clone()).unwrap();
+        let expected: Vec<f32> = serde_json::from_value(check["probabilities"].clone()).unwrap();
+        let got = model.probabilities(&frames);
+        let worst = got.iter().zip(&expected).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+        println!("largest difference {worst}");
+        assert!(worst < 1e-4);
     }
 }
