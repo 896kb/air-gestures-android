@@ -22,7 +22,9 @@ import kotlin.concurrent.thread
  * Debug builds only: write words with the band. Letters are written one at a time on a table
  * with the index finger (a letter ends once the finger has been still for the recorder's Still
  * time); the dictionary (assets/words.txt) turns them into words and completions
- * (rust/bridge/src/words.rs). The band's gestures edit, as Meta's handwriting does:
+ * (rust/bridge/src/words.rs). A line drawn right is a space and one drawn left deletes, and
+ * full stops, commas and question marks can be written, once the model knows them (record them
+ * with the recorder's "+ space, delete" and "+ punctuation" sets). The band's gestures also edit:
  * swipe right (or an index tap) takes the highlighted word and a space, swipe left deletes,
  * swipe up and down move through the suggestions. Everything is recorded like the recorder's
  * sessions; words taken whole label their letters for training.
@@ -64,7 +66,8 @@ class WriteActivity : Screen() {
         asRead = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_400)
         suggestions = column(gap = 6f)
         hint = Cb.text(this, 13f, R.font.geist_regular, Cb.INK_500).apply {
-            text = "Gestures: swipe right or index tap = take the word + space · swipe left = delete · swipe up/down = choose a suggestion"
+            text = "Draw a line to the right for a space, to the left to delete (once they're recorded and trained). " +
+                "Or gestures: swipe right or index tap = take the word + space · swipe left = delete · swipe up/down = choose a suggestion"
         }
         stats = Cb.text(this, 13f, R.font.geist_mono_medium, Cb.INK_500)
         buttons = row(gap = 10f).apply { gravity = Gravity.END }

@@ -168,11 +168,29 @@ impl Recorder {
         guesses
     }
 
-    /// Words mode: the letter written in `start..end` joins the word under way.
+    /// Words mode: the letter written in `start..end` joins the word under way; a stroke or
+    /// mark (a line right for space, left to delete, punctuation) does what it stands for.
     pub fn write(&mut self, start: f64, end: f64, words: Option<&Dictionary>) -> WriterState {
-        if let Some(features) = &self.features {
-            let letter = features.letter(start, end);
-            if !letter.is_empty() {
+        let Some(features) = &self.features else { return self.writer.state() };
+        let letter = features.letter(start, end);
+        if letter.is_empty() {
+            return self.writer.state();
+        }
+        match self.letters.symbol(&letter).as_deref() {
+            Some(edit @ ("space" | "backspace")) => return self.edit(edit, end, words),
+            Some(mark @ ("period" | "comma" | "question")) => {
+                let _ = self.mark("edit", mark, end);
+                self.take_word(end);
+                self.writer.punctuate(
+                    match mark {
+                        "period" => '.',
+                        "comma" => ',',
+                        _ => '?',
+                    },
+                    words,
+                );
+            }
+            _ => {
                 self.writer.letter(self.letters.odds(&letter), words);
                 self.word_windows.push((start, end));
             }
@@ -180,22 +198,27 @@ impl Recorder {
         self.writer.state()
     }
 
+    /// The highlighted word is being taken: mark it, and its letters when it's as long.
+    fn take_word(&mut self, now: f64) {
+        let word = self.writer.state().word;
+        if !word.is_empty() {
+            let _ = self.mark("word", &word, now);
+        }
+        if word.len() == self.word_windows.len() {
+            for (letter, (start, end)) in word.chars().zip(std::mem::take(&mut self.word_windows)) {
+                let _ = self.mark("wstart", &letter.to_string(), start);
+                let _ = self.mark("wend", &letter.to_string(), end);
+            }
+        }
+        self.word_windows.clear();
+    }
+
     /// Words mode: `space`, `backspace`, `next`, `previous` or `clear` (anything else: nothing).
     pub fn edit(&mut self, edit: &str, now: f64, words: Option<&Dictionary>) -> WriterState {
         let _ = self.mark("edit", edit, now);
         match edit {
             "space" => {
-                let word = self.writer.state().word;
-                if !word.is_empty() {
-                    let _ = self.mark("word", &word, now);
-                }
-                if word.len() == self.word_windows.len() {
-                    for (letter, (start, end)) in word.chars().zip(std::mem::take(&mut self.word_windows)) {
-                        let _ = self.mark("wstart", &letter.to_string(), start);
-                        let _ = self.mark("wend", &letter.to_string(), end);
-                    }
-                }
-                self.word_windows.clear();
+                self.take_word(now);
                 self.writer.space(words);
             }
             "backspace" => {

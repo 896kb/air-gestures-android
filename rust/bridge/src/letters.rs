@@ -28,6 +28,8 @@ const KEEP_S: f64 = 30.0;
 const MARGIN: usize = 3;
 /// How many guesses a letter gets.
 const GUESSES: usize = 5;
+/// How sure the model must be that a stroke or mark was written (rather than a letter).
+const SYMBOL_SURE: f32 = 0.5;
 /// Without a model: a letter whose closest copy is this much (of the nearest's distance)
 /// further away is e times less likely.
 const NEAR_SPREAD: f32 = 0.2;
@@ -258,6 +260,11 @@ impl Letters {
             for (label, p) in model.letters.iter().zip(model.probabilities(letter)) {
                 put(label, p);
             }
+            // Over the letters only (the strokes and marks take some).
+            let total: f32 = odds.iter().sum();
+            if total > 0.0 {
+                odds.iter_mut().for_each(|p| *p /= total);
+            }
             return odds;
         }
         let nearest = self.nearest(letter);
@@ -269,6 +276,14 @@ impl Letters {
             put(&guess.letter, weight / total);
         }
         odds
+    }
+
+    /// A stroke or mark (`space`, `backspace`, `period`, `comma`, `question`: labels longer than
+    /// a letter) when that's what `letter` most likely is, and surely enough.
+    pub fn symbol(&self, letter: &[Vec<f32>]) -> Option<String> {
+        let best = self.rank(letter).into_iter().next()?;
+        let sure = self.model.is_none() || 1.0 - best.distance >= SYMBOL_SURE;
+        (best.letter.len() > 1 && sure).then_some(best.letter)
     }
 
     /// Every known letter, nearest first, each by its closest copy.

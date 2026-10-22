@@ -32,6 +32,8 @@ class RecordActivity : Screen() {
     /** What the last recording ended with, and where it is. */
     private var saved: String? = null
     private var reps = 5
+    /** What's asked for: letters, then also the strokes (space, delete), then also punctuation. */
+    private var set = 0
     private val settingsStore by lazy { getSharedPreferences("recorder", MODE_PRIVATE) }
     private var windowMs = 2000L
     /** From a letter appearing to its writing window. */
@@ -72,6 +74,7 @@ class RecordActivity : Screen() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         // The last session's settings.
         reps = settingsStore.getInt("reps", reps)
+        set = settingsStore.getInt("set", set)
         windowMs = settingsStore.getLong("write_ms", windowMs)
         gapMs = settingsStore.getLong("ready_ms", gapMs)
         auto = settingsStore.getBoolean("auto", auto)
@@ -139,6 +142,7 @@ class RecordActivity : Screen() {
                         else -> "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Each letter shows grey for ${seconds(gapMs)}, then turns dark: write it within ${seconds(windowMs)}. $reps of each letter, in random order."
                     }
                 }
+                settings.addView(pill(SETS[set]) { set = (set + 1) % SETS.size; remember() }.first)
                 settings.addView(pill("Reps: $reps") { reps = if (reps >= 10) 1 else reps + 1; remember() }.first)
                 if (auto) {
                     settings.addView(pill("Still: ${seconds(stillMs)}") { stillMs = following(STILL_MS, stillMs); remember() }.first)
@@ -161,7 +165,8 @@ class RecordActivity : Screen() {
         service.startPractice(quiet)
         service.rawEmg(true)
         service.recording.recordMark("session", if (auto) "reps=$reps self_paced still_ms=$stillMs" else "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
-        prompts = ('a'..'z').flatMap { c -> List(reps) { c.toString() } }.shuffled()
+        val labels = ('a'..'z').map { it.toString() } + STROKES.keys.take(if (set >= 1) 2 else 0) + STROKES.keys.drop(2).take(if (set >= 2) 3 else 0)
+        prompts = labels.flatMap { label -> List(reps) { label } }.shuffled()
         at = 0
         read = 0
         right = 0
@@ -183,7 +188,7 @@ class RecordActivity : Screen() {
         val shown = prompts[at]
         val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
         count.text = "LETTER ${at + 1} OF ${prompts.size}"
-        letter.text = shown
+        letter.text = glyph(shown)
         letter.setTextColor(Cb.INK_400)
         cue.text = "Get ready…"
         recording.recordMark("prompt", shown)
@@ -210,9 +215,9 @@ class RecordActivity : Screen() {
         val shown = prompts[at]
         val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
         count.text = "LETTER ${at + 1} OF ${prompts.size}"
-        letter.text = shown
+        letter.text = glyph(shown)
         letter.setTextColor(Cb.INK_900)
-        cue.text = "Write it"
+        cue.text = STROKES[shown]?.let { "Draw ${it.second}" } ?: "Write it"
         promptAt = recording.clock()
         writingAt = Double.NaN
         recording.recordMark("prompt", shown, promptAt)
@@ -272,14 +277,14 @@ class RecordActivity : Screen() {
         read++
         if (result.first) right++
         if (result.second) inThree++
-        reading.text = "“$shown” read as ${guesses.first()} ${if (result.first) "✓" else "✗"}   then ${guesses.drop(1).take(2).joinToString(", ")}\n" + score()
+        reading.text = "“${glyph(shown)}” read as ${glyph(guesses.first())} ${if (result.first) "✓" else "✗"}   then ${guesses.drop(1).take(2).joinToString(", ", transform = ::glyph)}\n" + score()
     }
 
     private fun score() = if (read == 0) "" else
         "$right of $read right first time (${100 * right / read} %), $inThree in the first three (${100 * inThree / read} %)"
 
     private fun remember() {
-        settingsStore.edit().putInt("reps", reps).putLong("write_ms", windowMs).putLong("ready_ms", gapMs)
+        settingsStore.edit().putInt("reps", reps).putInt("set", set).putLong("write_ms", windowMs).putLong("ready_ms", gapMs)
             .putBoolean("auto", auto).putLong("still_ms", stillMs).apply()
         render()
     }
@@ -359,7 +364,19 @@ class RecordActivity : Screen() {
         render()
     }
 
+    /** How a prompt shows: a letter as itself, a stroke or mark as its symbol. */
+    private fun glyph(label: String) = STROKES[label]?.first ?: label
+
     companion object {
+        /** Strokes and punctuation as labelled in recordings: what's shown, and what to draw. */
+        val STROKES = linkedMapOf(
+            "space" to ("→" to "a line to the right (space)"),
+            "backspace" to ("←" to "a line to the left (delete)"),
+            "period" to ("." to "a full stop: a dot"),
+            "comma" to ("," to "a comma"),
+            "question" to ("?" to "a question mark"),
+        )
+        val SETS = listOf("Letters", "+ space, delete", "+ punctuation")
         /** Seconds of "get ready" before the first letter. */
         const val COUNTDOWN = 5
         /** What the Write and Ready buttons step through. */

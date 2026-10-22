@@ -202,6 +202,19 @@ impl Writer {
         self.refresh(words);
     }
 
+    /// A punctuation mark after the highlighted word (or after the text), then a space.
+    pub fn punctuate(&mut self, mark: char, words: Option<&Dictionary>) {
+        if let Some(word) = self.suggestions.get(self.highlight) {
+            self.text.push_str(word);
+        } else if self.text.ends_with(' ') {
+            self.text.pop();
+        }
+        self.text.push(mark);
+        self.text.push(' ');
+        self.letters.clear();
+        self.refresh(words);
+    }
+
     /// The next (or previous) suggestion, round and round.
     pub fn step(&mut self, forward: bool) {
         let n = self.suggestions.len();
@@ -274,6 +287,12 @@ mod tests {
         writer.letter(odds('x', 'y'), None);
         writer.space(None);
         assert_eq!(writer.state().text, "thex ");
+        writer.punctuate('.', None);
+        assert_eq!(writer.state().text, "thex. ");
+        writer.letter(odds('t', 'f'), Some(&words));
+        writer.letter(odds('o', 'a'), Some(&words));
+        writer.punctuate('?', Some(&words));
+        assert_eq!(writer.state().text, "thex. to? ");
     }
 }
 
