@@ -176,6 +176,8 @@ pub struct BandSession {
     guessing: bool,
     /// Traffic the session skipped, described for the log.
     diagnostics: Vec<String>,
+    /// What the band said about itself while connecting.
+    device_info: Option<DeviceInfo>,
     /// Describe every frame once streaming, too (debug logging).
     log_frames: bool,
     /// Extra stream flags to request, to find out what else the band sends (see `set_probe`).
@@ -248,6 +250,7 @@ impl BandSession {
             variant: SCHEME_3,
             guessing: false,
             diagnostics: Vec::new(),
+            device_info: None,
             log_frames: false,
             probe: Vec::new(),
             probe_flags: None,
@@ -337,6 +340,11 @@ impl BandSession {
         if count <= PROBE_SHOWN || count % PROBE_EVERY == 0 {
             self.diagnostics.push(format!("probe #{count} {}", line()));
         }
+    }
+
+    /// What the band said about itself while connecting (none before then).
+    pub fn device_info(&self) -> Option<&DeviceInfo> {
+        self.device_info.as_ref()
     }
 
     pub fn take_diagnostics(&mut self) -> Vec<String> {
@@ -1268,6 +1276,7 @@ impl BandSession {
             && !self.stopping
         {
             let fields = ProtoFields::parse(&frame.payload)?;
+            self.device_info = DeviceInfo::find(&fields, 0).or(self.device_info.take());
             if self.probing() {
                 // DeviceInfoResp: firmware, model ids, protocol version, features (handwriting).
                 self.diagnostics.push(format!("probe: device info: {}", fields.describe_nested(0)));
@@ -1515,5 +1524,64 @@ impl BandSession {
                 Ok(Some(vec![Event::RawEmgState(pending.enabled)]))
             }
         }
+    }
+}
+
+/// The band's DeviceInfoResp (Meta AI's schema): its firmware and serial number.
+#[derive(Clone, Default, PartialEq)]
+pub struct DeviceInfo {
+    pub firmware: String,
+    pub software: String,
+    pub hardware: String,
+    pub serial: String,
+    pub release_branch: String,
+}
+
+/// Leaves the serial out.
+impl std::fmt::Debug for DeviceInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceInfo")
+            .field("firmware", &self.firmware)
+            .field("software", &self.software)
+            .field("hardware", &self.hardware)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeviceInfo {
+    /// The DeviceInfoResp inside an RPC response: the nested message with a printable serial
+    /// (field 6) and a firmware revision (2).
+    fn find(fields: &ProtoFields, depth: usize) -> Option<Self> {
+        let serial = fields.text(6).filter(|s| (4..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric()));
+        if let (Some(serial), Some(firmware)) = (serial, fields.text(2)) {
+            return Some(Self {
+                firmware,
+                software: fields.text(3).unwrap_or_default(),
+                hardware: fields.text(4).unwrap_or_default(),
+                serial,
+                release_branch: fields.text(13).unwrap_or_default(),
+            });
+        }
+        if depth >= 3 {
+            return None;
+        }
+        fields
+            .byte_fields()
+            .into_iter()
+            .find_map(|(_, bytes)| ProtoFields::parse(bytes).ok().and_then(|inner| Self::find(&inner, depth + 1)))
+    }
+}
+
+#[cfg(test)]
+mod device_info_tests {
+    use super::*;
+    use crate::proto::{field_bytes, field_int};
+
+    #[test]
+    fn device_info_is_found_inside_the_response() {
+        let info = [field_bytes(2, b"1.2.3"), field_bytes(4, b"PVT"), field_bytes(6, b"ABC123XYZ")].concat();
+        let response = [field_int(1, 1), field_int(2, 1), field_bytes(3, &field_bytes(5, &info))].concat();
+        let found = DeviceInfo::find(&ProtoFields::parse(&response).unwrap(), 0).unwrap();
+        assert_eq!((found.firmware.as_str(), found.hardware.as_str(), found.serial.as_str()), ("1.2.3", "PVT", "ABC123XYZ"));
     }
 }

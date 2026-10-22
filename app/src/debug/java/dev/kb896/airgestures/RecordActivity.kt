@@ -131,11 +131,13 @@ class RecordActivity : Screen() {
                 if (last != null) {
                     count.text = "SAVED"
                     letter.text = "✓"
+                    letter.textSize = 120f
                     letter.setTextColor(Cb.INK_900)
                     cue.text = last
                 } else {
                     count.text = "RECORD HANDWRITING"
                     letter.text = "a"
+                    letter.textSize = 120f
                     cue.text = when {
                         service() == null -> "Connect the band first."
                         auto -> "Tap Start, then rest your index finger on the table: it counts down from $COUNTDOWN. Write each letter as it shows; the next comes once your finger has been still for ${seconds(stillMs)}. $reps of each letter, in random order."
@@ -165,8 +167,16 @@ class RecordActivity : Screen() {
         service.startPractice(quiet)
         service.rawEmg(true)
         service.recording.recordMark("session", if (auto) "reps=$reps self_paced still_ms=$stillMs" else "reps=$reps window_ms=$windowMs gap_ms=$gapMs")
-        val labels = ('a'..'z').map { it.toString() } + STROKES.keys.take(if (set >= 1) 2 else 0) + STROKES.keys.drop(2).take(if (set >= 2) 3 else 0)
-        prompts = labels.flatMap { label -> List(reps) { label } }.shuffled()
+        val letters = ('a'..'z').map { it.toString() }
+        prompts = when (set) {
+            0 -> letters
+            1 -> letters + STROKES.keys.take(2)
+            2 -> letters + STROKES.keys
+            3 -> STROKES.keys.toList()
+            else -> emptyList()
+        }.flatMap { label -> List(reps) { label } }.shuffled()
+        // Whole words, written without stopping between letters: for reading joined-up writing.
+        if (set == WORDS_SET) prompts = commonWords().shuffled().take(WORDS_PER_REP * reps)
         at = 0
         read = 0
         right = 0
@@ -188,7 +198,7 @@ class RecordActivity : Screen() {
         val shown = prompts[at]
         val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
         count.text = "LETTER ${at + 1} OF ${prompts.size}"
-        letter.text = glyph(shown)
+        showPrompt(shown)
         letter.setTextColor(Cb.INK_400)
         cue.text = "Get ready…"
         recording.recordMark("prompt", shown)
@@ -215,9 +225,10 @@ class RecordActivity : Screen() {
         val shown = prompts[at]
         val recording = BandService.instance?.recording ?: return stop("The band service stopped.")
         count.text = "LETTER ${at + 1} OF ${prompts.size}"
-        letter.text = glyph(shown)
+        showPrompt(shown)
         letter.setTextColor(Cb.INK_900)
-        cue.text = STROKES[shown]?.let { "Draw ${it.second}" } ?: "Write it"
+        cue.text = STROKES[shown]?.let { "Draw ${it.second}" }
+            ?: if (set == WORDS_SET) "Write the whole word without stopping, then rest" else "Write it"
         promptAt = recording.clock()
         writingAt = Double.NaN
         recording.recordMark("prompt", shown, promptAt)
@@ -253,9 +264,15 @@ class RecordActivity : Screen() {
                 if (still || now - writingAt > MAX_LETTER_S) {
                     val shown = prompts[at]
                     val end = if (still) minOf(now, offset + POST_S) else now
-                    recording.recordMark("start", shown, writingAt)
-                    recording.recordMark("end", shown, end)
-                    judge(shown, writingAt, end)
+                    if (set == WORDS_SET) {
+                        // Not letters: kept apart from them (read_windows skips these).
+                        recording.recordMark("word_start", shown, writingAt)
+                        recording.recordMark("word_end", shown, end)
+                    } else {
+                        recording.recordMark("start", shown, writingAt)
+                        recording.recordMark("end", shown, end)
+                        judge(shown, writingAt, end)
+                    }
                     at++
                     return nextSelfPaced()
                 }
@@ -300,6 +317,7 @@ class RecordActivity : Screen() {
         if (seconds == 0) return next()
         count.text = "GET READY"
         letter.text = seconds.toString()
+        letter.textSize = 120f
         letter.setTextColor(Cb.INK_400)
         cue.text = "Rest your index finger on the table"
         main.postDelayed({ countdown(seconds - 1) }, 1000)
@@ -364,6 +382,17 @@ class RecordActivity : Screen() {
         render()
     }
 
+    /** Common words of 3–7 letters from the dictionary, for the whole-words set. */
+    private fun commonWords(): List<String> = assets.open("words.txt").bufferedReader().useLines { lines ->
+        lines.filterNot { it.startsWith("#") }.map { it.substringBefore(' ') }.filter { it.length in 3..7 }.take(400).toList()
+    }
+
+    /** The prompt, smaller when it's a whole word. */
+    private fun showPrompt(shown: String) {
+        letter.text = glyph(shown)
+        letter.textSize = if (letter.text.length > 2) 64f else 120f
+    }
+
     /** How a prompt shows: a letter as itself, a stroke or mark as its symbol. */
     private fun glyph(label: String) = STROKES[label]?.first ?: label
 
@@ -376,14 +405,16 @@ class RecordActivity : Screen() {
             "comma" to ("," to "a comma"),
             "question" to ("?" to "a question mark"),
         )
-        val SETS = listOf("Letters", "+ space, delete", "+ punctuation")
+        val SETS = listOf("Letters", "+ space, delete", "+ punctuation", "Strokes only", "Whole words")
+        const val WORDS_SET = 4
+        const val WORDS_PER_REP = 10
         /** Seconds of "get ready" before the first letter. */
         const val COUNTDOWN = 5
         /** What the Write and Ready buttons step through. */
         val WRITE_MS = listOf(1000L, 1500L, 2000L, 2500L, 3000L, 4000L, 5000L)
         val READY_MS = listOf(250L, 500L, 1000L, 1500L, 2000L, 3000L)
         /** What the Still button steps through: long enough for an i's dot, short enough to flow. */
-        val STILL_MS = listOf(400L, 500L, 700L, 1000L, 1500L)
+        val STILL_MS = listOf(250L, 300L, 400L, 500L, 700L, 1000L, 1500L)
         const val POLL_MS = 50L
         /** A letter's window starts this long before the muscles became active, and ends this long after. */
         const val PRE_S = 0.15

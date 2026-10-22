@@ -306,6 +306,37 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_recordEdit<'local>(
     json_out(&mut env, state)
 }
 
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_deviceInfo<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let info = unsafe { connection(handle) }.device_info();
+    json_out(&mut env, Ok(info))
+}
+
+/// Debug: check, download and keep the firmware Meta offers this band (blocking HTTP: call off
+/// the main thread). A summary as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session: JString<'local>,
+    serial: JString<'local>,
+    version: JString<'local>,
+    dir: JString<'local>,
+) -> jstring {
+    let result = (|| {
+        let session = get_string(&mut env, &session)?;
+        let serial = get_string(&mut env, &serial)?;
+        let version = get_string(&mut env, &version)?;
+        let dir = get_string(&mut env, &dir)?;
+        crate::firmware::archive(&session, &serial, &version, &dir)
+    })();
+    json_out(&mut env, result)
+}
+
 /// The handwriting dictionary (`word count` lines); how many words it has.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_wordsLoad<'local>(

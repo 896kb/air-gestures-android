@@ -47,6 +47,13 @@ object Bridge {
     @JvmStatic external fun recordWrite(handle: Long, start: Double, end: Double): String
     /** Words mode: "space", "backspace", "next", "previous" or "clear"; the state as for [recordWrite]. */
     @JvmStatic external fun recordEdit(handle: Long, edit: String, now: Double): String
+    /** What the band said about itself: `{"firmware", "software", "hardware", "serial", "release_branch"}` (`{}` before). */
+    @JvmStatic external fun deviceInfo(handle: Long): String
+    /**
+     * Debug: check, download and keep the firmware Meta offers this band under [dir] (blocking
+     * HTTP; off the main thread). [version]: the band's, as reported to Meta ("1": the full current build).
+     */
+    @JvmStatic external fun firmwareArchive(session: String, serial: String, version: String, dir: String): String
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
     @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun recordStop(handle: Long)

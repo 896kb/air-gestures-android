@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import kotlin.concurrent.thread
 
 /**
  * Debug builds only: run any action without the band, for tests on an emulator.
@@ -22,6 +23,11 @@ import android.util.Log
  *     ... --es config f202080800102018022809   # 46 = {1=0 2=32 3=2 5=9}
  *
  * Or stream raw sEMG alongside gestures (its rate goes to the log): `--ez emg true` / `false`.
+ *
+ * Or keep a copy of the firmware Meta offers the connected band (with the Meta sign-in; the
+ * value is the version to report, "1" for the full current build), into files/firmware:
+ *
+ *     ... --es firmware 1
  *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
@@ -44,6 +50,19 @@ class DebugActions : BroadcastReceiver() {
         }
         intent.getStringExtra("config")?.let { hex ->
             BandService.instance?.probeConfig(hex) ?: Log.i("AirGestures", "debug config: the band service isn't running")
+            return
+        }
+        intent.getStringExtra("firmware")?.let { version ->
+            val session = SessionStore.load(context) ?: return run { Log.i("AirGestures", "debug firmware: not signed in to Meta") }
+            val serial = BandService.instance?.recording?.deviceInfo()?.optString("serial")?.takeIf { it.isNotEmpty() }
+                ?: return run { Log.i("AirGestures", "debug firmware: the band hasn't said its serial yet (connect it)") }
+            val dir = context.getExternalFilesDir("firmware")?.path ?: return
+            val result = goAsync()
+            thread(name = "firmware") {
+                val summary = runCatching { Bridge.firmwareArchive(session, serial, version.ifBlank { "1" }, dir) }
+                Log.i("AirGestures", "debug firmware: ${summary.getOrElse { "failed: ${it.message}" }}")
+                result.finish()
+            }
             return
         }
         val action = intent.getStringExtra("action") ?: return

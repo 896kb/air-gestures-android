@@ -129,6 +129,27 @@ impl ProtoFields {
         self.values.contains_key(&field)
     }
 
+    /// Every length-delimited value (strings and nested messages), with its field number.
+    pub fn byte_fields(&self) -> Vec<(u32, &[u8])> {
+        let mut out: Vec<(u32, &[u8])> = self
+            .values
+            .iter()
+            .flat_map(|(&field, values)| {
+                values.iter().filter_map(move |value| match value {
+                    Value::Bytes(bytes) => Some((field, bytes.as_slice())),
+                    _ => None,
+                })
+            })
+            .collect();
+        out.sort_by_key(|(field, _)| *field);
+        out
+    }
+
+    /// A string field (`None` when absent, repeated or not text).
+    pub fn text(&self, field: u32) -> Option<String> {
+        self.bytes(field).ok().and_then(|bytes| std::str::from_utf8(bytes).ok()).map(str::to_owned)
+    }
+
     /// Every field with its value, sorted: `1=7 3=[12B 0a0b…] 9=f32:0.25`. For the
     /// stream probe only: values may be plaintext, so never call it on sensor data
     /// or keys. Byte fields show their first [`DESCRIBE_BYTES`] bytes.

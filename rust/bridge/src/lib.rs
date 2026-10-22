@@ -14,6 +14,7 @@ use serde::Serialize;
 pub mod claim;
 pub mod config;
 pub mod controller;
+pub mod firmware;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
@@ -244,6 +245,21 @@ impl Connection {
             Some(recorder) => recorder.mark(event, label, now),
             None => Ok(()),
         }
+    }
+
+    /// What the band said about itself (`{}` before it has): firmware, software, hardware,
+    /// serial, release branch. For the firmware archive; the serial isn't logged.
+    pub fn device_info(&self) -> String {
+        self.session.device_info().map_or_else(
+            || "{}".into(),
+            |info| {
+                serde_json::json!({
+                    "firmware": info.firmware, "software": info.software, "hardware": info.hardware,
+                    "serial": info.serial, "release_branch": info.release_branch,
+                })
+                .to_string()
+            },
+        )
     }
 
     /// The recording's counts as JSON (`{}` when none runs).

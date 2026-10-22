@@ -142,6 +142,12 @@ class BandLink(
         List(guesses.length()) { guesses.getJSONObject(it).getString("letter") }
     }
 
+    /** What the band said about itself (see Bridge.deviceInfo); null before it has. */
+    fun deviceInfo(): org.json.JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        org.json.JSONObject(Bridge.deviceInfo(handle)).takeIf { it.length() > 0 }
+    }
+
     /** Words mode (see Bridge.recordWrite); null when no recording runs. */
     fun recordWrite(start: Double, end: Double): org.json.JSONObject? = synchronized(lock) {
         if (handle == 0L) return null
