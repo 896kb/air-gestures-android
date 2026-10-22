@@ -15,6 +15,7 @@ use band_core::events::{EmgBatch, EmgConfig};
 use serde::Serialize;
 
 pub struct Recorder {
+    detector: Detector,
     emg: BufWriter<File>,
     marks: BufWriter<File>,
     config: Option<EmgConfig>,
@@ -31,6 +32,12 @@ pub struct Stats {
     /// Batches that couldn't be read (an unsupported layout); not written.
     pub unreadable: u64,
     pub marks: u64,
+    /// The writing detector: muscles active now, the envelope over the resting level, and
+    /// when activity last began and ended (host time, s).
+    pub active: bool,
+    pub level: f64,
+    pub onset: Option<f64>,
+    pub offset: Option<f64>,
 }
 
 impl Recorder {
@@ -46,6 +53,7 @@ impl Recorder {
         let mut marks = open("marks.csv")?;
         writeln!(marks, "time,event,label").map_err(|e| e.to_string())?;
         Ok(Self {
+            detector: Detector::default(),
             emg: open("emg.bin")?,
             marks,
             config: None,
@@ -85,6 +93,17 @@ impl Recorder {
         }
         self.last_sequence = Some(batch.sequence);
         self.stats.batches += 1;
+        let rate = config.sample_rate as f64;
+        let channels = config.channels as usize;
+        if let Some(change) = self.detector.batch(&batch.values, channels, rate) {
+            if change {
+                self.stats.onset = Some(now);
+            } else {
+                self.stats.offset = Some(now);
+            }
+        }
+        self.stats.active = self.detector.active;
+        self.stats.level = self.detector.level();
         let mut record = Vec::with_capacity(24 + batch.values.len() * 2);
         record.extend(now.to_le_bytes());
         record.extend(batch.sequence.to_le_bytes());
@@ -110,5 +129,99 @@ impl Recorder {
         self.emg.flush().map_err(|e| e.to_string())?;
         self.marks.flush().map_err(|e| e.to_string())?;
         Ok(self.stats)
+    }
+}
+
+/// Writing detection from the sEMG envelope, causal and per batch: each channel's drift is
+/// taken out (a 20 ms mean), the rectified rest averaged over channels and smoothed (50 ms);
+/// the resting level follows it slowly (3 s) while nothing is written. Writing starts when the
+/// envelope passes [`ON`] × the resting level and ends below [`OFF`] ×. Tuned offline on
+/// recorded sessions: every letter seen, active during ~3 % of the waits between them.
+#[derive(Default)]
+struct Detector {
+    mean: Vec<f64>,
+    envelope: f64,
+    rest: f64,
+    active: bool,
+}
+
+const ON: f64 = 2.5;
+const OFF: f64 = 1.6;
+const DRIFT_S: f64 = 0.02;
+const ENVELOPE_S: f64 = 0.05;
+const REST_S: f64 = 3.0;
+
+impl Detector {
+    /// One batch (sample-major); `Some(true)` when writing started, `Some(false)` when it stopped.
+    fn batch(&mut self, values: &[u16], channels: usize, rate: f64) -> Option<bool> {
+        if channels == 0 || values.len() < channels {
+            return None;
+        }
+        let samples = values.len() / channels;
+        let first = self.mean.is_empty();
+        if first {
+            self.mean = values[..channels].iter().map(|&v| f64::from(v)).collect();
+        }
+        let drift = 1.0 - (-1.0 / (rate * DRIFT_S)).exp();
+        let mut energy = 0.0;
+        for sample in values.chunks_exact(channels) {
+            for (mean, &value) in self.mean.iter_mut().zip(sample) {
+                let value = f64::from(value);
+                *mean += (value - *mean) * drift;
+                energy += (value - *mean).abs();
+            }
+        }
+        energy /= (samples * channels) as f64;
+        let dt = samples as f64 / rate;
+        if first {
+            self.envelope = energy;
+            self.rest = energy.max(1e-6);
+            return None;
+        }
+        self.envelope += (energy - self.envelope) * (1.0 - (-dt / ENVELOPE_S).exp());
+        if !self.active && self.envelope < self.rest * 1.2 {
+            self.rest += (self.envelope - self.rest) * (1.0 - (-dt / REST_S).exp());
+            self.rest = self.rest.max(1e-6);
+        }
+        if !self.active && self.envelope > self.rest * ON {
+            self.active = true;
+            return Some(true);
+        }
+        if self.active && self.envelope < self.rest * OFF {
+            self.active = false;
+            return Some(false);
+        }
+        None
+    }
+
+    fn level(&self) -> f64 {
+        if self.rest > 0.0 { self.envelope / self.rest } else { 0.0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A batch of 16 samples × 8 channels alternating ±`swing` around 1000.
+    fn batch(swing: u16, phase: usize) -> Vec<u16> {
+        (0..128).map(|i| if (i / 8 + phase) % 2 == 0 { 1000 + swing } else { 1000 - swing }).collect()
+    }
+
+    #[test]
+    fn a_burst_over_the_resting_level_starts_and_ends_writing() {
+        let mut detector = Detector::default();
+        let mut changes = Vec::new();
+        let mut feed = |swing, batches| {
+            for i in 0..batches {
+                if let Some(change) = detector.batch(&batch(swing, i), 8, 2048.0) {
+                    changes.push(change);
+                }
+            }
+        };
+        feed(10, 400); // 3 s of rest
+        feed(80, 60); // half a second of writing
+        feed(10, 200); // rest again
+        assert_eq!(changes, vec![true, false]);
     }
 }

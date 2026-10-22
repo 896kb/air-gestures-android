@@ -1268,6 +1268,10 @@ impl BandSession {
             && !self.stopping
         {
             let fields = ProtoFields::parse(&frame.payload)?;
+            if self.probing() {
+                // DeviceInfoResp: firmware, model ids, protocol version, features (handwriting).
+                self.diagnostics.push(format!("probe: device info: {}", fields.describe_nested(0)));
+            }
             if fields.required_integer(1)? != 1 {
                 return Ok(Vec::new());
             }
