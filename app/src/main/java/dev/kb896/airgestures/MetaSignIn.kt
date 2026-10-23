@@ -24,7 +24,7 @@ import org.json.JSONObject
 import kotlin.concurrent.thread
 
 /**
- * The Meta sign-in (air-gestures `signin.rs`, kinesis `MetaLoginView.swift`): Meta's own
+ * The Meta sign-in (air-gestures `signin.rs`): Meta's own
  * page in a web view that keeps nothing (cookies and storage are cleared before and
  * after). The app never sees the password; it only catches the final redirect to
  * `fb-viewapp://frl_login?token=…&blob=…`, checks it against this sign-in's token and

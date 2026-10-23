@@ -1,8 +1,7 @@
 //! Copied from air-gestures' `air-gesturesd/src/controller.rs` (91e7217); here
 //! the commands are app action names instead of shell commands.
 //!
-//! What to do with each band event — a port of the event handling in kinesis
-//! `BandModel.swift` (~L840–990). Pure: no I/O; time is passed in.
+//! What to do with each band event. Pure: no I/O; time is passed in.
 
 use band_core::events::{Event, Hand};
 use band_core::gestures::{ActionGate, DialRouter, GestureRouter, Recognized, Swipe, Tap};

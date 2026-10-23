@@ -2,8 +2,7 @@
 
 Use a **Meta Neural Band** with an Android phone: thumb swipes, taps, a middle-finger hold
 and pinch-and-turn control music, volume, brightness and the screen. The Android side of
-[air-gestures](https://gitlab.com/896kb/air-gestures) for Linux, a Rust port of
-[callbacked/kinesis](https://github.com/callbacked/kinesis). Not affiliated with Meta.
+[air-gestures](https://gitlab.com/896kb/air-gestures) for Linux. Not affiliated with Meta.
 
 Site: <https://band.896.ro>
 
@@ -69,5 +68,6 @@ can hold the band at a time. `scripts/push-identity.sh` gives it the desktop's b
 
 ## License
 
-MIT, see [`LICENSE`](LICENSE). The protocol core derives from kinesis, whose notice is in
+MIT, see [`LICENSE`](LICENSE). Parts of the protocol core started from
+[callbacked/kinesis](https://github.com/callbacked/kinesis) (MIT), whose notice is in
 [`LICENSE-kinesis`](LICENSE-kinesis). Fonts: Geist (OFL). Icons: Lucide (ISC).

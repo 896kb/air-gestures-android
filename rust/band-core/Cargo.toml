@@ -4,7 +4,7 @@ version = "0.3.8"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Sans-IO Meta Neural Band protocol core, ported from callbacked/kinesis"
+description = "Sans-IO Meta Neural Band protocol core"
 
 [dependencies]
 aes = "0.8"

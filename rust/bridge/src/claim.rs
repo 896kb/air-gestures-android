@@ -1,5 +1,5 @@
-//! Claiming a band in pairing mode for this phone (air-gesturesd `pairing.rs`,
-//! kinesis `BandModel.performCeremony`): the ownership ceremony over the
+//! Claiming a band in pairing mode for this phone (air-gesturesd
+//! `pairing.rs`): the ownership ceremony over the
 //! band's L2CAP channel, with Meta's two HTTP steps run right where the
 //! session asks for them (blocking; the band waits), and the new owner key
 //! saved in the app's files directory.

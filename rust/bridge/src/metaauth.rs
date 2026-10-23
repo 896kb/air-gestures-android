@@ -1,5 +1,5 @@
-//! Meta sign-in HTTP steps (copied from air-gestures `metaauth.rs`, kinesis
-//! `MetaAuth.swift`), made blocking: the app calls them off the main thread.
+//! Meta sign-in HTTP steps (copied from air-gestures
+//! `metaauth.rs`), made blocking: the app calls them off the main thread.
 //! The client ids below are Meta's own public app identifiers (the same in
 //! every copy of Meta's apps), not secrets. The resulting access token never
 //! reaches logs.
