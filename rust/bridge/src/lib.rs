@@ -37,6 +37,8 @@ const QUIET_QUERY: f64 = 2.0;
 const OFF_PULSE_MS: u64 = 80;
 const ON_PULSE_MS: u64 = 300;
 const PROFILE_PULSE_MS: u64 = 40;
+const VOLUME_PULSE_MS: u64 = 18;
+const VOLUME_DETENT_INTERVAL: f64 = 0.100;
 const DOUBLE_GAP: f64 = 0.100;
 
 pub struct Connection {
@@ -53,6 +55,7 @@ pub struct Connection {
     haptics_flight: Option<HapticFlight>,
     haptics_next_at: f64,
     last_clock: f64,
+    last_volume_detent: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +70,7 @@ struct HapticStep {
 enum HapticPriority {
     State,
     Profile,
+    Detent,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,6 +129,7 @@ impl Connection {
             haptics_flight: None,
             haptics_next_at: 0.0,
             last_clock: 0.0,
+            last_volume_detent: f64::NEG_INFINITY,
         })
     }
 
@@ -157,7 +162,7 @@ impl Connection {
                 outgoing.extend(self.apply(command, now)?);
             }
         }
-        if self.session.streams_enabled() && now >= self.next_battery {
+        if self.live && self.session.startup_ready() && now >= self.next_battery {
             self.next_battery = now + BATTERY_EVERY;
             outgoing.extend(
                 self.session
@@ -165,7 +170,8 @@ impl Connection {
                     .map_err(|e| e.to_string())?,
             );
         }
-        if self.session.streams_enabled()
+        if self.live
+            && self.session.startup_ready()
             && now - self.last_read >= QUIET_QUERY
             && now - self.last_query >= QUIET_QUERY
         {
@@ -190,6 +196,13 @@ impl Connection {
         } else {
             2
         });
+        self.pump_haptics(self.last_clock)
+    }
+
+    /// Reassert the built-in controls pattern without a transition pulse.
+    pub fn sync_controls_haptics(&mut self, paused: bool) -> Result<Vec<u8>, String> {
+        self.replace_haptics_state();
+        self.push_pattern(if self.band_vibration && !paused { 1 } else { 2 });
         self.pump_haptics(self.last_clock)
     }
 
@@ -238,6 +251,31 @@ impl Connection {
         self.pump_haptics(self.last_clock)
     }
 
+    /// One actual phone-volume detent, dropped during other haptics and rate-limited.
+    pub fn volume_detent(&mut self) -> Result<Vec<u8>, String> {
+        let now = self.last_clock;
+        if !self.band_vibration
+            || !self.live
+            || !self.session.startup_ready()
+            || self.haptics_flight.is_some()
+            || !self.haptics_queue.is_empty()
+            || now - self.last_volume_detent < VOLUME_DETENT_INTERVAL
+        {
+            return Ok(Vec::new());
+        }
+        self.last_volume_detent = now;
+        self.haptics_queue.push_back(HapticStep {
+            command: HapticsCommand::Vibrate {
+                duration_ms: VOLUME_PULSE_MS,
+                amplitude: 128,
+            },
+            wait_after: 0.0,
+            duration_ms: VOLUME_PULSE_MS,
+            priority: HapticPriority::Detent,
+        });
+        self.pump_haptics(now)
+    }
+
     fn push_pattern(&mut self, pattern_id: u32) {
         self.haptics_queue.push_back(HapticStep {
             command: HapticsCommand::Perform { pattern_id },
@@ -266,8 +304,9 @@ impl Connection {
     fn pump_haptics(&mut self, now: f64) -> Result<Vec<u8>, String> {
         self.retire_completed_haptics(now);
         if self.haptics_flight.is_some()
+            || !self.live
             || now < self.haptics_next_at
-            || !self.session.streams_enabled()
+            || !self.session.startup_ready()
             || self.haptics_queue.is_empty()
         {
             return Ok(Vec::new());
@@ -362,6 +401,10 @@ impl Connection {
 
     fn on_event(&mut self, event: &Event, now: f64) -> Result<Vec<u8>, String> {
         match event {
+            Event::StartupFailure(message) => {
+                self.live = false;
+                return Err(message.clone());
+            }
             Event::Connected => {
                 self.live = true;
                 self.log.push("connected".into());
@@ -429,12 +472,37 @@ impl Connection {
 #[cfg(test)]
 mod haptics_tests {
     use super::*;
+    use band_core::proto::ProtoFields;
+    use band_core::sim::SimBand;
     use p256::ecdsa::SigningKey;
     use rand_core::OsRng;
 
     fn connection() -> Connection {
         let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
         Connection::new(&identity.private_bytes(), 0, false, "", "").unwrap()
+    }
+
+    fn ready_connection() -> (Connection, SimBand) {
+        let mut connection = connection();
+        // Haptics only depend on the live transport; use the simulator's legacy
+        // setup fixture to make that state without a separate ownership ceremony.
+        connection.session = BandSession::new(None, None, false);
+        let (mut band, _) = SimBand::connect(&mut connection.session).unwrap();
+        band.complete_legacy_setup(&mut connection.session).unwrap();
+        band.hand_reply(&mut connection.session, 2, Some(0), 1, 6, 0.0)
+            .unwrap();
+        assert!(connection.session.startup_ready());
+        connection.live = true;
+        (connection, band)
+    }
+
+    fn decode_haptics_request(band: &mut SimBand, bytes: &[u8]) -> ProtoFields {
+        let frames = band.requests(bytes).unwrap();
+        let [frame] = frames.as_slice() else {
+            panic!("expected exactly one haptics RPC frame");
+        };
+        assert_eq!(frame.channel & 0x80ff, 0x8006);
+        ProtoFields::parse(&frame.payload).unwrap()
     }
 
     #[test]
@@ -587,5 +655,96 @@ mod haptics_tests {
             HapticsCommand::Perform { pattern_id: 2 },
             "a reconnect with the preference off never enables feedback"
         );
+    }
+
+    #[test]
+    fn quiet_state_sync_replaces_state_without_transition_pulses() {
+        let (mut connection, _) = ready_connection();
+        let first = connection.sync_controls_haptics(false).unwrap();
+        assert!(!first.is_empty(), "ready session sends persistent state");
+        assert_eq!(
+            connection.haptics_flight.unwrap().priority,
+            HapticPriority::State
+        );
+        assert_eq!(connection.haptics_flight.unwrap().duration_ms, 0);
+
+        // A repeated sync while the first state RPC is in flight only replaces
+        // the unsent persistent state. It never queues an enable/disable cue.
+        assert!(connection.sync_controls_haptics(false).unwrap().is_empty());
+        assert_eq!(connection.haptics_queue.len(), 1);
+        assert_eq!(
+            connection.haptics_queue[0].command,
+            HapticsCommand::Perform { pattern_id: 1 }
+        );
+
+        assert!(connection.sync_controls_haptics(true).unwrap().is_empty());
+        assert_eq!(connection.haptics_queue.len(), 1);
+        assert_eq!(
+            connection.haptics_queue[0].command,
+            HapticsCommand::Perform { pattern_id: 2 },
+            "paused controls synchronize to no vibration"
+        );
+        assert!(connection.set_band_vibration(false).unwrap().is_empty());
+        assert_eq!(connection.haptics_queue.len(), 1);
+        assert_eq!(
+            connection.haptics_queue[0].command,
+            HapticsCommand::Perform { pattern_id: 2 },
+            "global vibration off remains a quiet persistent-state change"
+        );
+    }
+
+    #[test]
+    fn volume_detents_require_live_enabled_idle_feedback_and_never_backlog() {
+        let mut disconnected = connection();
+        disconnected.last_clock = 1.0;
+        assert!(disconnected.volume_detent().unwrap().is_empty());
+        assert!(disconnected.haptics_queue.is_empty());
+
+        let (mut disabled, _) = ready_connection();
+        disabled.set_band_vibration(false).unwrap();
+        let queued_state = disabled.haptics_queue.len();
+        assert!(disabled.volume_detent().unwrap().is_empty());
+        assert_eq!(disabled.haptics_queue.len(), queued_state);
+
+        let (mut connection, mut band) = ready_connection();
+        connection.last_clock = 1.0;
+        let bytes = connection.volume_detent().unwrap();
+        assert!(!bytes.is_empty());
+        let rpc = decode_haptics_request(&mut band, &bytes);
+        let body = ProtoFields::parse(rpc.bytes(17).unwrap()).unwrap();
+        let vibrate = ProtoFields::parse(body.bytes(1).unwrap()).unwrap();
+        assert_eq!(
+            (vibrate.integer(1).unwrap(), vibrate.integer(3).unwrap()),
+            (18, 128)
+        );
+        assert!(connection.haptics_queue.is_empty());
+
+        // Calls during the active detent and the rate window are discarded.
+        assert!(connection.volume_detent().unwrap().is_empty());
+        assert!(connection.haptics_queue.is_empty(), "no click backlog");
+        let sequence = connection.haptics_flight.unwrap().sequence;
+        let ack = [
+            band_core::proto::field_int(1, u64::from(sequence)),
+            band_core::proto::field_int(2, 1),
+        ]
+        .concat();
+        let (events, _) = band
+            .exchange(&mut connection.session, 6, 0x02000315, &ack, 1.02)
+            .unwrap();
+        for event in &events {
+            connection.on_event(event, 1.02).unwrap();
+        }
+        connection.last_clock = 1.05;
+        connection.tick(1.05).unwrap();
+        assert!(connection.volume_detent().unwrap().is_empty());
+        assert!(
+            connection.haptics_queue.is_empty(),
+            "rate-limited call is dropped"
+        );
+
+        connection.last_clock = 1.101;
+        let next = connection.volume_detent().unwrap();
+        assert!(!next.is_empty(), "a later actual detent can play normally");
+        assert!(connection.haptics_queue.is_empty());
     }
 }

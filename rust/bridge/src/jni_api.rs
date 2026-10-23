@@ -185,6 +185,27 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_controlsHaptics<'local>
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_syncControlsHaptics<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    paused: jboolean,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.sync_controls_haptics(paused != 0);
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_volumeDetent<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.volume_detent();
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileHaptics<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,

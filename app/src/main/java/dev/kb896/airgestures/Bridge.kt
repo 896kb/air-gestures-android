@@ -25,8 +25,12 @@ object Bridge {
     @JvmStatic external fun setBandVibration(handle: Long, enabled: Boolean): ByteArray
     /** Report a controls state edge; returns bytes for the active link. */
     @JvmStatic external fun controlsHaptics(handle: Long, paused: Boolean): ByteArray
+    /** Quietly synchronize built-in gesture feedback with the current controls state. */
+    @JvmStatic external fun syncControlsHaptics(handle: Long, paused: Boolean): ByteArray
     /** Send the optional profile-switch cue; returns bytes for the active link. */
     @JvmStatic external fun profileHaptics(handle: Long, previous: Boolean): ByteArray
+    /** Send a short volume detent after a successful phone volume change. */
+    @JvmStatic external fun volumeDetent(handle: Long): ByteArray
     @JvmStatic external fun setDial(handle: Long, dial: String)
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)

@@ -332,6 +332,19 @@ impl Responder {
             (0x8006, _) => {
                 let fields = ProtoFields::parse(&frame.payload)?;
                 let config = ProtoFields::parse(fields.bytes(5).unwrap_or(&[]))?;
+                if config.integer(6).ok() == Some(2) {
+                    return reply(
+                        band,
+                        6,
+                        RPC,
+                        &[
+                            field_int(1, fields.integer(1)?),
+                            field_int(2, 1),
+                            field_bytes(6, &field_int(6, 2)),
+                        ]
+                        .concat(),
+                    );
+                }
                 if config.contains(10) {
                     self.hand = config.integer(10)?;
                 }
@@ -402,6 +415,7 @@ impl Responder {
             return Ok(Vec::new());
         }
         let control = ProtoFields::parse(fields.bytes(4).unwrap_or(&[]))?;
+        let device_state = control.integer(16).ok() == Some(1);
         if control.contains(2) {
             self.raw = control.integer(2)?;
         }
@@ -411,13 +425,16 @@ impl Responder {
         if id == 4 && self.streams == 0 {
             self.stopped = true;
         }
-        let flags = [
+        let mut flags = [
             field_int(2, self.raw),
             field_int(3, self.streams),
             field_int(6, self.streams),
             field_int(8, self.streams),
         ]
         .concat();
+        if device_state {
+            flags.extend(field_int(16, 1));
+        }
         reply(
             band,
             5,

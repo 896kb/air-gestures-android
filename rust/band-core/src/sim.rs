@@ -334,12 +334,29 @@ impl SimBand {
         self.exchange(session, channel, 0x02000315, &payload, now)
     }
 
-    /// Acknowledge the legacy link setup and the device-info query.
+    /// Complete the startup activation and stream subscription sequence.
     pub fn complete_legacy_setup(&mut self, session: &mut BandSession) -> Result<Vec<DataXFrame>> {
         let ready = [field_int(1, 1), field_bytes(2, &[1; 16])].concat();
         let mut frames = self.exchange(session, 0x8001, 0x02001000, &ready, 0.0)?.1;
         let device = [field_int(1, 1), field_int(2, 1), field_bytes(4, &[])].concat();
         frames.extend(self.exchange(session, 3, 0x02000315, &device, 0.0)?.1);
+        let active = [
+            field_int(1, 1),
+            field_int(2, 1),
+            field_bytes(6, &field_int(6, 2)),
+        ]
+        .concat();
+        frames.extend(self.exchange(session, 6, 0x02000315, &active, 0.0)?.1);
+        let streams_on = [
+            field_int(1, 3),
+            field_int(2, 1),
+            field_bytes(5, &[field_int(3, 1), field_int(6, 1), field_int(8, 1)].concat()),
+        ]
+        .concat();
+        frames.extend(self.exchange(session, 5, 0x02000315, &streams_on, 0.0)?.1);
+        let device_state = [field_int(1, 4), field_int(2, 1), field_bytes(5, &field_int(16, 1))]
+            .concat();
+        frames.extend(self.exchange(session, 5, 0x02000315, &device_state, 0.0)?.1);
         Ok(frames)
     }
 

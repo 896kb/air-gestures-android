@@ -373,12 +373,19 @@ impl Controller {
                 match &mut self.held_tap {
                     // The double's second tap: its double tap comes right with it.
                     Some(held) if held.tap == tap => {
-                        held.fire_at = held.fire_at.max(now + if profile_triple { TRIPLE_TAP_GAP } else { 0.08 })
+                        held.fire_at = held
+                            .fire_at
+                            .max(now + if profile_triple { TRIPLE_TAP_GAP } else { 0.08 })
                     }
                     _ => {
                         self.held_tap = Some(HeldTap {
                             tap,
-                            fire_at: now + if profile_triple { TRIPLE_TAP_GAP } else { DOUBLE_TAP_WAIT },
+                            fire_at: now
+                                + if profile_triple {
+                                    TRIPLE_TAP_GAP
+                                } else {
+                                    DOUBLE_TAP_WAIT
+                                },
                             received_at: message.received_at,
                         })
                     }
@@ -584,7 +591,13 @@ mod tests {
     }
 
     /// A fresh band gesture (`action` = tap / doubletap) at `t`, with its own sequence number.
-    fn tap(controller: &mut Controller, finger: &str, action: &str, sequence: u64, t: f64) -> Vec<Command> {
+    fn tap(
+        controller: &mut Controller,
+        finger: &str,
+        action: &str,
+        sequence: u64,
+        t: f64,
+    ) -> Vec<Command> {
         let message = GestureMessage {
             sequence,
             timestamp_us: sequence * 1_000,

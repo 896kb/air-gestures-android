@@ -54,7 +54,6 @@ class BandLink(
     private var handle = 0L
     private var lastStatus = ""
     private val hapticCommands = ArrayDeque<PendingHaptic>()
-    private var vibrationSyncedGeneration = -1
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
     @Volatile private var pending = false
     @Volatile private var wanted = false
@@ -88,8 +87,16 @@ class BandLink(
         enqueueHaptics(HapticCommand.Controls(paused))
     }
 
+    fun syncControlsHaptics(paused: Boolean) = synchronized(lock) {
+        enqueueHaptics(HapticCommand.SyncControls(paused))
+    }
+
     fun profileHaptics(previous: Boolean) = synchronized(lock) {
         enqueueHaptics(HapticCommand.Profile(previous))
+    }
+
+    fun volumeDetent() = synchronized(lock) {
+        enqueueHaptics(HapticCommand.VolumeDetent)
     }
 
     private fun enqueueHaptics(command: HapticCommand) {
@@ -129,7 +136,6 @@ class BandLink(
     private fun teardown() {
         synchronized(lock) {
             generation++
-            vibrationSyncedGeneration = -1
             hapticCommands.clear()
             runCatching { socket?.close() }
             runCatching { gatt?.disconnect() }
@@ -233,7 +239,11 @@ class BandLink(
         val guess = File(dir, "band.json").takeIf { it.exists() }
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
-            synchronized(lock) { handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping()) }
+            synchronized(lock) {
+                handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping())
+                // This queues Perform1/2 inside the new session before its first status snapshot.
+                Bridge.setBandVibration(handle, prefs.bandVibration)
+            }
             true
         } catch (e: Exception) {
             log("owner key: ${e.message}")
@@ -282,7 +292,10 @@ class BandLink(
                             }
                         }
                     } catch (e: Exception) {
-                        if (attempt == generation) log("link: ${e.message}")
+                        if (attempt == generation) {
+                            log("link: ${e.message}")
+                            main.post { if (attempt == generation) retry(2000) }
+                        }
                         break
                     }
                 }
@@ -329,10 +342,6 @@ class BandLink(
         lastStatus = json
         val status = JSONObject(json)
         if (status.optBoolean("connected")) {
-            if (vibrationSyncedGeneration != generation) {
-                vibrationSyncedGeneration = generation
-                enqueueHaptics(HapticCommand.BandVibration(prefs.bandVibration))
-            }
             listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
         }
         listener.onStatus(status)
@@ -346,7 +355,9 @@ class BandLink(
             val bytes = when (val command = pending.command) {
                 is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
                 is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
+                is HapticCommand.SyncControls -> Bridge.syncControlsHaptics(handle, command.paused)
                 is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
+                HapticCommand.VolumeDetent -> Bridge.volumeDetent(handle)
             }
             if (bytes.isNotEmpty()) write(bytes)
         }
@@ -357,7 +368,9 @@ class BandLink(
     private sealed interface HapticCommand {
         data class BandVibration(val enabled: Boolean) : HapticCommand
         data class Controls(val paused: Boolean) : HapticCommand
+        data class SyncControls(val paused: Boolean) : HapticCommand
         data class Profile(val previous: Boolean) : HapticCommand
+        data object VolumeDetent : HapticCommand
     }
 
     private fun log(line: String) = listener.onLog(line)

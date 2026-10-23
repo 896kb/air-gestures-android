@@ -109,12 +109,31 @@ fn enrolled_startup_verifies_both_trust_directions_before_link_setup() {
         let info = peer
             .send(&encode_frame(3, &[RPC], &device_ok()).unwrap())
             .unwrap();
-        assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006]);
-        let enabled = peer
+        assert_eq!(channels(&info), vec![0x8006]);
+        let activation = [
+            band_core::proto::field_int(1, 1),
+            band_core::proto::field_int(2, 1),
+            band_core::proto::field_bytes(6, &band_core::proto::field_int(6, 2)),
+        ]
+        .concat();
+        let streams = peer
+            .send(&encode_frame(6, &[RPC], &activation).unwrap())
+            .unwrap();
+        assert_eq!(channels(&streams), vec![0x8005, 0x8005]);
+        let subscription = peer
             .send(&encode_frame(5, &[RPC], &status(3)).unwrap())
             .unwrap();
-        assert!(enabled.is_empty());
-        assert!(peer.session.streams_enabled());
+        assert_eq!(channels(&subscription), vec![0x8005]);
+        assert!(!peer.session.startup_ready());
+        let state = [
+            band_core::proto::field_int(1, 4),
+            band_core::proto::field_int(2, 1),
+            band_core::proto::field_bytes(5, &band_core::proto::field_int(16, 1)),
+        ]
+        .concat();
+        let ready = peer.send(&encode_frame(5, &[RPC], &state).unwrap()).unwrap();
+        assert!(ready.iter().any(|frame| frame.channel == 0x8006));
+        assert!(peer.session.startup_ready() && peer.session.streams_enabled());
     }
 }
 

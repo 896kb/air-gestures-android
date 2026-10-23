@@ -7,7 +7,7 @@ use common::*;
 fn encrypted_input_drives_the_dial_and_releases_on_motion_loss() {
     let mut peer = Peer::legacy(true, false);
     let first = peer.gyro(1_000_000, 0.0).unwrap();
-    assert!(connected(&first) && heartbeat(&first));
+    assert!(!connected(&first));
     assert!(
         engagement(&peer.gesture_with(1, 2, 0, 1, 0.01).unwrap()).is_empty(),
         "synthetic press"

@@ -138,7 +138,9 @@ impl EmgBatch {
 /// Sensor data must not be logged verbatim: `Debug` prints raw sEMG frames by length only.
 #[derive(Clone)]
 pub enum Event {
-    /// Input streams are live (first subscription ack or first sensor data).
+    /// Required startup state could not be confirmed; the session must reconnect.
+    StartupFailure(String),
+    /// Startup activation and device-state subscription are confirmed; inputs are live.
     Connected,
     /// Authenticated traffic arrived while streaming (at most every 0.2 s).
     Heartbeat,
@@ -175,6 +177,9 @@ pub enum Event {
 impl std::fmt::Debug for Event {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::StartupFailure(message) => {
+                f.debug_tuple("StartupFailure").field(message).finish()
+            }
             Self::Connected => f.write_str("Connected"),
             Self::Heartbeat => f.write_str("Heartbeat"),
             Self::DataSeen => f.write_str("DataSeen"),

@@ -57,7 +57,9 @@ sends pattern 1, then a 300 ms pulse at amplitude 255. The existing
 profile feedback option now uses the Band. Each profile can also require a connected Bluetooth
 audio output for play/pause, track changes, and seek; this option defaults off. Haptics protocol
 work is based on [`neural-band-poc`](https://github.com/iinsaane/neural-band-poc); the pulse
-feel and timing still need confirmation on the Band.
+feel and timing still need confirmation on the Band. The app reapplies its gesture mapping,
+controls state and vibration setting on each fresh connection; successful volume changes also
+give a short Band detent.
 
 ## Build
 

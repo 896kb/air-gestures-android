@@ -106,6 +106,44 @@ fn all_set(flags: &ProtoFields, fields: &[u32], value: u64) -> Result<bool> {
     Ok(true)
 }
 
+fn startup_activation_confirmed(frame: &DataXFrame, sequence: u64) -> bool {
+    if frame.words.last() != Some(&RPC_RESPONSE) {
+        return false;
+    }
+    let Ok(response) = ProtoFields::parse(&frame.payload) else {
+        return false;
+    };
+    if response.integer(1).ok() != Some(sequence)
+        || response.integer(2).ok() != Some(1)
+    {
+        return false;
+    }
+    response
+        .bytes(6)
+        .ok()
+        .and_then(|config| ProtoFields::parse(config).ok())
+        .is_some_and(|config| config.integer(6).ok() == Some(2))
+}
+
+fn startup_state_subscription_confirmed(frame: &DataXFrame, sequence: u64) -> bool {
+    if frame.words.last() != Some(&RPC_RESPONSE) {
+        return false;
+    }
+    let Ok(response) = ProtoFields::parse(&frame.payload) else {
+        return false;
+    };
+    if response.integer(1).ok() != Some(sequence)
+        || response.integer(2).ok() != Some(1)
+    {
+        return false;
+    }
+    response
+        .bytes(5)
+        .ok()
+        .and_then(|control| ProtoFields::parse(control).ok())
+        .is_some_and(|control| control.integer(16).ok() == Some(1))
+}
+
 fn haptics_response_status(fields: &ProtoFields, expected_response: u32) -> (bool, Option<bool>) {
     let rpc_success = fields.integer(2).ok() == Some(1);
     let haptics_success = fields
@@ -133,8 +171,11 @@ enum SetupStage {
     Ceremony,
     Identity,
     DeviceInfo,
+    Activation,
     Input,
 }
+
+const STARTUP_TIMEOUT_SECONDS: f64 = 8.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RawStage {
@@ -204,6 +245,7 @@ pub struct BandSession {
     authenticated_packets: usize,
     motion_messages: usize,
     streams_enabled: bool,
+    startup_ready: bool,
     battery_channel_opened: bool,
     battery_request_id: u64,
     battery_request: Option<(u64, f64)>,
@@ -216,6 +258,8 @@ pub struct BandSession {
     raw_emg_frames: usize,
     raw_emg_bytes: usize,
     setup_stage: SetupStage,
+    startup_activation: Option<(u64, f64)>,
+    startup_state_subscription: Option<(u64, f64)>,
     enrollment: Option<EnrollmentIdentity>,
     ceremony: Option<OwnershipCeremony>,
     app_trusted: bool,
@@ -270,6 +314,7 @@ impl BandSession {
             authenticated_packets: 0,
             motion_messages: 0,
             streams_enabled: false,
+            startup_ready: false,
             battery_channel_opened: false,
             battery_request_id: 0,
             battery_request: None,
@@ -282,6 +327,8 @@ impl BandSession {
             raw_emg_frames: 0,
             raw_emg_bytes: 0,
             setup_stage: SetupStage::Link,
+            startup_activation: None,
+            startup_state_subscription: None,
             enrollment,
             ceremony,
             app_trusted: false,
@@ -331,6 +378,10 @@ impl BandSession {
     }
     pub fn streams_enabled(&self) -> bool {
         self.streams_enabled
+    }
+
+    pub fn startup_ready(&self) -> bool {
+        self.startup_ready
     }
 
     /// The shared configuration/haptics RPC sequence used by the active service.
@@ -609,6 +660,31 @@ impl BandSession {
         let mut events = self.engagement_events();
         if !self.stopping
             && self
+                .startup_activation
+                .is_some_and(|(_, deadline)| time >= deadline)
+        {
+            self.startup_activation = None;
+            self.stopping = true;
+            self.streams_enabled = false;
+            events.push(Event::StartupFailure(
+                "The band did not confirm startup activation. Try reconnecting.".into(),
+            ));
+        }
+        if !self.stopping
+            && self
+                .startup_state_subscription
+                .is_some_and(|(_, deadline)| time >= deadline)
+        {
+            self.startup_state_subscription = None;
+            self.stopping = true;
+            self.streams_enabled = false;
+            events.push(Event::StartupFailure(
+                "The band did not confirm startup device-state subscription. Try reconnecting."
+                    .into(),
+            ));
+        }
+        if !self.stopping
+            && self
                 .hand_request
                 .is_some_and(|request| time >= request.deadline)
         {
@@ -656,7 +732,7 @@ impl BandSession {
 
     /// Send one serialized haptics RPC over the already-open encrypted control channel.
     pub fn send_haptics(&mut self, command: HapticsCommand, time: f64) -> Result<Vec<u8>> {
-        if !self.streams_enabled || self.stopping || self.hand_request.is_some() {
+        if !self.startup_ready || self.stopping || self.hand_request.is_some() {
             return Err(BandError::Busy(
                 "Wait for the live Band control channel before haptics.".into(),
             ));
@@ -881,6 +957,8 @@ impl BandSession {
             return Ok(Vec::new());
         }
         self.stopping = true;
+        self.startup_activation = None;
+        self.startup_state_subscription = None;
         self.hand_request = None;
         self.raw_request = None;
         self.battery_request = None;
@@ -1125,6 +1203,38 @@ impl BandSession {
         self.encrypt(&frame)
     }
 
+    fn startup_activation_request(&mut self, time: f64) -> Result<Vec<u8>> {
+        let id = self.configuration_id + 1;
+        let config = field_int(6, 2); // DeviceState.ACTIVE, matching neural-band-poc startup.
+        let words: &[u32] = if self.configuration_id == 0 {
+            &SERVICE_OPEN
+        } else {
+            &[]
+        };
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            words,
+            &[field_int(1, id), field_bytes(5, &config)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        self.startup_activation = Some((id, time + STARTUP_TIMEOUT_SECONDS));
+        Ok(bytes)
+    }
+
+    fn startup_device_state_subscription_request(&mut self, time: f64) -> Result<Vec<u8>> {
+        let id = 4;
+        let control = field_int(16, 1); // enableDeviceState, matching startup subscription.
+        let frame = encode_frame(
+            STREAM_CHANNEL,
+            &[],
+            &[field_int(1, id), field_bytes(4, &control)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.startup_state_subscription = Some((id, time + STARTUP_TIMEOUT_SECONDS));
+        Ok(bytes)
+    }
+
     fn engagement_events(&mut self) -> Vec<Event> {
         if self.dial.engaged() == self.emitted_engagement {
             return Vec::new();
@@ -1201,6 +1311,20 @@ impl BandSession {
             if route(frame.channel) == 3 && self.setup_stage == SetupStage::DeviceInfo {
                 return Err(perr("The band rejected gesture setup. Try reconnecting."));
             }
+            if route(frame.channel) == CONFIGURATION_CHANNEL & 0x7fff
+                && self.startup_activation.is_some()
+            {
+                self.startup_activation = None;
+                return Err(perr("The band rejected startup activation. Try reconnecting."));
+            }
+            if route(frame.channel) == STREAM_CHANNEL
+                && self.startup_state_subscription.is_some()
+            {
+                self.startup_state_subscription = None;
+                return Err(perr(
+                    "The band rejected startup device-state subscription. Try reconnecting.",
+                ));
+            }
             if let Some(raw) = self.raw_request
                 && (route(frame.channel) == 7
                     || (route(frame.channel) == 5 && raw.stage != RawStage::Config))
@@ -1240,13 +1364,32 @@ impl BandSession {
             if fields.required_integer(2)? != 1 {
                 return Err(perr("The band rejected gesture setup. Try reconnecting."));
             }
-            self.setup_stage = SetupStage::Input;
-            let open = self.stream_request(2, None)?;
-            let enable = self.stream_request(3, Some(true))?;
-            let hand = self.request_hand(None, true, time)?;
-            outgoing.extend(open);
-            outgoing.extend(enable);
-            outgoing.extend(hand);
+            self.setup_stage = SetupStage::Activation;
+            outgoing.extend(self.startup_activation_request(time)?);
+            return Ok(Vec::new());
+        }
+        if kind == RPC_RESPONSE
+            && route(frame.channel) == CONFIGURATION_CHANNEL & 0x7fff
+            && self.setup_stage == SetupStage::Activation
+            && !self.stopping
+        {
+            let fields = ProtoFields::parse(&frame.payload)?;
+            if let Some((id, _)) = self.startup_activation
+                && fields.integer(1).ok() == Some(id)
+            {
+                self.startup_activation = None;
+                if !startup_activation_confirmed(frame, id) {
+                    return Err(perr(
+                        "The band did not confirm startup activation. Try reconnecting.",
+                    ));
+                }
+                self.setup_stage = SetupStage::Input;
+                let open = self.stream_request(2, None)?;
+                let enable = self.stream_request(3, Some(true))?;
+                outgoing.extend(open);
+                outgoing.extend(enable);
+                return Ok(Vec::new());
+            }
             return Ok(Vec::new());
         }
         if self.setup_stage != SetupStage::Input {
@@ -1284,6 +1427,29 @@ impl BandSession {
         if kind == RPC_RESPONSE {
             let fields = ProtoFields::parse(&frame.payload)?;
             let request = fields.integer(1)?;
+            if let Some((id, _)) = self.startup_state_subscription
+                && request == id
+            {
+                if self.stopping {
+                    return Ok(Vec::new());
+                }
+                self.startup_state_subscription = None;
+                if !startup_state_subscription_confirmed(frame, id) {
+                    return Err(perr(
+                        "The band did not confirm startup device-state subscription.",
+                    ));
+                }
+                self.startup_ready = true;
+                self.streaming = true;
+                if self.raw_emg && self.raw_request.is_none() {
+                    outgoing.extend(self.set_raw_emg_enabled(true, time)?);
+                }
+                outgoing.extend(self.request_hand(None, true, time)?);
+                return Ok(vec![Event::Connected]);
+            }
+            if request == 3 && self.startup_ready {
+                return Ok(Vec::new());
+            }
             if request == 3 || request == 5 {
                 if self.stopping {
                     return Ok(Vec::new());
@@ -1296,9 +1462,12 @@ impl BandSession {
                 if !self.streams_enabled {
                     return Err(perr("The band input subscription stopped"));
                 }
-                if request == 3 && self.raw_emg && self.raw_request.is_none() {
-                    let raw = self.set_raw_emg_enabled(true, time)?;
-                    outgoing.extend(raw);
+                if request == 3 {
+                    outgoing.extend(self.startup_device_state_subscription_request(time)?);
+                    return Ok(Vec::new());
+                }
+                if !self.startup_ready {
+                    return Ok(Vec::new());
                 }
                 if !self.streaming {
                     self.streaming = true;
@@ -1315,6 +1484,9 @@ impl BandSession {
             return Ok(Vec::new());
         }
         if self.stopping {
+            return Ok(Vec::new());
+        }
+        if !self.startup_ready && matches!(kind, RAW_EMG | GESTURE | GYRO | ORIENTATION) {
             return Ok(Vec::new());
         }
         if kind == RAW_EMG {

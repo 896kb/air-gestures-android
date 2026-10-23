@@ -4,7 +4,7 @@ use band_core::ceremony::{CeremonyHttpRequest, OwnershipCeremony};
 use band_core::datax::{DataXFrame, encode_frame};
 use band_core::events::Event;
 use band_core::identity::{point64, trust_digest};
-use band_core::proto::{ProtoFields, field_bytes as fb};
+use band_core::proto::{ProtoFields, field_bytes as fb, field_int as fi};
 use band_core::session::BandSession;
 use band_core::sim::SimBand;
 use band_core::{BandError, Result};
@@ -326,9 +326,21 @@ fn after_the_ceremony_the_session_rejoins_the_full_startup() {
         .send(&encode_frame(3, &[0x02000315], &device_ok()).unwrap())
         .unwrap()
         .1;
-    assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006]);
-    let (events, _) = peer
+    assert_eq!(channels(&info), vec![0x8006]);
+    let activation = [fi(1, 1), fi(2, 1), fb(6, &fi(6, 2))].concat();
+    let streams = peer
+        .send(&encode_frame(6, &[0x02000315], &activation).unwrap())
+        .unwrap()
+        .1;
+    assert_eq!(channels(&streams), vec![0x8005, 0x8005]);
+    let state_subscription = peer
         .send(&encode_frame(5, &[0x02000315], &status(3)).unwrap())
+        .unwrap()
+        .1;
+    assert_eq!(channels(&state_subscription), vec![0x8005]);
+    let state = [fi(1, 4), fi(2, 1), fb(5, &fi(16, 1))].concat();
+    let (events, _) = peer
+        .send(&encode_frame(5, &[0x02000315], &state).unwrap())
         .unwrap();
     assert!(connected(&events));
     assert!(peer.session.streams_enabled());

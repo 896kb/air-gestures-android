@@ -120,10 +120,11 @@ fn live_emg_can_be_enabled_and_disabled_without_replacing_gesture_streams() {
 #[test]
 fn a_saved_emg_preference_starts_gestures_before_adding_readings() {
     let mut peer = Peer::legacy(true, true);
-    assert!(!peer.startup.iter().any(|frame| frame.channel == 0x8007));
+    assert!(peer.startup.iter().any(|frame| frame.channel == 0x8007));
+    assert!(peer.session.startup_ready());
     let ack = peer.exchange(5, RPC, &stream_reply(3, 0), 0.0).unwrap();
-    assert!(connected(&ack.0));
-    assert_eq!(channels(&ack.1), vec![0x8007]);
+    assert!(!connected(&ack.0));
+    assert!(ack.1.is_empty());
 }
 
 #[test]

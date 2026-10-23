@@ -58,7 +58,7 @@ class SetupActivity : Screen() {
         val bandVibration = Prefs(this).bandVibration
         steps.addView(settingRow(
             "Band vibration",
-            "Use the Band for controls and profile feedback",
+            "Use the Band for controls, profile feedback and volume detents",
             pill(if (bandVibration) "On" else "Off") {
                 BandService.instance?.setBandVibration(!bandVibration)
                     ?: Prefs(this).let { it.bandVibration = !bandVibration }

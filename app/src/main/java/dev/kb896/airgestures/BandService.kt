@@ -28,7 +28,7 @@ class BandService : Service(), BandLink.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        actions = Actions(this, ::onLog)
+        actions = Actions(this, ::volumeDetent, ::onLog)
         link = BandLink(this, this)
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
@@ -98,7 +98,11 @@ class BandService : Service(), BandLink.Listener {
         val changed = paused != state.value.paused
         prefs.paused = paused
         link.setPaused(paused)
-        if (changed && feedback && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
+        if (changed && feedback && state.value.phase == Phase.CONNECTED) {
+            link.controlsHaptics(paused)
+        } else {
+            link.syncControlsHaptics(paused)
+        }
         pausedChanged(paused)
     }
 
@@ -106,6 +110,11 @@ class BandService : Service(), BandLink.Listener {
     fun setBandVibration(enabled: Boolean) {
         prefs.bandVibration = enabled
         link.setBandVibration(enabled)
+    }
+
+    /** Route successful phone volume changes to the connected Band when enabled. */
+    private fun volumeDetent() {
+        if (prefs.bandVibration) link.volumeDetent()
     }
 
     /** When the controls were last switched by the app rather than by the band. */
@@ -262,20 +271,14 @@ class BandService : Service(), BandLink.Listener {
             prefs.practising = true
         }
         practice = lesson
-        if (state.value.paused) {
-            setPaused(false, feedback = false)
-            link.setBandVibration(prefs.bandVibration)
-        }
+        if (state.value.paused) setPaused(false, feedback = false)
     }
 
     fun endPractice() {
         practice = null
         if (!prefs.practising) return
         prefs.practising = false
-        if (state.value.paused != prefs.practiceWasPaused) {
-            setPaused(prefs.practiceWasPaused, feedback = false)
-            link.setBandVibration(prefs.bandVibration)
-        }
+        if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused, feedback = false)
     }
 
     override fun onLog(line: String) = main.post {

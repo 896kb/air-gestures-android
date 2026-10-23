@@ -5,6 +5,27 @@ use band_core::proto::{ProtoFields, field_bytes as fb, field_int as fi};
 use band_core::session::BandSession;
 use common::*;
 
+fn after_device_info() -> Peer {
+    let mut peer = Peer::legacy(false, false);
+    peer.exchange(0x8001, LINK, &ready(), 0.0).unwrap();
+    peer.exchange(3, RPC, &device_ok(), 0.0).unwrap();
+    peer
+}
+
+fn activate(peer: &mut Peer) -> Vec<band_core::datax::DataXFrame> {
+    let response = [fi(1, 1), fi(2, 1), fb(6, &fi(6, 2))].concat();
+    peer.exchange(6, RPC, &response, 0.0).unwrap().1
+}
+
+fn enable_streams(peer: &mut Peer) -> (Vec<band_core::events::Event>, Vec<band_core::datax::DataXFrame>) {
+    peer.exchange(5, RPC, &status(3), 0.0).unwrap()
+}
+
+fn enable_device_state(peer: &mut Peer) -> (Vec<band_core::events::Event>, Vec<band_core::datax::DataXFrame>) {
+    let response = [fi(1, 4), fi(2, 1), fb(5, &fi(16, 1))].concat();
+    peer.exchange(5, RPC, &response, 0.0).unwrap()
+}
+
 #[test]
 fn the_request_opens_encryption_with_parameters_31() {
     let session = BandSession::new(None, None, false);
@@ -50,15 +71,25 @@ fn startup_waits_for_its_link_and_device_info_before_opening_input() {
         .unwrap();
     assert!(wrong_id.1.is_empty());
     let accepted = peer.exchange(3, RPC, &device_ok(), 7.0).unwrap();
-    assert_eq!(channels(&accepted.1), vec![0x8005, 0x8005, 0x8006]);
+    assert_eq!(channels(&accepted.1), vec![0x8006]);
     assert!(accepted.0.is_empty() && !peer.session.streams_enabled());
+    let activation = ProtoFields::parse(&accepted.1[0].payload).unwrap();
+    assert_eq!(ProtoFields::parse(activation.bytes(5).unwrap()).unwrap().integer(6).unwrap(), 2);
+    let active = activate(&mut peer);
+    assert_eq!(channels(&active), vec![0x8005, 0x8005]);
+    let (events, subscription) = enable_streams(&mut peer);
+    assert!(events.is_empty() && !peer.session.startup_ready());
+    assert_eq!(channels(&subscription), vec![0x8005]);
+    let (events, hand_request) = enable_device_state(&mut peer);
+    assert!(connected(&events) && peer.session.startup_ready());
+    assert_eq!(channels(&hand_request), vec![0x8006]);
     let repeated_link = peer.exchange(0x8001, LINK, &ready(), 7.0).unwrap();
     let repeated_device = peer.exchange(3, RPC, &device_ok(), 7.0).unwrap();
-    assert!(repeated_link.0.is_empty() && repeated_link.1.is_empty());
-    assert!(repeated_device.0.is_empty() && repeated_device.1.is_empty());
-    assert!(peer.session.tick(108.0).is_empty());
+    assert!(!connected(&repeated_link.0) && repeated_link.1.is_empty());
+    assert!(!connected(&repeated_device.0) && repeated_device.1.is_empty());
+    assert!(peer.session.tick(3.0).is_empty());
     assert_eq!(
-        hands(&peer.hand_reply(1, Some(0), 1, 6, 9.0).unwrap().0),
+        hands(&peer.hand_reply(2, Some(0), 1, 6, 4.0).unwrap().0),
         vec![band_core::events::Hand::Right]
     );
 }
@@ -96,13 +127,41 @@ fn startup_ignores_input_until_device_info_succeeds() {
             peer.exchange(0x8001, LINK, &fi(1, 1), 0.0).unwrap();
         }
         let device = peer.exchange(3, RPC, &device_ok(), 0.0).unwrap();
-        assert_eq!(channels(&device.1), vec![0x8005, 0x8005, 0x8006]);
+        assert_eq!(channels(&device.1), vec![0x8006]);
+        let active = peer.exchange(6, RPC, &[fi(1, 1), fi(2, 1), fb(6, &fi(6, 2))].concat(), 0.0).unwrap();
+        assert_eq!(channels(&active.1), vec![0x8005, 0x8005]);
         let enabled = peer.exchange(5, RPC, &status(3), 0.0).unwrap();
-        assert!(connected(&enabled.0));
-        assert!(peer.session.streams_enabled());
+        assert!(enabled.0.is_empty() && peer.session.streams_enabled());
+        assert!(!peer.session.startup_ready());
+        let state = peer.exchange(5, RPC, &[fi(1, 4), fi(2, 1), fb(5, &fi(16, 1))].concat(), 0.0).unwrap();
+        assert!(connected(&state.0) && peer.session.startup_ready());
         peer.gyro(1_010_000, 0.03).unwrap();
         assert_eq!(peer.session.motion_messages(), 1);
     }
+}
+
+#[test]
+fn startup_requires_active_and_device_state_acknowledgements_and_times_out() {
+    let mut rejected = after_device_info();
+    let wrong_state = [fi(1, 1), fi(2, 1), fb(6, &fi(6, 1))].concat();
+    assert!(rejected.exchange(6, RPC, &wrong_state, 1.0).is_err());
+    assert!(!rejected.session.startup_ready());
+
+    let mut active = after_device_info();
+    assert!(matches!(
+        active.session.tick(108.0).as_slice(),
+        [band_core::events::Event::StartupFailure(_)]
+    ));
+    assert!(!active.session.startup_ready());
+
+    let mut subscription = after_device_info();
+    activate(&mut subscription);
+    enable_streams(&mut subscription);
+    assert!(!subscription.session.startup_ready());
+    assert!(matches!(
+        subscription.session.tick(108.0).as_slice(),
+        [band_core::events::Event::StartupFailure(_)]
+    ));
 }
 
 #[test]
@@ -111,7 +170,8 @@ fn rejected_startup_channels_fail_immediately_without_reporting_ready() {
     peer.exchange(0x8001, LINK, &fi(1, 1), 0.0).unwrap();
     assert!(peer.exchange(3, REJECTED, &[], 0.0).is_err());
     assert!(!peer.session.streams_enabled());
-    let mut subscribing = Peer::legacy(true, false);
+    let mut subscribing = after_device_info();
+    activate(&mut subscribing);
     let unrelated = subscribing.exchange(7, REJECTED, &[], 0.0).unwrap();
     assert!(unrelated.0.is_empty() && unrelated.1.is_empty());
     assert!(subscribing.exchange(5, REJECTED, &[], 0.0).is_err());
@@ -149,7 +209,7 @@ fn native_handshake_subscribes_and_stops_the_same_streams_on_the_same_channel() 
     let mut peer = Peer::legacy(true, false);
     assert_eq!(
         channels(&peer.startup),
-        vec![0x8002, 0x8001, 0x8003, 0x8005, 0x8005, 0x8006]
+        vec![0x8002, 0x8001, 0x8003, 0x8006, 0x8005, 0x8005, 0x8005, 0x8006]
     );
     assert_eq!(peer.startup[0].words, vec![0x81000024, 0x02003000]);
     assert_eq!(peer.startup[1].words, vec![0x02001000]);
@@ -157,9 +217,12 @@ fn native_handshake_subscribes_and_stops_the_same_streams_on_the_same_channel() 
     assert_eq!(end.integer(1).unwrap(), 1);
     assert_eq!(end.bytes(2).unwrap().len(), 16);
     assert_eq!(peer.startup[3].words, SERVICE_OPEN.to_vec());
-    assert!(peer.startup[4].words.is_empty());
+    let activation = ProtoFields::parse(&peer.startup[3].payload).unwrap();
+    assert_eq!(ProtoFields::parse(activation.bytes(5).unwrap()).unwrap().integer(6).unwrap(), 2);
+    assert_eq!(peer.startup[4].words, SERVICE_OPEN.to_vec());
+    assert!(peer.startup[5].words.is_empty());
     let enabled = ProtoFields::parse(
-        ProtoFields::parse(&peer.startup[4].payload)
+        ProtoFields::parse(&peer.startup[5].payload)
             .unwrap()
             .bytes(4)
             .unwrap(),
@@ -169,6 +232,9 @@ fn native_handshake_subscribes_and_stops_the_same_streams_on_the_same_channel() 
         assert_eq!(enabled.integer(field).unwrap(), 1);
     }
     assert!(!enabled.contains(2));
+    let subscription = ProtoFields::parse(&peer.startup[6].payload).unwrap();
+    assert_eq!(subscription.integer(1).unwrap(), 4);
+    assert_eq!(ProtoFields::parse(subscription.bytes(4).unwrap()).unwrap().integer(16).unwrap(), 1);
     let stop = peer.session.stop().unwrap();
     let frames = peer.requests(&stop).unwrap();
     let frame = &frames[0];
@@ -199,10 +265,14 @@ fn late_subscription_replies_do_not_interrupt_shutdown() {
             [fi(2, 1), fb(5, &flags_off())].concat(),
         ];
         for reply in replies {
-            let mut peer = Peer::legacy(true, false);
+            let mut peer = if request_id == 3 {
+                let mut peer = after_device_info();
+                activate(&mut peer);
+                peer
+            } else {
+                Peer::legacy(true, false)
+            };
             if request_id == 5 {
-                let ready = peer.exchange(5, RPC, &status(3), 0.0).unwrap();
-                assert!(connected(&ready.0));
                 let query = peer.session.query_stream_state().unwrap();
                 assert!(!peer.requests(&query).unwrap().is_empty());
             }
@@ -227,8 +297,8 @@ fn late_subscription_replies_do_not_interrupt_shutdown() {
 #[test]
 fn a_quiet_band_stays_connected_through_acknowledged_status_queries() {
     let mut peer = Peer::legacy(true, false);
-    let started = peer.send(RPC, &status(3), 0.0).unwrap();
-    assert!(connected(&started) && heartbeat(&started));
+    let started = peer.send(RPC, &status(3), 2.0).unwrap();
+    assert!(!connected(&started) && heartbeat(&started));
     assert!(peer.session.streams_enabled());
     assert_eq!(peer.session.motion_messages(), 0);
     let query = peer.session.query_stream_state().unwrap();
@@ -239,7 +309,7 @@ fn a_quiet_band_stays_connected_through_acknowledged_status_queries() {
     assert_eq!(fields.integer(1).unwrap(), 5);
     assert!(fields.bytes(4).unwrap().is_empty());
     let reply = peer.send(RPC, &status(5), 2.0).unwrap();
-    assert!(heartbeat(&reply) && !connected(&reply));
+    assert!(!connected(&reply));
     assert!(movement(&reply).is_empty());
     peer.session.stop().unwrap();
     assert!(peer.session.query_stream_state().unwrap().is_empty());
@@ -248,20 +318,24 @@ fn a_quiet_band_stays_connected_through_acknowledged_status_queries() {
 #[test]
 fn another_rpc_channel_cannot_acknowledge_the_input_subscription() {
     for channel in [7u16, 0x8005] {
-        let mut peer = Peer::legacy(true, false);
+        let mut peer = after_device_info();
+        activate(&mut peer);
         let unrelated = peer.exchange(channel, RPC, &status(3), 0.0).unwrap();
         assert!(unrelated.0.is_empty() && unrelated.1.is_empty());
         assert!(!peer.session.streams_enabled());
         let accepted = peer.exchange(5, RPC, &status(3), 0.0).unwrap();
-        assert!(connected(&accepted.0));
+        assert!(accepted.0.is_empty());
         assert!(peer.session.streams_enabled());
+        let state = peer.exchange(5, RPC, &[fi(1, 4), fi(2, 1), fb(5, &fi(16, 1))].concat(), 0.0).unwrap();
+        assert!(connected(&state.0));
     }
 }
 
 #[test]
 fn rejected_subscriptions_fail_without_reporting_a_ready_connection() {
-    let mut peer = Peer::legacy(true, false);
-    assert!(peer.send(RPC, &[fi(1, 3), fi(2, 2)].concat(), 0.0).is_err());
+    let mut peer = after_device_info();
+    activate(&mut peer);
+    assert!(peer.exchange(5, REJECTED, &[], 0.0).is_err());
     assert!(!peer.session.streams_enabled());
 }
 

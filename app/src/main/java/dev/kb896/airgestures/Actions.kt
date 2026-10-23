@@ -25,6 +25,8 @@ import android.view.KeyEvent
 /** Runs the bridge's action names on the phone. */
 class Actions(
     private val context: Context,
+    /** A successful media volume adjustment gets a short Band detent. */
+    private val volumeDetent: () -> Unit = {},
     /** Where a sequence's failing steps are told (the activity log). */
     private val log: (String) -> Unit = {},
 ) {
@@ -394,8 +396,13 @@ class Actions(
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */
-    private fun volume(direction: Int) =
+    private fun volume(direction: Int) {
+        val before = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
         audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+        if (direction != AudioManager.ADJUST_TOGGLE_MUTE &&
+            audio.getStreamVolume(AudioManager.STREAM_MUSIC) != before
+        ) volumeDetent()
+    }
 
     /**
      * Screen brightness in 5% steps (as the desktop). Needs "Modify system
