@@ -216,10 +216,9 @@ impl Config {
     /// switch profiles; absent = off).
     pub fn apply_mapping(&mut self, mapping: &str) {
         self.gestures.apply_mapping(mapping);
-        self.band.profile_triples = mapping.split(';').any(|pair| {
-            pair.split_once('=')
-                .is_some_and(|(key, value)| key.trim() == "triples" && value.trim() == "profiles")
-        });
+        self.band.profile_triples = mapping
+            .split(';')
+            .any(|pair| pair.split_once('=').is_some_and(|(key, value)| key.trim() == "triples" && value.trim() == "profiles"));
         for pair in mapping.split(';') {
             if let Some(("hand", hand)) = pair.split_once('=') {
                 self.band.hand = match hand.trim() {
