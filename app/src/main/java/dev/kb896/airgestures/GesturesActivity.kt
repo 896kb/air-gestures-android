@@ -89,7 +89,7 @@ class GesturesActivity : GestureScreen() {
                 render()
             }.first))
             val vibrate = Profiles.vibrate(this)
-            profiles.addView(settingRow("Vibrate", "Once for the next profile, twice for the previous", pill(if (vibrate) "On" else "Off") {
+            profiles.addView(settingRow("Vibrate", "On the Band: once for next, twice for previous", pill(if (vibrate) "On" else "Off") {
                 Profiles.setVibrate(applicationContext, !vibrate)
                 render()
             }.first))

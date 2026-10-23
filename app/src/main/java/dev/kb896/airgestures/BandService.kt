@@ -92,12 +92,20 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    fun setPaused(paused: Boolean) {
+    fun setPaused(paused: Boolean, feedback: Boolean = true) {
         // Asked for (button, tile, widget, notification, a lesson): not a middle hold.
         commandedAt = android.os.SystemClock.uptimeMillis()
+        val changed = paused != state.value.paused
         prefs.paused = paused
         link.setPaused(paused)
+        if (changed && feedback && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
         pausedChanged(paused)
+    }
+
+    /** Change the Band's built-in gesture feedback setting. */
+    fun setBandVibration(enabled: Boolean) {
+        prefs.bandVibration = enabled
+        link.setBandVibration(enabled)
     }
 
     /** When the controls were last switched by the app rather than by the band. */
@@ -162,19 +170,8 @@ class BandService : Service(), BandLink.Listener {
         remap()
         Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
         if (Profiles.speak(this)) actions.announce(profile.name)
-        if (Profiles.vibrate(this)) buzz(times = if (back) 2 else 1)
+        if (Profiles.vibrate(this) && prefs.bandVibration) link.profileHaptics(previous = back)
         onLog("profile: ${profile.name}")
-    }
-
-    /** One short buzz, or two (the previous profile). */
-    private fun buzz(times: Int) {
-        val vibrator = getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
-        val effect = if (times == 1) {
-            android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
-        } else {
-            android.os.VibrationEffect.createWaveform(longArrayOf(0, 40, 90, 40), -1)
-        }
-        runCatching { vibrator.vibrate(effect) }
     }
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
@@ -195,6 +192,7 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
+        val pausedBefore = state.value.paused
         var paused = status.optBoolean("paused")
         val lesson = practice
         // A flip to off within a moment of the app switching the controls is that switch
@@ -204,9 +202,13 @@ class BandService : Service(), BandLink.Listener {
             // The middle hold in a lesson: it counts, but the controls stay on.
             lesson.held()
             link.setPaused(false)
+            link.setBandVibration(prefs.bandVibration)
             paused = false
         }
         if (paused != prefs.paused) prefs.paused = paused
+        if (paused != pausedBefore && lesson == null && state.value.phase == Phase.CONNECTED) {
+            link.controlsHaptics(paused)
+        }
         if (paused != state.value.paused) pausedChanged(paused)
         val before = state.value
         state.update {
@@ -230,14 +232,15 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onActions(actions: List<String>) = main.post {
+        val profile = Profiles.active(this)
         // In a lesson nothing runs; the lesson sees what would have.
         practice?.let { lesson -> actions.forEach(lesson::action) } ?: actions.forEach { action ->
-            this.actions.run(action)?.let(::onLog)
+            this.actions.run(action, profile)?.let(::onLog)
         }
     }.let {}
 
     /** Run one action as a gesture would (e.g. a sequence's Try it); a failure goes to the log. */
-    fun runAction(action: String) = actions.run(action)?.let(::onLog)
+    fun runAction(action: String) = actions.run(action, Profiles.active(this))?.let(::onLog)
 
     /** What a practice lesson hears from the band while it's open. */
     interface Practice {
@@ -259,14 +262,20 @@ class BandService : Service(), BandLink.Listener {
             prefs.practising = true
         }
         practice = lesson
-        if (state.value.paused) setPaused(false)
+        if (state.value.paused) {
+            setPaused(false, feedback = false)
+            link.setBandVibration(prefs.bandVibration)
+        }
     }
 
     fun endPractice() {
         practice = null
         if (!prefs.practising) return
         prefs.practising = false
-        if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused)
+        if (state.value.paused != prefs.practiceWasPaused) {
+            setPaused(prefs.practiceWasPaused, feedback = false)
+            link.setBandVibration(prefs.bandVibration)
+        }
     }
 
     override fun onLog(line: String) = main.post {

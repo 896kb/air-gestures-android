@@ -51,6 +51,14 @@ Screen actions and opening apps need the app's accessibility service; brightness
 playing app's media session; no notifications are read). The app shows each under Setup
 when a gesture needs it.
 
+Band haptics are on by default in Setup; turning the setting off silences app cues and sends
+pattern 2. Controls off sends two 80 ms pulses at amplitude 255, then pattern 2; controls on
+sends pattern 1, then a 300 ms pulse at amplitude 255. The existing
+profile feedback option now uses the Band. Each profile can also require a connected Bluetooth
+audio output for play/pause, track changes, and seek; this option defaults off. Haptics protocol
+work is based on [`neural-band-poc`](https://github.com/iinsaane/neural-band-poc); the pulse
+feel and timing still need confirmation on the Band.
+
 ## Build
 
 Needs the Android SDK (platform 36) and NDK, JDK 21, and Rust with the

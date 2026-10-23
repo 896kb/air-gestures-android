@@ -55,6 +55,16 @@ class SetupActivity : Screen() {
     private fun render() {
         drawnClaiming = BandService.state.value.claiming
         steps.removeAllViews()
+        val bandVibration = Prefs(this).bandVibration
+        steps.addView(settingRow(
+            "Band vibration",
+            "Use the Band for controls and profile feedback",
+            pill(if (bandVibration) "On" else "Off") {
+                BandService.instance?.setBandVibration(!bandVibration)
+                    ?: Prefs(this).let { it.bandVibration = !bandVibration }
+                render()
+            }.first,
+        ))
         Setup.steps(this).forEach { steps.addView(stepRow(it)) }
     }
 
@@ -188,6 +198,7 @@ class SetupActivity : Screen() {
             Profiles.speak(this),
             Profiles.vibrate(this),
             Profiles.sequences(this),
+            Prefs(this).bandVibration,
         )
     }
 
@@ -200,7 +211,9 @@ class SetupActivity : Screen() {
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
+        Prefs(this).bandVibration = settings.bandVibration
         BandService.instance?.remap()
+        BandService.instance?.setBandVibration(settings.bandVibration)
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()
     }

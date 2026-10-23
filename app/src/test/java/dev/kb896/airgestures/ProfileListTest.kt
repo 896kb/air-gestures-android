@@ -86,6 +86,14 @@ class ProfileListTest {
         assertEquals(list, ProfileList.fromJson(json.first, json.second, list.picked))
     }
 
+    @Test fun `music Bluetooth restriction is per profile and old JSON defaults off`() {
+        val list = three().withMusicBluetoothOnly("p2", true)
+        val encoded = list.toJson().first
+        assertTrue(ProfileList.fromJson(encoded, "{}", "p1").profile("p2")!!.musicBluetoothOnly)
+        val oldJson = encoded.replace(",\"musicBluetoothOnly\":true", "")
+        assertFalse(ProfileList.fromJson(oldJson, "{}", "p1").profile("p2")!!.musicBluetoothOnly)
+    }
+
     @Test fun pickingMakesAProfileTheManualOne() {
         val (list, second) = ProfileList.migrated(mapOf(), "volume").added(mapOf(), "volume")
         val picked = list.picking(second.id)

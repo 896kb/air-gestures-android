@@ -21,6 +21,12 @@ object Bridge {
     /** Status snapshot JSON: connected, paused, battery, charging, hand, dial, last_gesture, last_action, gestures. */
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
+    /** Apply the band's built-in gesture feedback setting; returns bytes for the active link. */
+    @JvmStatic external fun setBandVibration(handle: Long, enabled: Boolean): ByteArray
+    /** Report a controls state edge; returns bytes for the active link. */
+    @JvmStatic external fun controlsHaptics(handle: Long, paused: Boolean): ByteArray
+    /** Send the optional profile-switch cue; returns bytes for the active link. */
+    @JvmStatic external fun profileHaptics(handle: Long, previous: Boolean): ByteArray
     @JvmStatic external fun setDial(handle: Long, dial: String)
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)

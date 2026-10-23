@@ -66,11 +66,20 @@ class Actions(
     }
 
     /** Returns a line for the activity log when the action couldn't run. */
-    fun run(action: String): String? {
+    fun run(action: String, profile: Profile = Profiles.active(context)): String? {
         when (action) {
-            "media.play_pause" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-            "media.next" -> mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
-            "media.previous" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            "media.play_pause" -> {
+                if (!mayControlMusic(profile)) return musicGateMessage()
+                mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+            }
+            "media.next" -> {
+                if (!mayControlMusic(profile)) return musicGateMessage()
+                mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
+            }
+            "media.previous" -> {
+                if (!mayControlMusic(profile)) return musicGateMessage()
+                mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+            }
             "volume.up" -> volume(AudioManager.ADJUST_RAISE)
             "volume.down" -> volume(AudioManager.ADJUST_LOWER)
             "volume.mute" -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
@@ -80,8 +89,8 @@ class Actions(
             "screen.back", "screen.home", "screen.recents" ->
                 return screen(action)
             "torch.toggle" -> return torch()
-            "dial.seek_forward" -> return seek(+SEEK_STEP)
-            "dial.seek_back" -> return seek(-SEEK_STEP)
+            "dial.seek_forward" -> return if (mayControlMusic(profile)) seek(+SEEK_STEP) else musicGateMessage()
+            "dial.seek_back" -> return if (mayControlMusic(profile)) seek(-SEEK_STEP) else musicGateMessage()
             "assistant.voice" -> return assistant()
             "notification.dismiss" -> return dismiss()
             "notification.read" -> return read()
@@ -98,13 +107,21 @@ class Actions(
                 action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
                 action.startsWith(Tap.PREFIX) -> tap(action)
                 action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
-                action.startsWith(Sequences.PREFIX) -> sequence(action.removePrefix(Sequences.PREFIX))
+                action.startsWith(Sequences.PREFIX) -> sequence(action.removePrefix(Sequences.PREFIX), profile)
                 action.startsWith("${Mappings.AUTOMATION}:") -> automation(action.substringAfter(':'))
                 else -> "unknown action $action"
             }
         }
         return null
     }
+
+    private fun mayControlMusic(profile: Profile) =
+        MusicOutput.allowed(
+            profile.musicBluetoothOnly,
+            audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }.toIntArray(),
+        )
+
+    private fun musicGateMessage() = "music controls need a Bluetooth audio device connected"
 
     /** A key press to whichever media session is active. */
     private fun mediaKey(code: Int) {
@@ -203,7 +220,7 @@ class Actions(
      * Run a sequence's steps in order: actions, and waits between them. Steps without a wait
      * get a short pause, so the screen can catch up (an app opening, a list scrolling).
      */
-    private fun sequence(id: String): String? {
+    private fun sequence(id: String, profile: Profile): String? {
         val sequence = Profiles.sequences(context).get(id) ?: return "that sequence is gone"
         if (running != null) return "$runningName is still running"
         running = id
@@ -215,7 +232,7 @@ class Actions(
             }
             val step = sequence.steps[at]
             val wait = Sequences.waitMs(step)
-            if (wait == null) run(step)?.let { log("${sequence.name}, step ${at + 1}: $it") }
+            if (wait == null) run(step, profile)?.let { log("${sequence.name}, step ${at + 1}: $it") }
             main.postDelayed({ step(at + 1) }, wait ?: (STEP_PAUSE_MS + busyMs(step)))
         }
         step(0)

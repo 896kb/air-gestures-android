@@ -22,6 +22,7 @@ use crate::datax::{DataXFrame, DataXReceiver, be16, be32, encode_frame};
 use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
+use crate::haptics::HapticsCommand;
 use crate::identity::{EnrollmentIdentity, trust_digest};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
@@ -103,6 +104,21 @@ fn all_set(flags: &ProtoFields, fields: &[u32], value: u64) -> Result<bool> {
         }
     }
     Ok(true)
+}
+
+fn haptics_response_status(fields: &ProtoFields, expected_response: u32) -> (bool, Option<bool>) {
+    let rpc_success = fields.integer(2).ok() == Some(1);
+    let haptics_success = fields
+        .bytes(18)
+        .ok()
+        .and_then(|bytes| ProtoFields::parse(bytes).ok())
+        .filter(|response| response.bytes(expected_response).is_ok())
+        .and_then(|response| {
+            response
+                .contains(1)
+                .then(|| response.integer(1).ok().is_some_and(|code| code == 0))
+        });
+    (rpc_success, haptics_success)
 }
 
 fn random<const N: usize>() -> [u8; N] {
@@ -207,6 +223,7 @@ pub struct BandSession {
     end_link_sent: bool,
     configuration_id: u64,
     hand_request: Option<HandRequest>,
+    haptics_request: Option<(u64, f64, u32)>,
     hand: Option<Hand>,
 }
 
@@ -272,6 +289,7 @@ impl BandSession {
             end_link_sent: false,
             configuration_id: 0,
             hand_request: None,
+            haptics_request: None,
             hand: None,
         }
     }
@@ -313,6 +331,11 @@ impl BandSession {
     }
     pub fn streams_enabled(&self) -> bool {
         self.streams_enabled
+    }
+
+    /// The shared configuration/haptics RPC sequence used by the active service.
+    pub fn configuration_sequence(&self) -> u32 {
+        self.configuration_id as u32
     }
     pub fn hand(&self) -> Option<Hand> {
         self.hand
@@ -613,7 +636,47 @@ impl BandSession {
                 "The band didn't confirm the EMG change. Turn readings off, then try again.".into(),
             ));
         }
+        if !self.stopping
+            && self
+                .haptics_request
+                .is_some_and(|(_, deadline, _)| time >= deadline)
+        {
+            let (id, _, _) = self
+                .haptics_request
+                .take()
+                .expect("checked pending haptics");
+            events.push(Event::HapticsFinished {
+                sequence: id as u32,
+                rpc_success: false,
+                haptics_success: None,
+            });
+        }
         events
+    }
+
+    /// Send one serialized haptics RPC over the already-open encrypted control channel.
+    pub fn send_haptics(&mut self, command: HapticsCommand, time: f64) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() {
+            return Err(BandError::Busy(
+                "Wait for the live Band control channel before haptics.".into(),
+            ));
+        }
+        if self.haptics_request.is_some() {
+            return Err(BandError::Busy(
+                "Wait for the previous haptics response.".into(),
+            ));
+        }
+        let id = self.configuration_id + 1;
+        let payload = command.encode_rpc(id as u32)?;
+        let frame = encode_frame(CONFIGURATION_CHANNEL, &[], &payload)?;
+        let encrypted = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        let expected_response = match command {
+            HapticsCommand::Vibrate { .. } => 2,
+            HapticsCommand::Perform { .. } => 3,
+        };
+        self.haptics_request = Some((id, time + 5.0, expected_response));
+        Ok(encrypted)
     }
 
     /// Update the existing input subscription. Gesture and motion flags stay on.
@@ -1194,6 +1257,18 @@ impl BandSession {
                 return Ok(Vec::new());
             }
             let fields = ProtoFields::parse(&frame.payload)?;
+            if let Some((id, _deadline, expected_response)) = self.haptics_request
+                && fields.integer(1).ok() == Some(id)
+            {
+                self.haptics_request = None;
+                let (rpc_success, haptics_success) =
+                    haptics_response_status(&fields, expected_response);
+                return Ok(vec![Event::HapticsFinished {
+                    sequence: id as u32,
+                    rpc_success,
+                    haptics_success,
+                }]);
+            }
             return self.receive_hand(&fields, time, outgoing);
         }
         if kind == RPC_RESPONSE
@@ -1390,5 +1465,57 @@ impl BandSession {
                 Ok(Some(vec![Event::RawEmgState(pending.enabled)]))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod haptics_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn haptics_timeout_releases_the_single_pending_slot() {
+        let mut session = BandSession::new(None, None, false);
+        session.haptics_request = Some((9, 5.0, 2));
+        assert!(matches!(
+            session.tick(5.0).as_slice(),
+            [Event::HapticsFinished {
+                sequence: 9,
+                rpc_success: false,
+                haptics_success: None
+            }]
+        ));
+        assert!(session.haptics_request.is_none());
+        assert!(session.tick(10.0).is_empty());
+    }
+
+    #[test]
+    fn outer_rpc_and_optional_detailed_haptics_status_stay_separate() {
+        let outer_only =
+            ProtoFields::parse(&[field_int(2, 1), field_bytes(18, &field_bytes(3, &[]))].concat())
+                .unwrap();
+        assert_eq!(haptics_response_status(&outer_only, 3), (true, None));
+
+        let detailed_success = ProtoFields::parse(
+            &[
+                field_int(2, 1),
+                field_bytes(18, &[field_int(1, 0), field_bytes(3, &[])].concat()),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        assert_eq!(
+            haptics_response_status(&detailed_success, 3),
+            (true, Some(true))
+        );
+
+        let wrong_arm = ProtoFields::parse(
+            &[
+                field_int(2, 1),
+                field_bytes(18, &[field_int(1, 0), field_bytes(2, &[])].concat()),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        assert_eq!(haptics_response_status(&wrong_arm, 3), (true, None));
     }
 }

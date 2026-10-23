@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.SystemClock
 import org.json.JSONObject
 import java.io.File
+import java.util.ArrayDeque
 import java.util.UUID
 import kotlin.concurrent.thread
 
@@ -52,6 +53,8 @@ class BandLink(
     private var socket: BluetoothSocket? = null
     private var handle = 0L
     private var lastStatus = ""
+    private val hapticCommands = ArrayDeque<PendingHaptic>()
+    private var vibrationSyncedGeneration = -1
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
     @Volatile private var pending = false
     @Volatile private var wanted = false
@@ -75,6 +78,22 @@ class BandLink(
     fun setPaused(paused: Boolean) = synchronized(lock) {
         if (handle != 0L) Bridge.setPaused(handle, paused, now())
         publishStatus()
+    }
+
+    fun setBandVibration(enabled: Boolean) = synchronized(lock) {
+        enqueueHaptics(HapticCommand.BandVibration(enabled))
+    }
+
+    fun controlsHaptics(paused: Boolean) = synchronized(lock) {
+        enqueueHaptics(HapticCommand.Controls(paused))
+    }
+
+    fun profileHaptics(previous: Boolean) = synchronized(lock) {
+        enqueueHaptics(HapticCommand.Profile(previous))
+    }
+
+    private fun enqueueHaptics(command: HapticCommand) {
+        if (handle != 0L) hapticCommands.addLast(PendingHaptic(generation, command))
     }
 
     fun setMapping(mapping: String) = synchronized(lock) {
@@ -108,19 +127,21 @@ class BandLink(
 
     /** Drop everything from the current attempt; `connect` starts a fresh one. */
     private fun teardown() {
-        generation++
-        main.removeCallbacksAndMessages(null)
-        runCatching { adapter?.bluetoothLeScanner?.stopScan(scan) }
-        runCatching { socket?.close() }
-        runCatching { gatt?.disconnect() }
-        runCatching { gatt?.close() }
-        socket = null
-        gatt = null
         synchronized(lock) {
+            generation++
+            vibrationSyncedGeneration = -1
+            hapticCommands.clear()
+            runCatching { socket?.close() }
+            runCatching { gatt?.disconnect() }
+            runCatching { gatt?.close() }
+            socket = null
+            gatt = null
             if (handle != 0L) Bridge.close(handle)
             handle = 0L
             lastStatus = ""
         }
+        main.removeCallbacksAndMessages(null)
+        runCatching { adapter?.bluetoothLeScanner?.stopScan(scan) }
     }
 
     private fun retry(delayMs: Long) {
@@ -146,20 +167,27 @@ class BandLink(
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            if (gatt != this@BandLink.gatt) return
+            val attempt = synchronized(lock) {
+                if (gatt != this@BandLink.gatt) return
+                generation
+            }
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    listener.onPhase(Phase.CONNECTING, gatt.device.name)
-                    gatt.discoverServices()
+                    synchronized(lock) {
+                        if (attempt != generation || gatt != this@BandLink.gatt) return
+                        listener.onPhase(Phase.CONNECTING, gatt.device.name)
+                        gatt.discoverServices()
+                    }
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     log("the band disconnected (status $status)")
-                    retry(2000)
+                    main.post { if (attempt == generation) retry(2000) }
                 }
             }
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (!synchronized(lock) { gatt == this@BandLink.gatt }) return
             val characteristic = gatt.getService(BAND_SERVICE)?.getCharacteristic(PSM_CHARACTERISTIC)
             if (characteristic == null) {
                 log("this device has no Neural Band input service")
@@ -176,13 +204,16 @@ class BandLink(
             value: ByteArray,
             status: Int,
         ) {
+            val attempt = synchronized(lock) {
+                if (gatt != this@BandLink.gatt) return
+                generation
+            }
             if (status != BluetoothGatt.GATT_SUCCESS || value.size != 2) {
                 log("reading the input channel failed (status $status)")
                 retry(5000)
                 return
             }
             val psm = (value[0].toInt() and 0xff) or ((value[1].toInt() and 0xff) shl 8)
-            val attempt = generation
             thread(name = "band-l2cap") { runChannel(gatt.device, psm, attempt) }
         }
     }
@@ -211,8 +242,10 @@ class BandLink(
     }
 
     private fun runChannel(device: BluetoothDevice, psm: Int, attempt: Int) {
-        if (!openSession()) {
-            main.post { stop() }
+        val opened = synchronized(lock) { if (attempt == generation) openSession() else null }
+        if (opened == null) return
+        if (!opened) {
+            main.post { if (attempt == generation) stop() }
             return
         }
         val channel = try {
@@ -222,19 +255,32 @@ class BandLink(
             main.post { if (attempt == generation) retry(3000) }
             return
         }
-        socket = channel
+        synchronized(lock) {
+            if (attempt != generation || handle == 0L) {
+                runCatching { channel.close() }
+                return
+            }
+            socket = channel
+        }
         val input = channel.inputStream
         val output = channel.outputStream
         val write = { bytes: ByteArray -> if (bytes.isNotEmpty()) synchronized(output) { output.write(bytes) } }
         try {
-            write(synchronized(lock) { Bridge.request(handle) })
+            synchronized(lock) {
+                if (attempt != generation || handle == 0L) return
+                write(Bridge.request(handle))
+            }
             thread(name = "band-tick") {
                 while (attempt == generation) {
                     SystemClock.sleep(50)
                     try {
-                        val out = synchronized(lock) { if (handle == 0L) null else Bridge.tick(handle, now()) }
-                        out?.let(write)
-                        drain()
+                        synchronized(lock) {
+                            if (attempt == generation && handle != 0L) {
+                                Bridge.tick(handle, now()).takeIf { it.isNotEmpty() }?.let(write)
+                                drain()
+                                flushHapticsLocked(write, attempt)
+                            }
+                        }
                     } catch (e: Exception) {
                         if (attempt == generation) log("link: ${e.message}")
                         break
@@ -245,11 +291,13 @@ class BandLink(
             while (attempt == generation) {
                 val count = input.read(buffer)
                 if (count < 0) break
-                val out = synchronized(lock) {
-                    if (handle == 0L) null else Bridge.feed(handle, buffer.copyOf(count), now())
+                synchronized(lock) {
+                    if (attempt == generation && handle != 0L) {
+                        Bridge.feed(handle, buffer.copyOf(count), now()).takeIf { it.isNotEmpty() }?.let(write)
+                        drain()
+                        flushHapticsLocked(write, attempt)
+                    }
                 }
-                out?.let(write)
-                drain()
             }
             if (attempt == generation) log("the band closed the input channel")
         } catch (e: Exception) {
@@ -280,8 +328,36 @@ class BandLink(
         if (json == lastStatus) return
         lastStatus = json
         val status = JSONObject(json)
-        if (status.optBoolean("connected")) listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
+        if (status.optBoolean("connected")) {
+            if (vibrationSyncedGeneration != generation) {
+                vibrationSyncedGeneration = generation
+                enqueueHaptics(HapticCommand.BandVibration(prefs.bandVibration))
+            }
+            listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
+        }
         listener.onStatus(status)
+    }
+
+    /** Invoke JNI and write on the active generation's existing single writer. Caller holds [lock]. */
+    private fun flushHapticsLocked(write: (ByteArray) -> Unit, attempt: Int) {
+        while (attempt == generation && handle != 0L && hapticCommands.isNotEmpty()) {
+            val pending = hapticCommands.removeFirst()
+            if (pending.generation != attempt) continue
+            val bytes = when (val command = pending.command) {
+                is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
+                is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
+                is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
+            }
+            if (bytes.isNotEmpty()) write(bytes)
+        }
+    }
+
+    private data class PendingHaptic(val generation: Int, val command: HapticCommand)
+
+    private sealed interface HapticCommand {
+        data class BandVibration(val enabled: Boolean) : HapticCommand
+        data class Controls(val paused: Boolean) : HapticCommand
+        data class Profile(val previous: Boolean) : HapticCommand
     }
 
     private fun log(line: String) = listener.onLog(line)

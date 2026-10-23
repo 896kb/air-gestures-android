@@ -151,6 +151,13 @@ pub enum Event {
     DialTurn(f64),
     Handedness(Hand),
     HandednessFailure(String),
+    /// A matching haptics RPC response. `haptics_success` is None when the
+    /// detailed status is absent or lacks the expected operation response.
+    HapticsFinished {
+        sequence: u32,
+        rpc_success: bool,
+        haptics_success: Option<bool>,
+    },
     /// `None` = unknown (timed out, rejected or unsupported).
     BatteryStatus(Option<BatteryStatus>),
     RawEmgFrame(Vec<u8>),
@@ -178,6 +185,16 @@ impl std::fmt::Debug for Event {
             Self::HandednessFailure(message) => {
                 f.debug_tuple("HandednessFailure").field(message).finish()
             }
+            Self::HapticsFinished {
+                sequence,
+                rpc_success,
+                haptics_success,
+            } => f
+                .debug_struct("HapticsFinished")
+                .field("sequence", sequence)
+                .field("rpc_success", rpc_success)
+                .field("haptics_success", haptics_success)
+                .finish(),
             Self::BatteryStatus(status) => f.debug_tuple("BatteryStatus").field(status).finish(),
             Self::RawEmgFrame(bytes) => write!(f, "RawEmgFrame(len={})", bytes.len()),
             Self::RawEmgConfiguration(config) => {

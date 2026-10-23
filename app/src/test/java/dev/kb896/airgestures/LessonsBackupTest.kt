@@ -48,6 +48,11 @@ class LessonsBackupTest {
     @Test fun `settings round-trip, tap spots and apps included`() =
         assertEquals(settings, Backup.read(Backup.write(settings)))
 
+    @Test fun `older settings backups default band vibration to on`() {
+        val legacy = Backup.write(settings).replace(Regex(",\\s*\"bandVibration\":\\s*true"), "")
+        assertTrue(Backup.read(legacy)?.bandVibration == true)
+    }
+
     @Test fun `a backup from before sequences leaves them out instead of empty`() {
         val old = Backup.write(settings.copy(sequences = null)).replace(Regex(",\\s*\"sequences\":[^\\]]*\\]"), "")
         assertNull(Backup.read(old)?.sequences)
