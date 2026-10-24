@@ -61,6 +61,12 @@ class WriteService : AccessibilityService() {
                 if (node.isEditable && !node.isPassword) enter(node, event.packageName?.toString())
                 else if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) leave("the focus moved off the field")
             }
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                if (field == null || event.source != field) return
+                // Looked at a moment later, once our own changes have landed.
+                main.removeCallbacks(outside)
+                main.postDelayed(outside, 250)
+            }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
                 // The keyboard, system pop-ups and our own popup come up over the field: they don't end it.
@@ -92,17 +98,42 @@ class WriteService : AccessibilityService() {
         main.post(tick)
     }
 
-    /** A fresh start at the cursor: what's before it says whether a sentence begins. */
-    private fun restart(service: BandService, node: AccessibilityNodeInfo) {
+    /** The field's text and cursor as we last left them, to tell others' changes from ours. */
+    private var expected: Pair<String, Int>? = null
+
+    /**
+     * The field isn't as we left it: the keyboard typed, or a touch moved the cursor. The word
+     * under way ends; what's written next starts afresh at the cursor.
+     */
+    private val outside = Runnable {
+        val node = field ?: return@Runnable
+        if (looks(node) == expected) return@Runnable
+        log("handwriting: the field changed outside the band, starting afresh at the cursor")
+        anchor = null
+        menu = null
+        choosing = false
+        popup.hide()
+        BandService.instance?.let { restart(it, node) }
+    }
+
+    /** The field's text and cursor now. */
+    private fun looks(node: AccessibilityNodeInfo): Pair<String, Int> {
         node.refresh()
         val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-        val cursor = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
+        return text to (node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length)
+    }
+
+    /** A fresh start at the cursor: what's before it says whether a sentence begins. */
+    private fun restart(service: BandService, node: AccessibilityNodeInfo, now: Pair<String, Int>? = null) {
+        val (text, cursor) = (now ?: looks(node)).also { expected = it }
         service.setFieldTyping(true, text.substring(0, cursor))
     }
 
     /** Back to gestures. */
     private fun leave(why: String) {
         menu = null
+        expected = null
+        main.removeCallbacks(outside)
         popup.hide()
         if (field == null) return
         field = null
@@ -226,7 +257,7 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, before.length)
         })
         anchor = null
-        restart(service, node)
+        restart(service, node, before + after to before.length)
     }
 
     /** Where the cursor (the selection's moving end) is in [node]. */
@@ -248,7 +279,7 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, at)
         })
         // Our word ends here: what's written next starts afresh at the new place.
-        restart(service, node)
+        restart(service, node, text to at)
     }
 
     /** A word's suggestions over the field (swipe up, when the setting says popup). */
@@ -327,6 +358,7 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
         })
+        expected = text to cursor
     }
 
     private fun log(line: String) {
