@@ -7,6 +7,9 @@
 pub const SYMBOLS: usize = 100;
 /// The CTC blank's index.
 pub const BLANK: usize = 99;
+/// `^` in Meta AI's list, but the band's model sends it when the writing pauses (seen between
+/// letters, the longer the pause the likelier): kept as a pause, not text. It may mark word gaps.
+pub const PAUSE: usize = 87;
 /// Added to the blank's score before choosing (ln 0.2), as Meta AI's decoder config says.
 const BLANK_BIAS: f32 = -1.609_438;
 
@@ -59,7 +62,9 @@ impl Decoder {
         if !new {
             return None;
         }
-        self.text.push_str(symbol(index));
+        if index != PAUSE {
+            self.text.push_str(symbol(index));
+        }
         Some((index, margin))
     }
 }
@@ -86,6 +91,12 @@ mod tests {
             decoder.push(&frame(index));
         }
         assert_eq!(decoder.text, "hello");
+        // A pause between letters is a token, not text.
+        let mut decoder = Decoder::default();
+        for index in [0, PAUSE, 1] {
+            decoder.push(&frame(index));
+        }
+        assert_eq!(decoder.text, "ab");
     }
 
     #[test]

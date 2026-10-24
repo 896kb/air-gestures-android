@@ -23,7 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
-use crate::handwriting::{Decoder, SYMBOLS, scores, symbol};
+use crate::handwriting::{Decoder, PAUSE, SYMBOLS, scores, symbol};
 use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
@@ -1513,7 +1513,8 @@ impl BandSession {
                 if floats.len().is_multiple_of(SYMBOLS) {
                     for chunk in floats.chunks(SYMBOLS) {
                         if let Some((index, margin)) = handwriting.decoder.push(chunk) {
-                            handwriting.tokens.push((index, symbol(index), margin));
+                            let shown = if index == PAUSE { "pause" } else { symbol(index) };
+                            handwriting.tokens.push((index, shown, margin));
                         }
                     }
                 }
