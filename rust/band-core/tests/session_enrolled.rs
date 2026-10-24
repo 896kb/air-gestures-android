@@ -109,7 +109,7 @@ fn enrolled_startup_verifies_both_trust_directions_before_link_setup() {
         let info = peer
             .send(&encode_frame(3, &[RPC], &device_ok()).unwrap())
             .unwrap();
-        assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006]);
+        assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006, 0x8006]);
         let enabled = peer
             .send(&encode_frame(5, &[RPC], &status(3)).unwrap())
             .unwrap();

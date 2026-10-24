@@ -27,6 +27,8 @@ use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
+/// The request id of [`BandSession::request_active`], apart from the counted ones.
+const ACTIVE_REQUEST: u64 = 1 << 20;
 /// Gyro and orientation: off while a firmware update runs (see [`BandSession::ota_start`]).
 const MOTION_FIELDS: [u32; 2] = [6, 8];
 /// The stream probe shows this many messages of each kind, then one in [`PROBE_EVERY`].
@@ -785,6 +787,20 @@ impl BandSession {
         self.request_hand(Some(hand), false, time)
     }
 
+    /// Put the band in its active state (`ConfigReq.deviceState` = ACTIVE), as Meta AI's gesture
+    /// screens do. Build 70 comes up in standby on its wake ("IA") model and drops what it
+    /// detects; active switches it to the gesture model. The answer isn't needed.
+    /// Sent right after the hand read (which opens the service), under its own request id
+    /// so the hand requests keep theirs.
+    fn request_active(&mut self) -> Result<Vec<u8>> {
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            &[],
+            &[field_int(1, ACTIVE_REQUEST), field_bytes(5, &field_int(6, 2))].concat(),
+        )?;
+        self.encrypt(&frame)
+    }
+
     fn request_hand(&mut self, hand: Option<Hand>, reading: bool, time: f64) -> Result<Vec<u8>> {
         let id = self.configuration_id + 1;
         // ConfigReq.is_left_handed is field 10. An empty ConfigReq reads current settings.
@@ -1462,9 +1478,11 @@ impl BandSession {
             let open = self.stream_request(2, None)?;
             let enable = self.stream_request(3, Some(true))?;
             let hand = self.request_hand(None, true, time)?;
+            let active = self.request_active()?;
             outgoing.extend(open);
             outgoing.extend(enable);
             outgoing.extend(hand);
+            outgoing.extend(active);
             return Ok(Vec::new());
         }
         if self.setup_stage != SetupStage::Input {

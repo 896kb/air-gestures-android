@@ -326,7 +326,7 @@ fn after_the_ceremony_the_session_rejoins_the_full_startup() {
         .send(&encode_frame(3, &[0x02000315], &device_ok()).unwrap())
         .unwrap()
         .1;
-    assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006]);
+    assert_eq!(channels(&info), vec![0x8005, 0x8005, 0x8006, 0x8006]);
     let (events, _) = peer
         .send(&encode_frame(5, &[0x02000315], &status(3)).unwrap())
         .unwrap();
