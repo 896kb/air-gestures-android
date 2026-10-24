@@ -37,7 +37,7 @@ class SetupActivity : Screen() {
         super.onCreate(savedInstanceState)
         steps = column(gap = 14f)
         val band = column().apply {
-            addView(navRow(R.drawable.ic_zap, "Firmware") { open<FirmwareActivity>() })
+            addView(navRow(R.drawable.ic_zap, "Band firmware updates") { open<FirmwareActivity>() })
         }
         show(pageColumn().apply {
             addView(card(null, steps))

@@ -78,7 +78,8 @@ class FirmwareActivity : Screen() {
         text = "WARNING: updating the firmware can brick your band. This is not Meta's updater and " +
             "nothing about it is guaranteed to work. It has been tested, on one band, but a failed or " +
             "interrupted update could leave yours unusable, and Meta may not repair or replace it. An " +
-            "installed update can't be undone: the band refuses older firmware. Go on only if you accept that risk."
+            "installed update can't be undone: to the best of our knowledge you cannot downgrade the " +
+            "firmware, because the band refuses older versions. Go on only if you accept that risk."
         setLineSpacing(0f, 1.3f)
         background = android.graphics.drawable.GradientDrawable().apply {
             cornerRadius = dp(14f)
