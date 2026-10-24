@@ -27,6 +27,8 @@ use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
+/// Gyro and orientation: off while a firmware update runs (see [`BandSession::ota_start`]).
+const MOTION_FIELDS: [u32; 2] = [6, 8];
 /// The stream probe shows this many messages of each kind, then one in [`PROBE_EVERY`].
 const PROBE_SHOWN: usize = 40;
 const PROBE_EVERY: usize = 200;
@@ -233,6 +235,9 @@ pub struct BandSession {
     ota_progress: Option<String>,
     /// The files of the running (or last) update and how far each is.
     ota_items: Vec<OtaItemProgress>,
+    /// Gyro and orientation are paused for an update: less traffic from the band while it
+    /// acknowledges chunks (with them on, build 64 updates kept losing their place).
+    ota_quiet: bool,
 }
 
 impl BandSession {
@@ -307,6 +312,7 @@ impl BandSession {
             ota_last: None,
             ota_progress: None,
             ota_items: Vec::new(),
+            ota_quiet: false,
         }
     }
 
@@ -648,6 +654,11 @@ impl BandSession {
                                 frame.words,
                                 frame.payload.len()
                             ));
+                            // The records just before, to see how the reading lost its place.
+                            for (age, record) in self.datax.recent().iter().enumerate() {
+                                let hex: String = record.iter().map(|b| format!("{b:02x}")).collect();
+                                self.diagnostics.push(format!("skipped: record -{age} ({}B) {hex}", record.len()));
+                            }
                             Vec::new()
                         }
                         other => other?,
@@ -901,7 +912,8 @@ impl BandSession {
         let mut job = OtaJob::new(plan);
         let mut ids = self.configuration_id;
         let bodies = job.begin(&mut ids, time);
-        let bytes = self.ota_frames(bodies, ids)?;
+        let mut bytes = self.ota_frames(bodies, ids)?;
+        bytes.extend(self.set_ota_quiet(true)?);
         let lines = job.log();
         self.ota_log(lines);
         self.ota_items = job.items();
@@ -920,11 +932,22 @@ impl BandSession {
         let lines = job.log();
         self.ota_log(lines);
         self.ota_items = job.items();
-        let bytes = self.ota_frames(bodies, ids);
-        if !job.done() {
+        let mut bytes = self.ota_frames(bodies, ids)?;
+        if job.done() {
+            bytes.extend(self.set_ota_quiet(false)?);
+        } else {
             self.ota_job = Some(job);
         }
-        bytes
+        Ok(bytes)
+    }
+
+    /// Pause (or resume) gyro and orientation for an update; the bytes to write.
+    fn set_ota_quiet(&mut self, quiet: bool) -> Result<Vec<u8>> {
+        if self.ota_quiet == quiet {
+            return Ok(Vec::new());
+        }
+        self.ota_quiet = quiet;
+        self.stream_request(3, Some(true))
     }
 
     /// Frame and encrypt update requests on the configuration service; `ids` is the counter after them.
@@ -1277,10 +1300,11 @@ impl BandSession {
             selected.insert(0, 2);
         }
         selected.extend(&self.probe);
+        let quiet = self.ota_quiet;
         let control: Vec<u8> = match enabled {
             Some(on) => selected
                 .iter()
-                .flat_map(|&field| field_int(field, u64::from(on)))
+                .flat_map(|&field| field_int(field, u64::from(on && !(quiet && MOTION_FIELDS.contains(&field)))))
                 .collect(),
             None => Vec::new(),
         };
@@ -1460,7 +1484,9 @@ impl BandSession {
                     self.ota_log(lines);
                     self.ota_items = job.items();
                     outgoing.extend(self.ota_frames(bodies, ids)?);
-                    if !job.done() {
+                    if job.done() {
+                        outgoing.extend(self.set_ota_quiet(false)?);
+                    } else {
                         self.ota_job = Some(job);
                     }
                     return Ok(Vec::new());
@@ -1517,7 +1543,8 @@ impl BandSession {
                         self.probe_flags = Some(shown);
                     }
                 }
-                self.streams_enabled = all_set(&flags, &STREAM_FIELDS, 1)?;
+                let wanted: &[u32] = if self.ota_quiet { &STREAM_FIELDS[..1] } else { &STREAM_FIELDS };
+                self.streams_enabled = all_set(&flags, wanted, 1)?;
                 if !self.streams_enabled {
                     return Err(perr("The band input subscription stopped"));
                 }

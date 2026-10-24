@@ -61,6 +61,8 @@ pub struct DataXReceiver {
     /// The sender pads every record (a whole block of 0xd0 when its frames end on a block
     /// boundary): each record's padding is then known exactly and comes off before parsing.
     always_padded: bool,
+    /// The last few records as received (newest first), for the log when reading goes wrong.
+    recent: std::collections::VecDeque<Vec<u8>>,
 }
 
 impl std::fmt::Debug for DataXReceiver {
@@ -76,6 +78,11 @@ impl DataXReceiver {
     /// record's padding is known exactly from the start, not only after a whole 0xd0 block.
     pub fn set_always_padded(&mut self) {
         self.always_padded = true;
+    }
+
+    /// The last few records as received, newest first. Debug only: they hold sensor data.
+    pub fn recent(&self) -> &std::collections::VecDeque<Vec<u8>> {
+        &self.recent
     }
 
     /// Bytes held back waiting for the rest of a frame.
@@ -112,6 +119,8 @@ impl DataXReceiver {
         if !self.always_padded && plaintext.ends_with(&[0xd0; 16]) {
             self.always_padded = true;
         }
+        self.recent.push_front(plaintext.to_vec());
+        self.recent.truncate(4);
         let record = if self.always_padded { without_padding(plaintext) } else { plaintext };
         self.pending.extend_from_slice(record);
         let mut frames = Vec::new();
