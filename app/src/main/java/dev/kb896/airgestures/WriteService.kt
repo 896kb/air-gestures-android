@@ -102,6 +102,7 @@ class WriteService : AccessibilityService() {
 
     /** Back to gestures. */
     private fun leave(why: String) {
+        menu = null
         popup.hide()
         if (field == null) return
         field = null
@@ -121,6 +122,9 @@ class WriteService : AccessibilityService() {
      * - otherwise swipe left and right move the cursor, and a tap starts selecting: then
      *   left and right grow the selection from where the tap was, until the next tap (writing
      *   replaces what's selected);
+     * - swipe down (with popups on): the edit menu above the keyboard: delete word, delete all,
+     *   new line, and lists of punctuation and emoji; left and right choose, a tap does it,
+     *   swipe down closes (or goes back from a list);
      * - a double tap puts the pen down.
      */
     private val gestures = object : BandService.Practice {
@@ -137,8 +141,10 @@ class WriteService : AccessibilityService() {
         val node = field ?: return
         val service = BandService.instance ?: return
         lastWritten = SystemClock.uptimeMillis()
+        val open = menu
         when {
             label == "index double tap" -> service.fieldPenDown()
+            open != null -> onMenuGesture(service, node, open, label)
             choosing -> when (label) {
                 "swipe left" -> service.fieldChooseStep(false)
                 "swipe right" -> service.fieldChooseStep(true)
@@ -158,6 +164,11 @@ class WriteService : AccessibilityService() {
                 choosing = service.fieldChoose()
                 if (!choosing) buzz(false)
             }
+            label == "swipe down" && Prefs(this).choicesPopup -> {
+                anchor = null
+                menu = Menu(MAIN, 0)
+                showMenu(node)
+            }
             label == "index tap" -> {
                 anchor = if (anchor == null) cursor(node) else null
                 log(if (anchor != null) "handwriting: selecting (left and right, tap to stop)" else "handwriting: selection kept")
@@ -165,6 +176,57 @@ class WriteService : AccessibilityService() {
             label == "swipe left" -> moveCursor(service, node, -1)
             label == "swipe right" -> moveCursor(service, node, 1)
         }
+    }
+
+    /** The edit menu (swipe down, with popups on): which list, and which entry is picked. */
+    private data class Menu(val items: List<String>, val pick: Int)
+    private var menu: Menu? = null
+
+    private fun showMenu(node: AccessibilityNodeInfo) {
+        val open = menu ?: return popup.hide()
+        popup.show(node, open.items, open.pick, MENU_HINT, aboveKeyboard = true)
+    }
+
+    private fun onMenuGesture(service: BandService, node: AccessibilityNodeInfo, open: Menu, label: String) {
+        val n = open.items.size
+        when (label) {
+            "swipe left" -> menu = open.copy(pick = (open.pick + n - 1) % n)
+            "swipe right" -> menu = open.copy(pick = (open.pick + 1) % n)
+            "swipe down", "swipe up" -> menu = if (open.items === MAIN) null else Menu(MAIN, 0)
+            "index tap" -> {
+                val item = open.items[open.pick]
+                menu = null
+                when {
+                    open.items === MAIN && item == PUNCTUATION_ITEM -> menu = Menu(PUNCTUATION, 0)
+                    open.items === MAIN && item == EMOJI_ITEM -> menu = Menu(EMOJI, 0)
+                    item == DELETE_WORD -> edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
+                    item == DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
+                    item == NEW_LINE -> edit(service, node) { before, after -> before + "\n" to after }
+                    else -> edit(service, node) { before, after -> before + item to after }
+                }
+            }
+        }
+        showMenu(node)
+    }
+
+    /**
+     * Change the field around the cursor: [change] gets the text before and after it (a
+     * selection goes) and gives them back; the cursor goes between. Writing then starts afresh.
+     */
+    private fun edit(service: BandService, node: AccessibilityNodeInfo, change: (String, String) -> Pair<String, String>) {
+        node.refresh()
+        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        val end = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
+        val start = (node.textSelectionStart.takeIf { it in 0..text.length } ?: end).let { minOf(it, end) }
+        val (before, after) = change(text.substring(0, start), text.substring(maxOf(start, end)))
+        val set = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, before + after) }
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, set)) return log("handwriting: the field didn't take the text")
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, before.length)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, before.length)
+        })
+        anchor = null
+        restart(service, node)
     }
 
     /** Where the cursor (the selection's moving end) is in [node]. */
@@ -217,8 +279,8 @@ class WriteService : AccessibilityService() {
             choosing = answer.optBoolean("choosing")
             val list = answer.optJSONArray("suggestions")
             if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {
-                popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"))
-            } else {
+                popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"), CHOOSE_HINT)
+            } else if (menu == null) {
                 popup.hide()
             }
             val down = answer.optBoolean("pen")
@@ -271,6 +333,19 @@ class WriteService : AccessibilityService() {
     }
 
     companion object {
+        const val CHOOSE_HINT = "Swipe to choose · tap to take · up to cancel"
+        const val MENU_HINT = "Swipe to choose · tap to do · down to close"
+        const val DELETE_WORD = "Delete word"
+        const val DELETE_ALL = "Delete all"
+        const val NEW_LINE = "New line"
+        const val PUNCTUATION_ITEM = "Punctuation…"
+        const val EMOJI_ITEM = "Emoji…"
+        /** The edit menu (swipe down), and its punctuation and emoji lists. */
+        val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
+        val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
+        val EMOJI = listOf("😀", "😂", "😊", "😍", "🥰", "😉", "😎", "🤔", "😮", "😢", "😭", "😡", "👍", "👎", "👏", "🙏",
+            "👋", "💪", "❤️", "🔥", "🎉", "✅", "❌", "👀", "💯", "🤷", "🙌", "😴")
+
         /** Back to gestures after this long with nothing written (the pen lifts much sooner). */
         const val IDLE_MS = 5 * 60_000L
         const val POLL_MS = 100L

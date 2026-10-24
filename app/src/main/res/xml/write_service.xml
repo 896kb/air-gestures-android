@@ -5,6 +5,6 @@
     android:description="@string/write_service_description"
     android:canRetrieveWindowContent="true"
     android:accessibilityEventTypes="typeViewFocused|typeWindowStateChanged|typeViewClicked"
-    android:accessibilityFlags="flagReportViewIds"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100" />
