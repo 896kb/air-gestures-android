@@ -50,7 +50,7 @@ class FirmwareActivity : Screen() {
             addView(progress)
             addView(files)
             addView(row(gap = 10f).apply {
-                addView(pill("Ask the band") { ask() }.first)
+                addView(pill("Refresh status") { ask() }.first)
                 addView(pill("Cancel update") { cancel() }.first)
             })
         }
@@ -109,7 +109,7 @@ class FirmwareActivity : Screen() {
         status.text = when {
             !connected -> "Connect the band to update it."
             state.otaStatus != null -> "Update status: ${state.otaStatus}"
-            else -> "Tap Ask the band for its update status."
+            else -> "Tap Refresh status for the band's update status."
         }
         progress.text = state.otaProgress?.let { if (state.otaBusy) "Working: $it" else "Last: $it" } ?: ""
         progress.visibility = if (state.otaProgress == null) android.view.View.GONE else android.view.View.VISIBLE
@@ -175,8 +175,8 @@ class FirmwareActivity : Screen() {
             when {
                 need == null -> {}
                 bandKey == null -> {
-                    addView(note("This firmware needs key $need on the band. Ask the band which key it has."))
-                    addView(row().apply { addView(pill("Ask the band") { ask() }.first) })
+                    addView(note("This firmware needs key $need on the band. Tap Refresh status to see which key it has."))
+                    addView(row().apply { addView(pill("Refresh status") { ask() }.first) })
                 }
                 bandKey != need -> {
                     addView(note("Your band has key $bandKey, but this firmware needs key $need installed on the band."))
