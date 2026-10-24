@@ -59,11 +59,16 @@ pub struct FieldTyping {
     /// Choosing among the suggestions (a swipe up): shown in place of the word, the current
     /// pick first; the word went back to "under way" and takes its space again when picked.
     choosing: Option<Choosing>,
+    /// The suggestions show in a popup (the app's) instead of in the field: the field keeps
+    /// its word until one is picked.
+    popup: bool,
 }
 
 struct Choosing {
     /// The word had been taken with a space (it gets it back when picked).
     spaced: bool,
+    /// The pick when choosing began (a cancel goes back to it).
+    from: usize,
 }
 
 impl FieldTyping {
@@ -114,9 +119,30 @@ impl FieldTyping {
             }
             return false;
         }
-        self.choosing = Some(Choosing { spaced });
+        self.choosing = Some(Choosing { spaced, from: self.writer.state().highlight });
         self.sync();
         true
+    }
+
+    /// Show the suggestions in the app's popup rather than in the field.
+    pub fn set_popup(&mut self, popup: bool) {
+        self.popup = popup;
+    }
+
+    /// While choosing: the suggestions and which is picked (for the popup).
+    pub fn choices(&self) -> Option<(Vec<String>, usize)> {
+        self.choosing.as_ref()?;
+        let state = self.writer.state();
+        Some((state.suggestions, state.highlight))
+    }
+
+    /// While choosing: leave it, with the word as it was (a swipe up again).
+    pub fn choose_cancel(&mut self, words: Option<&Dictionary>, now: f64) {
+        let Some(from) = self.choosing.as_ref().map(|c| c.from) else { return };
+        while self.writer.state().highlight != from {
+            self.writer.step(true);
+        }
+        self.choose_pick(words, now);
     }
 
     /// While choosing: the next (or previous) suggestion comes first (a swipe right or left).
@@ -284,9 +310,12 @@ impl FieldTyping {
 
     /// What the field should show of ours now; the difference from what it shows as an edit.
     fn sync(&mut self) {
+        if self.popup && self.choosing.is_some() {
+            return;
+        }
         let state = self.writer.state();
         let mut wanted = self.capitalised(&state.text, &state.word);
-        if self.choosing.is_some() && !state.suggestions.is_empty() {
+        if self.choosing.is_some() && !self.popup && !state.suggestions.is_empty() {
             // The suggestions in the word's place, the current pick first, in turn after it.
             let shown = wanted.chars().count() - state.word.chars().count();
             let n = state.suggestions.len();
@@ -445,6 +474,35 @@ mod tests {
         apply(&mut field, typing.take_edits());
         assert_eq!(field, format!("{second} "));
         assert!(!typing.choosing());
+    }
+
+    #[test]
+    fn in_popup_mode_the_field_keeps_its_word_until_the_pick() {
+        let words = Dictionary::parse("where 100000\nwhen 90000\nwere 80000\n");
+        let mut typing = FieldTyping::new("", 0.0);
+        typing.set_popup(true);
+        let mut field = String::new();
+        for c in "were".chars() {
+            typing.write(&letter(c, 0.9), Some(&words));
+        }
+        apply(&mut field, typing.take_edits());
+        let before = field.clone();
+        assert!(typing.choose(Some(&words)));
+        typing.choose_step(true);
+        let (list, pick) = typing.choices().unwrap();
+        assert!(typing.take_edits().is_empty(), "the field doesn't change while choosing");
+        typing.choose_pick(Some(&words), 1.0);
+        apply(&mut field, typing.take_edits());
+        let mut chars = list[pick].chars();
+        let expected: String = chars.next().unwrap().to_uppercase().chain(chars).collect();
+        assert_eq!(field, expected);
+        // A cancel puts the word back as it was.
+        assert!(typing.choose(Some(&words)));
+        typing.choose_step(true);
+        typing.choose_cancel(Some(&words), 2.0);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, expected);
+        let _ = before;
     }
 
     #[test]

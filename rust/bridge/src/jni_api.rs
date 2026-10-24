@@ -375,10 +375,11 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
     handle: jlong,
     on: jboolean,
     before: JString<'local>,
+    popup: jboolean,
     now: jdouble,
 ) -> jbyteArray {
     let result = match env.get_string(&before) {
-        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before), now),
+        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before), popup != 0, now),
         Err(error) => Err(error.to_string()),
     };
     bytes_out(&mut env, result)
@@ -425,6 +426,17 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChoosePick<'local>
     now: jdouble,
 ) {
     unsafe { connection(handle) }.field_choose_pick(now);
+}
+
+/// While choosing: leave it with the word as it was.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChooseCancel<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_choose_cancel(now);
 }
 
 /// A double tap in a text field: the pen goes down.

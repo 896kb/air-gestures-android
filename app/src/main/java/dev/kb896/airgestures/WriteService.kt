@@ -102,6 +102,7 @@ class WriteService : AccessibilityService() {
 
     /** Back to gestures. */
     private fun leave(why: String) {
+        popup.hide()
         if (field == null) return
         field = null
         app = null
@@ -144,6 +145,12 @@ class WriteService : AccessibilityService() {
                 "index tap" -> {
                     service.fieldChoosePick()
                     choosing = false
+                    popup.hide()
+                }
+                "swipe up" -> {
+                    service.fieldChooseCancel()
+                    choosing = false
+                    popup.hide()
                 }
             }
             label == "swipe up" -> {
@@ -182,6 +189,9 @@ class WriteService : AccessibilityService() {
         restart(service, node)
     }
 
+    /** A word's suggestions over the field (swipe up, when the setting says popup). */
+    private val popup by lazy { ChoicePopup(this) }
+
     /** Whether the pen was down at the last look (a buzz when it changes). */
     private var pen = true
 
@@ -205,6 +215,12 @@ class WriteService : AccessibilityService() {
                 }
             }
             choosing = answer.optBoolean("choosing")
+            val list = answer.optJSONArray("suggestions")
+            if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {
+                popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"))
+            } else {
+                popup.hide()
+            }
             val down = answer.optBoolean("pen")
             if (down != pen) {
                 pen = down

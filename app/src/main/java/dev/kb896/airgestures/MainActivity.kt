@@ -42,6 +42,8 @@ class MainActivity : Screen() {
     private var handwriting: Pair<TextView, NeuDrawable>? = null
     private lateinit var fields: Pair<TextView, NeuDrawable>
     private lateinit var fieldsDetail: TextView
+    private lateinit var choicesPopup: TextView
+    private lateinit var choicesInline: TextView
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
     private var player: MediaPlayer? = null
@@ -352,6 +354,9 @@ class MainActivity : Screen() {
             }, weighted())
             addView(fields.first)
         })
+        choicesPopup = segment("Popup") { Prefs(context).choicesPopup = true; render(BandService.state.value) }
+        choicesInline = segment("In the field") { Prefs(context).choicesPopup = false; render(BandService.state.value) }
+        addView(settingRow("Word choices", "Swipe up while writing for a word's other readings", segmented(choicesPopup, choicesInline)))
         if (Handwriting.available(context)) {
             handwriting = pill("Handwriting off", R.drawable.ic_pencil) { Handwriting.toggle(context); render(BandService.state.value) }
                 .also { addView(settingRow("Handwriting", "Write letters on a table with a finger", it.first)) }
@@ -445,6 +450,13 @@ class MainActivity : Screen() {
         val wrist = Prefs(this).hand.takeIf { it != "band" } ?: state.hand
         for ((view, name) in listOf(wristLeft to "left", wristRight to "right")) {
             val active = wrist == name
+            view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
+            view.background = if (active) GradientDrawable().apply {
+                cornerRadius = dp(999f)
+                setColor(Cb.INK_900)
+            } else null
+        }
+        for ((view, active) in listOf(choicesPopup to Prefs(this).choicesPopup, choicesInline to !Prefs(this).choicesPopup)) {
             view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
             view.background = if (active) GradientDrawable().apply {
                 cornerRadius = dp(999f)

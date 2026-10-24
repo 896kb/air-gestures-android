@@ -207,12 +207,13 @@ class BandService : Service(), BandLink.Listener {
 
     /** The band's handwriting into the text field in front (see WriteService). */
     /** [before]: the field's text before the cursor, so a sentence's first word gets its capital. */
-    fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before)
+    fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before, prefs.choicesPopup)
     fun fieldEdits() = link.fieldEdits()
     fun fieldPenDown() = link.fieldPenDown()
     fun fieldChoose() = link.fieldChoose()
     fun fieldChooseStep(forward: Boolean) = link.fieldChooseStep(forward)
     fun fieldChoosePick() = link.fieldChoosePick()
+    fun fieldChooseCancel() = link.fieldChooseCancel()
 
     /** Whether the band's firmware reads handwriting (a `hw_` model); null before it said. */
     fun bandWrites(): Boolean? = link.deviceInfo()?.takeIf { it.has("handwriting") }?.optBoolean("handwriting")

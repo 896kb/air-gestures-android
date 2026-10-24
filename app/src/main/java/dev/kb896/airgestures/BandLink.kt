@@ -115,7 +115,8 @@ class BandLink(
     }
 
     /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
-    fun setFieldTyping(on: Boolean, before: String = "") = debugSend { Bridge.setFieldTyping(it, on, before, now()) }
+    fun setFieldTyping(on: Boolean, before: String = "", popup: Boolean = true) =
+        debugSend { Bridge.setFieldTyping(it, on, before, popup, now()) }
 
     /** The field's edits since the last call and the pen; null when not connected. */
     fun fieldEdits(): org.json.JSONObject? = synchronized(lock) {
@@ -127,6 +128,7 @@ class BandLink(
     fun fieldChoose(): Boolean = synchronized(lock) { handle != 0L && Bridge.fieldChoose(handle) }
     fun fieldChooseStep(forward: Boolean) = synchronized(lock) { if (handle != 0L) Bridge.fieldChooseStep(handle, forward) }
     fun fieldChoosePick() = synchronized(lock) { if (handle != 0L) Bridge.fieldChoosePick(handle, now()) }
+    fun fieldChooseCancel() = synchronized(lock) { if (handle != 0L) Bridge.fieldChooseCancel(handle, now()) }
 
     /** A double tap in a text field: the pen goes down. */
     fun fieldPenDown() = synchronized(lock) { if (handle != 0L) Bridge.fieldPenDown(handle, now()) }

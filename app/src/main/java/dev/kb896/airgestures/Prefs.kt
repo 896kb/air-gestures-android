@@ -15,6 +15,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("write_in_fields", false)
         set(value) = prefs.edit().putBoolean("write_in_fields", value).apply()
 
+    /** A word's suggestions (swipe up in a text field) show in a popup, else in the field itself. */
+    var choicesPopup: Boolean
+        get() = prefs.getBoolean("choices_popup", true)
+        set(value) = prefs.edit().putBoolean("choices_popup", value).apply()
+
     /** The firmware an install committed, until the band reconnects and is checked (0: none). */
     var otaExpect: Long
         get() = prefs.getLong("ota_expect", 0)
