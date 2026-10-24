@@ -190,6 +190,9 @@ class BandService : Service(), BandLink.Listener {
     /** Debug: ask the band's update status (read only); the answer goes to the log. */
     fun otaStatus() = link.otaStatus()
     fun otaStart(mode: String, dir: String) {
+        // A new start or a cancel ends whatever the last install showed; a cancel leaves nothing to check.
+        state.update { copy(install = null) }
+        if (mode == "cancel") prefs.otaExpect = 0
         if (mode == "install" || mode == "update") {
             // Checked when the band reconnects after its reboot (see checkInstall).
             val manifest = runCatching { JSONObject(java.io.File(dir, "manifest.json").readText()) }.getOrNull()
