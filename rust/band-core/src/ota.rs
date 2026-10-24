@@ -399,12 +399,13 @@ impl OtaJob {
                 // GeneralResponse instead. A Result left at OK can arrive empty.
                 let code = response.bytes(4).ok().and_then(Self::result_code)
                     .or_else(|| response.bytes(1).ok().and_then(Self::result_code));
+                // Not secret: result codes and flags only. Before the verdict, which the app
+                // follows as the update's latest line.
+                self.say(format!("commit answer: {}", response.describe_nested(0)));
                 match code {
                     Some(0) => self.say("COMMITTED: the band now reboots into the new firmware; the app checks it on reconnecting"),
                     _ => self.say(format!("commit answered {}", code.map_or("no result".into(), Self::result_name))),
                 }
-                // Not secret: result codes and flags only.
-                self.say(format!("commit answer: {}", response.describe_nested(0)));
                 Vec::new()
             }
             _ => {

@@ -21,6 +21,10 @@ class FirmwareActivity : Screen() {
     /** A meter per file of the running (or last) update. */
     private lateinit var files: LinearLayout
     private lateinit var downloadBar: android.widget.ProgressBar
+    /** After the band accepts Install: restarting, checking, then the result. */
+    private lateinit var installStage: LinearLayout
+    private lateinit var installText: TextView
+    private lateinit var installBar: android.widget.ProgressBar
     private lateinit var downloads: LinearLayout
     private lateinit var checking: TextView
     /** A check with Meta is running. */
@@ -42,6 +46,14 @@ class FirmwareActivity : Screen() {
         checking = Cb.text(this, 13f, color = Cb.INK_500)
         files = column(gap = 10f)
         downloadBar = meter().apply { visibility = android.view.View.GONE }
+        installText = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_900)
+        installBar = meter()
+        installStage = column(gap = 6f).apply {
+            addView(Cb.label(context, "Install"))
+            addView(installText)
+            addView(installBar)
+            visibility = android.view.View.GONE
+        }
         downloads = column(gap = 14f)
         val band = column(gap = 10f).apply {
             addView(Cb.label(context, "Running"))
@@ -49,6 +61,7 @@ class FirmwareActivity : Screen() {
             addView(status)
             addView(progress)
             addView(files)
+            addView(installStage)
             addView(row(gap = 10f).apply {
                 addView(pill("Refresh status") { ask() }.first)
                 addView(pill("Cancel update") { cancel() }.first)
@@ -114,7 +127,37 @@ class FirmwareActivity : Screen() {
         progress.text = state.otaProgress?.let { if (state.otaBusy) "Working: $it" else "Last: $it" } ?: ""
         progress.visibility = if (state.otaProgress == null) android.view.View.GONE else android.view.View.VISIBLE
         renderFiles(state.otaItems)
+        renderInstall(state.install)
     }
+
+    private fun renderInstall(install: BandService.Install?) {
+        installStage.visibility = if (install == null) android.view.View.GONE else android.view.View.VISIBLE
+        install ?: return
+        val seconds = (android.os.SystemClock.uptimeMillis() - install.since) / 1000
+        val name = Firmware.name(install.version.toString())
+        installText.text = when (install.stage) {
+            "restarting" -> "The band is installing $name and restarting… ${seconds}s (about a minute)"
+            "checking" -> "The band is back; checking what it runs…"
+            "installed" -> "Installed: the band runs $name"
+            else -> "Not confirmed: the band runs ${install.running?.let { Firmware.name(it) } ?: "unknown firmware"}, not $name"
+        }
+        val finished = install.stage == "installed" || install.stage == "failed"
+        installBar.isIndeterminate = !finished
+        installBar.progress = if (finished) 1000 else 0
+        installBar.progressTintList = android.content.res.ColorStateList.valueOf(
+            when (install.stage) {
+                "installed" -> Cb.Signal.LIVE.fill
+                "failed" -> Cb.Signal.STOP.fill
+                else -> Cb.INK_900
+            },
+        )
+        installText.setTextColor(if (install.stage == "failed") Cb.Signal.STOP.fill else Cb.INK_900)
+        // The seconds count while it restarts.
+        installStage.removeCallbacks(installTick)
+        if (!finished) installStage.postDelayed(installTick, 1000)
+    }
+
+    private val installTick = Runnable { renderInstall(BandService.state.value.install) }
 
     /** "2 files to send", then a labelled meter for each. */
     private fun renderFiles(items: List<BandService.OtaItem>) {

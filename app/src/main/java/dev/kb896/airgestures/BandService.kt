@@ -223,7 +223,10 @@ class BandService : Service(), BandLink.Listener {
     // BandLink.Listener: called from Bluetooth and link threads.
 
     override fun onPhase(phase: Phase, band: String?) = main.post {
-        state.update { copy(phase = phase, band = band ?: this.band) }
+        state.update {
+            val back = phase == Phase.CONNECTED && install?.stage == "restarting"
+            copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
+        }
         refreshNotification()
         watchIdle()
         broadcastStatus()
@@ -267,6 +270,7 @@ class BandService : Service(), BandLink.Listener {
             )
         }
         val now = state.value
+        if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
         if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
         if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
@@ -352,10 +356,30 @@ class BandService : Service(), BandLink.Listener {
     private fun checkInstall(firmware: String) {
         val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
         prefs.otaExpect = 0
-        onLog(if (firmware == expected.toString()) "ota: INSTALLED: the band runs $firmware"
+        val installed = firmware == expected.toString()
+        onLog(if (installed) "ota: INSTALLED: the band runs $firmware"
               else "ota: INSTALL NOT CONFIRMED: the band runs $firmware, not $expected")
+        state.update {
+            val began = install?.since ?: android.os.SystemClock.uptimeMillis()
+            copy(install = Install(expected, if (installed) "installed" else "failed", began, firmware))
+        }
         // The band reports its version before it accepts requests: ask a moment later.
         main.postDelayed({ otaStatus() }, 3_000)
+    }
+
+    /**
+     * The update's latest line: once the band accepts Install it restarts (the stage shows
+     * that until it's back); a refused or failed update leaves nothing to check afterwards.
+     */
+    private fun followInstall(line: String?) {
+        line ?: return
+        val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
+        when {
+            line.startsWith("COMMITTED") || line.startsWith("no answer to Commit") ->
+                state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
+            line.startsWith("commit answered") || line.startsWith("FAILED") || line.startsWith("abort after the failure") ->
+                prefs.otaExpect = 0
+        }
     }
 
     override fun onLog(line: String) = main.post {
@@ -426,7 +450,15 @@ class BandService : Service(), BandLink.Listener {
         val otaBusy: Boolean = false,
         /** Each file of that update and how far it is. */
         val otaItems: List<OtaItem> = emptyList(),
+        /** The install after the band accepted it: restarting, then checked. */
+        val install: Install? = null,
     )
+
+    /**
+     * An install the band accepted: [stage] is "restarting", "checking", "installed" or
+     * "failed"; [since] (uptime ms) when it began; [running] what the band reported back.
+     */
+    data class Install(val version: Long, val stage: String, val since: Long, val running: String? = null)
 
     /** One file of a firmware update: [stage] is "waiting", "sending", "checking" or "done". */
     data class OtaItem(val name: String, val size: Long, val sent: Long, val stage: String)
