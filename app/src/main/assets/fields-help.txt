@@ -21,7 +21,7 @@ Popup shows the choices in a row just above the text field and leaves the field 
 Swipe left or right to move the cursor. Tap your index finger to start selecting: left and right then grow the selection, and a second tap stops. Writing replaces what's selected.
 
 ## Your keyboard and touch
-You can switch between typing on your devices keyboard or with the band, they will work together fine.
+You can switch between typing on your device's keyboard or with the band, they will work together fine.
 
 ## Back to gestures
 Leaving the field, switching apps or five minutes without writing turns the band back to its usual gesture mode.
