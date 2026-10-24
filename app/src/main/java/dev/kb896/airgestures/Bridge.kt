@@ -24,6 +24,42 @@ object Bridge {
     @JvmStatic external fun setDial(handle: Long, dial: String)
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)
+    /** Before [request]: also ask for these stream flags (`1,4,7`) and log what comes back (see Prefs.probe). */
+    @JvmStatic external fun setProbe(handle: Long, fields: String)
+    /** Debug: a ConfigReq as hex to write to the band; returns bytes to write. The answer goes to the log. */
+    @JvmStatic external fun probeConfig(handle: Long, hex: String, now: Double): ByteArray
+    /** Debug: ask the band's update status (read only); returns bytes to write. The answer goes to the log. */
+    @JvmStatic external fun otaStatus(handle: Long): ByteArray
+    @JvmStatic external fun otaStart(handle: Long, mode: String, dir: String, now: Double): ByteArray
+    /** What the band said about itself: `{"firmware", "software", "hardware", "serial", "release_branch"}` (`{}` before). */
+    @JvmStatic external fun deviceInfo(handle: Long): String
+    /**
+     * Debug: check, download and keep the firmware Meta offers this band under [dir] (blocking
+     * HTTP; off the main thread). [version]: the band's, as reported to Meta ("1": the full current build).
+     */
+    @JvmStatic external fun firmwareArchive(session: String, serial: String, version: String, dir: String): String
+    /** The firmware download in progress: `{"version", "done", "total"}`, or `{}`. */
+    @JvmStatic external fun firmwareProgress(): String
+    /** Debug: the band's own handwriting (deviceState HANDWRITING_CC) on or off; bytes to write. */
+    @JvmStatic external fun setBandHandwriting(handle: Long, on: Boolean): ByteArray
+    /** Debug: what it has sent: `{"on", "text", "tokens": [{"index", "symbol", "margin"}], "frames", ...}`. */
+    @JvmStatic external fun bandHandwriting(handle: Long, clear: Boolean): String
+    /** The band's handwriting into the text field in front, on or off; bytes to write. */
+    @JvmStatic external fun setFieldTyping(handle: Long, on: Boolean, before: String, popup: Boolean, now: Double): ByteArray
+    /** The field's edits since the last call, and the pen: `{"edits": [{"delete", "insert"}], "pen"}`. */
+    @JvmStatic external fun fieldEdits(handle: Long, now: Double): String
+    /** A swipe up in a text field: the word's suggestions show in its place; false when none. */
+    @JvmStatic external fun fieldChoose(handle: Long): Boolean
+    /** While choosing: the next (or previous) suggestion first. */
+    @JvmStatic external fun fieldChooseStep(handle: Long, forward: Boolean)
+    /** While choosing: leave it with the word as it was. */
+    @JvmStatic external fun fieldChooseCancel(handle: Long, now: Double)
+    /** While choosing: take the first. */
+    @JvmStatic external fun fieldChoosePick(handle: Long, now: Double)
+    /** A double tap in a text field: the pen goes down. */
+    @JvmStatic external fun fieldPenDown(handle: Long, now: Double)
+    /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
+    @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun close(handle: Long)
 
     // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.

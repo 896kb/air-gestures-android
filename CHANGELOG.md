@@ -4,6 +4,17 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
+## 0.7.8
+
+- An app can say it's in front itself, for when the screen can't tell: broadcast
+  `dev.kb896.airgestures.SET_PROFILE` with extra `profile` = its package name as it comes
+  to the front, and an empty one as it leaves. Its own profile then applies until it
+  leaves, even while it shows on another screen with the phone folded.
+- An app that does that gets the band's state back, `dev.kb896.airgestures.STATUS` with
+  `battery` (−1 when unknown), `charging`, `connected` and `controls` (on or off), sent
+  to it alone, whenever one of them changes. A remote app can then tell a flat band from
+  a lost connection.
+
 ## 0.7.7
 
 - Needs Android 13 or newer. Below that the app didn't work properly before either.

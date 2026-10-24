@@ -189,6 +189,243 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setMapping<'local>(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProbe<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    fields: JString<'local>,
+) {
+    match env.get_string(&fields) {
+        Ok(fields) => unsafe { connection(handle) }.set_probe(&String::from(fields)),
+        Err(error) => throw(&mut env, &error.to_string()),
+    }
+}
+
+/// Debug: the band's update status, read only; bytes to write (answer in the log).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_otaStatus<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.ota_status();
+    bytes_out(&mut env, result)
+}
+
+/// Debug: one step of a firmware update (`mode`: key, send, trial, cancel, install) from the package
+/// unzipped in `dir`. Bytes to write; progress goes to the log.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_otaStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    mode: JString<'local>,
+    dir: JString<'local>,
+    now: jdouble,
+) -> jbyteArray {
+    let strings = env.get_string(&mode).map(String::from).and_then(|mode| Ok((mode, String::from(env.get_string(&dir)?))));
+    let result = match strings {
+        Ok((mode, dir)) => unsafe { connection(handle) }.ota_start(&mode, &dir, now),
+        Err(error) => Err(error.to_string()),
+    };
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_probeConfig<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    hex: JString<'local>,
+    now: jdouble,
+) -> jbyteArray {
+    let result = match env.get_string(&hex) {
+        Ok(hex) => unsafe { connection(handle) }.probe_config(&String::from(hex), now),
+        Err(error) => Err(error.to_string()),
+    };
+    bytes_out(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_deviceInfo<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let info = unsafe { connection(handle) }.device_info();
+    json_out(&mut env, Ok(info))
+}
+
+/// Debug: check, download and keep the firmware Meta offers this band (blocking HTTP: call off
+/// the main thread). A summary as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    session: JString<'local>,
+    serial: JString<'local>,
+    version: JString<'local>,
+    dir: JString<'local>,
+) -> jstring {
+    let result = (|| {
+        let session = get_string(&mut env, &session)?;
+        let serial = get_string(&mut env, &serial)?;
+        let version = get_string(&mut env, &version)?;
+        let dir = get_string(&mut env, &dir)?;
+        crate::firmware::archive(&session, &serial, &version, &dir)
+    })();
+    json_out(&mut env, result)
+}
+
+/// The band's handwriting into the text field in front, on or off; bytes to write.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+    before: JString<'local>,
+    popup: jboolean,
+    now: jdouble,
+) -> jbyteArray {
+    let result = match env.get_string(&before) {
+        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before), popup != 0, now),
+        Err(error) => Err(error.to_string()),
+    };
+    bytes_out(&mut env, result)
+}
+
+/// A swipe left in a text field: take back the last word; false when none of ours was left.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldDeleteWord<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jboolean {
+    jboolean::from(unsafe { connection(handle) }.field_delete_word(now))
+}
+
+/// A swipe up in a text field: show the word's suggestions; false when there are none.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChoose<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jboolean {
+    jboolean::from(unsafe { connection(handle) }.field_choose())
+}
+
+/// While choosing: the next (`forward`) or previous suggestion first.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChooseStep<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    forward: jboolean,
+) {
+    unsafe { connection(handle) }.field_choose_step(forward != 0);
+}
+
+/// While choosing: take the first.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChoosePick<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_choose_pick(now);
+}
+
+/// While choosing: leave it with the word as it was.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChooseCancel<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_choose_cancel(now);
+}
+
+/// A double tap in a text field: the pen goes down.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldPenDown<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_pen_down(now);
+}
+
+/// The text field's edits since the last call, as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldEdits<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jstring {
+    let json = unsafe { connection(handle) }.field_edits(now);
+    json_out(&mut env, Ok(json))
+}
+
+/// Debug: the band's own handwriting on or off; bytes to write.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setBandHandwriting<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.set_band_handwriting(on != 0);
+    bytes_out(&mut env, result)
+}
+
+/// Debug: what the band's handwriting has sent, as JSON; `clear` forgets it afterwards.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_bandHandwriting<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    clear: jboolean,
+) -> jstring {
+    let json = unsafe { connection(handle) }.band_handwriting(clear != 0);
+    json_out(&mut env, Ok(json))
+}
+
+/// The firmware download in progress as `{"version", "done", "total"}` (`{}` when none).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareProgress<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let progress = crate::firmware::download_progress().map_or_else(
+        || "{}".to_owned(),
+        |(version, done, total)| serde_json::json!({"version": version, "done": done, "total": total}).to_string(),
+    );
+    json_out(&mut env, Ok(progress))
+}
+
+/// The handwriting dictionary (`word count` lines); how many words it has.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_wordsLoad<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    text: JString<'local>,
+) -> jint {
+    match get_string(&mut env, &text) {
+        Ok(text) => crate::words::load_dictionary(&text) as jint,
+        Err(message) => {
+            throw(&mut env, &message);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_close<'local>(
     _env: JNIEnv<'local>,
     _class: JClass<'local>,

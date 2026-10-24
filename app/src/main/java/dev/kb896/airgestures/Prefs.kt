@@ -2,10 +2,28 @@ package dev.kb896.airgestures
 
 import android.content.Context
 
+/** How many announced apps get the band's state. */
+private const val ANNOUNCED_KEPT = 8
+
 /** The few settings that outlive a connection. */
 class Prefs(context: Context) {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
+
+    /** Handwriting in text fields: when one has the focus, the band writes into it. */
+    var writeInFields: Boolean
+        get() = prefs.getBoolean("write_in_fields", false)
+        set(value) = prefs.edit().putBoolean("write_in_fields", value).apply()
+
+    /** A word's suggestions (swipe up in a text field) show in a popup, else in the field itself. */
+    var choicesPopup: Boolean
+        get() = prefs.getBoolean("choices_popup", true)
+        set(value) = prefs.edit().putBoolean("choices_popup", value).apply()
+
+    /** The firmware an install committed, until the band reconnects and is checked (0: none). */
+    var otaExpect: Long
+        get() = prefs.getLong("ota_expect", 0)
+        set(value) = prefs.edit().putLong("ota_expect", value).apply()
 
     var paused: Boolean
         get() = prefs.getBoolean("paused", false)
@@ -122,6 +140,23 @@ class Prefs(context: Context) {
 
     /** Anything is set in the During calls layer: it needs the phone permissions to know when a call is on. */
     fun usesCalls() = Gesture.entries.any { callActionId(it) != Mappings.AS_USUAL }
+
+    /** The apps that announced themselves ([ProfileReceiver]), newest first: they get the band's state. */
+    val announced: List<String>
+        get() = prefs.getString("announced", "").orEmpty().split(";").filter { it.isNotEmpty() }
+
+    fun recordAnnounced(pkg: String) {
+        val kept = (listOf(pkg) + announced.filter { it != pkg }).take(ANNOUNCED_KEPT)
+        prefs.edit().putString("announced", kept.joinToString(";")).apply()
+    }
+
+    /**
+     * Debug: extra stream flags to ask the band for on each connection (`1,4,5,7`), logging
+     * what it sends that the app doesn't know. Empty = off. Set by DebugActions.
+     */
+    var probe: String
+        get() = prefs.getString("probe", "").orEmpty()
+        set(value) = prefs.edit().putString("probe", value).apply()
 
     var associationId: Int
         get() = prefs.getInt("association", -1)

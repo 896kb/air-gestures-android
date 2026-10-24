@@ -73,7 +73,19 @@
         <receiver
             android:name=".SequenceRunner"
             android:exported="false" />
+
+        <!-- An app saying it is in front (its own profile) or left; see ProfileReceiver. -->
+        <receiver
+            android:name=".ProfileReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.kb896.airgestures.SET_PROFILE" />
+            </intent-filter>
+        </receiver>
         <activity android:name=".SetupActivity" android:exported="false" />
+        <activity android:name=".FirmwareActivity" android:exported="false" />
+        <activity android:name=".PersonalWordsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".LicensesActivity" android:exported="false" />
         <activity android:name=".ActivityLogActivity" android:exported="false" />
         <!-- The widget's profile picker: a sheet over the home screen, never in recents. -->
         <activity
@@ -166,6 +178,19 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/touch_service" />
+        </service>
+
+        <service
+            android:name=".WriteService"
+            android:exported="false"
+            android:label="${appLabel} handwriting in text fields"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/write_service" />
         </service>
 
         <service

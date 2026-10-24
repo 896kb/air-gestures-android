@@ -8,7 +8,7 @@ use crate::error::{Result, perr};
 enum Value {
     Integer(u64),
     Bytes(Vec<u8>),
-    Fixed,
+    Fixed(Vec<u8>),
 }
 
 /// All fields of one protobuf message, keyed by field number.
@@ -82,7 +82,7 @@ impl ProtoFields {
             let value = if wire == 2 {
                 Value::Bytes(data[offset..offset + size].to_vec())
             } else {
-                Value::Fixed
+                Value::Fixed(data[offset..offset + size].to_vec())
             };
             values.entry(number).or_default().push(value);
             offset += size;
@@ -128,7 +128,78 @@ impl ProtoFields {
     pub fn contains(&self, field: u32) -> bool {
         self.values.contains_key(&field)
     }
+
+    /// Every length-delimited value (strings and nested messages), with its field number.
+    pub fn byte_fields(&self) -> Vec<(u32, &[u8])> {
+        let mut out: Vec<(u32, &[u8])> = self
+            .values
+            .iter()
+            .flat_map(|(&field, values)| {
+                values.iter().filter_map(move |value| match value {
+                    Value::Bytes(bytes) => Some((field, bytes.as_slice())),
+                    _ => None,
+                })
+            })
+            .collect();
+        out.sort_by_key(|(field, _)| *field);
+        out
+    }
+
+    /// A string field (`None` when absent, repeated or not text).
+    pub fn text(&self, field: u32) -> Option<String> {
+        self.bytes(field).ok().and_then(|bytes| std::str::from_utf8(bytes).ok()).map(str::to_owned)
+    }
+
+    /// Every field with its value, sorted: `1=7 3=[12B 0a0b…] 9=f32:0.25`. For the
+    /// stream probe only: values may be plaintext, so never call it on sensor data
+    /// or keys. Byte fields show their first [`DESCRIBE_BYTES`] bytes.
+    pub fn describe(&self) -> String {
+        self.describe_nested(0)
+    }
+
+    /// [`describe`](Self::describe), opening byte fields that parse as messages `{…}` (up to
+    /// [`DESCRIBE_DEPTH`] deep) and showing printable ones as text. A guess: some bytes parse
+    /// as protobuf by chance.
+    pub fn describe_nested(&self, depth: usize) -> String {
+        let mut fields: Vec<_> = self.values.iter().collect();
+        fields.sort_unstable_by_key(|(number, _)| **number);
+        let mut parts = Vec::new();
+        for (number, values) in fields {
+            for value in values {
+                let shown = match value {
+                    Value::Integer(integer) => integer.to_string(),
+                    Value::Bytes(bytes) if !bytes.is_empty() && bytes.iter().all(|b| (0x20..0x7f).contains(b)) => {
+                        format!("{:?}", String::from_utf8_lossy(bytes))
+                    }
+                    Value::Bytes(bytes) if depth < DESCRIBE_DEPTH && !bytes.is_empty() && let Ok(inner) = Self::parse(bytes) => {
+                        format!("{{{}}}", inner.describe_nested(depth + 1))
+                    }
+                    Value::Bytes(bytes) => {
+                        let head: String = bytes.iter().take(DESCRIBE_BYTES).map(|b| format!("{b:02x}")).collect();
+                        let more = if bytes.len() > DESCRIBE_BYTES { "…" } else { "" };
+                        format!("[{}B {head}{more}]", bytes.len())
+                    }
+                    Value::Fixed(bytes) if bytes.len() == 4 => {
+                        let raw = [bytes[0], bytes[1], bytes[2], bytes[3]];
+                        format!("f32:{} u32:{}", f32::from_le_bytes(raw), u32::from_le_bytes(raw))
+                    }
+                    Value::Fixed(bytes) => {
+                        let mut raw = [0u8; 8];
+                        raw.copy_from_slice(bytes);
+                        format!("f64:{} u64:{}", f64::from_le_bytes(raw), u64::from_le_bytes(raw))
+                    }
+                };
+                parts.push(format!("{number}={shown}"));
+            }
+        }
+        parts.join(" ")
+    }
 }
+
+/// How many bytes of a byte field [`ProtoFields::describe`] shows.
+pub const DESCRIBE_BYTES: usize = 24;
+/// How deep [`ProtoFields::describe_nested`] opens nested messages.
+pub const DESCRIBE_DEPTH: usize = 4;
 
 pub fn varint(mut value: u64) -> Vec<u8> {
     let mut bytes = Vec::new();

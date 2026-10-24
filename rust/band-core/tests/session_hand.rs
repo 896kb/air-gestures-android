@@ -9,7 +9,7 @@ fn native_hand_selection_writes_only_handedness_and_checks_an_independent_readba
         let mut peer = Peer::legacy(true, false);
         let initial = if selected == Hand::Left { 0 } else { 1 };
         let desired: u8 = if selected == Hand::Left { 1 } else { 0 };
-        let query = peer.startup.last().unwrap().clone();
+        let query = peer.startup.iter().find(|frame| frame.channel == 0x8006).unwrap().clone();
         assert_eq!(query.channel, 0x8006);
         assert_eq!(query.words, SERVICE_OPEN.to_vec());
         assert_eq!(hex::encode(&query.payload), "08012a00");

@@ -70,4 +70,6 @@ can hold the band at a time. `scripts/push-identity.sh` gives it the desktop's b
 
 MIT, see [`LICENSE`](LICENSE). Parts of the protocol core started from
 [callbacked/kinesis](https://github.com/callbacked/kinesis) (MIT), whose notice is in
-[`LICENSE-kinesis`](LICENSE-kinesis). Fonts: Geist (OFL). Icons: Lucide (ISC).
+[`LICENSE-kinesis`](LICENSE-kinesis). Fonts: Geist (OFL). Icons: Lucide (ISC). Handwriting
+word data: `app/src/main/assets/words.txt` from FrequencyWords (CC BY-SA 4.0, and so this
+file too), `pairs.txt` from Tatoeba (CC BY 2.0 FR); see `app/src/main/assets/licenses.txt`.

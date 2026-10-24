@@ -50,7 +50,7 @@ fn startup_waits_for_its_link_and_device_info_before_opening_input() {
         .unwrap();
     assert!(wrong_id.1.is_empty());
     let accepted = peer.exchange(3, RPC, &device_ok(), 7.0).unwrap();
-    assert_eq!(channels(&accepted.1), vec![0x8005, 0x8005, 0x8006]);
+    assert_eq!(channels(&accepted.1), vec![0x8005, 0x8005, 0x8006, 0x8006]);
     assert!(accepted.0.is_empty() && !peer.session.streams_enabled());
     let repeated_link = peer.exchange(0x8001, LINK, &ready(), 7.0).unwrap();
     let repeated_device = peer.exchange(3, RPC, &device_ok(), 7.0).unwrap();
@@ -96,7 +96,7 @@ fn startup_ignores_input_until_device_info_succeeds() {
             peer.exchange(0x8001, LINK, &fi(1, 1), 0.0).unwrap();
         }
         let device = peer.exchange(3, RPC, &device_ok(), 0.0).unwrap();
-        assert_eq!(channels(&device.1), vec![0x8005, 0x8005, 0x8006]);
+        assert_eq!(channels(&device.1), vec![0x8005, 0x8005, 0x8006, 0x8006]);
         let enabled = peer.exchange(5, RPC, &status(3), 0.0).unwrap();
         assert!(connected(&enabled.0));
         assert!(peer.session.streams_enabled());
@@ -149,7 +149,7 @@ fn native_handshake_subscribes_and_stops_the_same_streams_on_the_same_channel() 
     let mut peer = Peer::legacy(true, false);
     assert_eq!(
         channels(&peer.startup),
-        vec![0x8002, 0x8001, 0x8003, 0x8005, 0x8005, 0x8006]
+        vec![0x8002, 0x8001, 0x8003, 0x8005, 0x8005, 0x8006, 0x8006]
     );
     assert_eq!(peer.startup[0].words, vec![0x81000024, 0x02003000]);
     assert_eq!(peer.startup[1].words, vec![0x02001000]);
@@ -283,10 +283,9 @@ fn unknown_repeated_fields_do_not_break_known_gesture_messages() {
     };
     assert!(gesture.finger == "thumb" && gesture.action == "left");
     assert!(gesture.sequence == 42 && gesture.timestamp_us == 1000);
-    assert!(
-        peer.send(GESTURE, &[payload, fi(1, 43)].concat(), 1.0)
-            .is_err()
-    );
+    // A repeated known field doesn't parse: that frame is skipped, the connection kept.
+    let events = peer.send(GESTURE, &[payload, fi(1, 43)].concat(), 1.0).unwrap();
+    assert!(!events.iter().any(|event| matches!(event, band_core::events::Event::Gesture(_))));
 }
 
 #[test]

@@ -384,7 +384,15 @@ abstract class Screen : Activity() {
     }
 
     /** A modal sheet in the picker's style: title, [body], Cancel (unless [cancel] is off) and [action]. */
-    fun sheet(title: String, body: View, action: String, cancel: Boolean = true, onAction: () -> Boolean): android.app.Dialog {
+    /** [withAction] gets the action button once it's made (to hold it until the body allows). */
+    fun sheet(
+        title: String,
+        body: View,
+        action: String,
+        cancel: Boolean = true,
+        withAction: (TextView) -> Unit = {},
+        onAction: () -> Boolean,
+    ): android.app.Dialog {
         val dialog = android.app.Dialog(this)
         val sheet = column(gap = 14f).apply {
             setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(18f))
@@ -398,7 +406,7 @@ abstract class Screen : Activity() {
             addView(row(gap = 12f).apply {
                 gravity = Gravity.END
                 if (cancel) addView(pill("Cancel") { dialog.dismiss() }.first)
-                addView(pill(action) { if (onAction()) dialog.dismiss() }.first)
+                addView(pill(action) { if (onAction()) dialog.dismiss() }.first.also(withAction))
             }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         dialog.setContentView(scrim(dialog, sheet))

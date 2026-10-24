@@ -30,6 +30,8 @@ class BandService : Service(), BandLink.Listener {
         prefs = Prefs(this)
         actions = Actions(this, ::onLog)
         link = BandLink(this, this)
+        // Unlocking the phone: the band is likely near and about to be used.
+        registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
         calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
@@ -78,6 +80,7 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(unlocked) }
         main.removeCallbacks(updateCheck)
         main.removeCallbacks(idleCheck)
         Alerts.notIdle(this)
@@ -108,6 +111,7 @@ class BandService : Service(), BandLink.Listener {
         state.update { copy(paused = paused) }
         refreshNotification()
         watchIdle()
+        broadcastStatus()
     }
 
     private val idleCheck = Runnable { if (idleNow()) Alerts.idle(this) }
@@ -180,6 +184,52 @@ class BandService : Service(), BandLink.Listener {
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
     fun watchCalls() = calls.start()
 
+    /** Debug: write a raw ConfigReq (hex) to the band; the answer goes to the log. */
+    fun probeConfig(hex: String) = link.probeConfig(hex)
+
+    /** Debug: ask the band's update status (read only); the answer goes to the log. */
+    fun otaStatus() = link.otaStatus()
+    fun otaStart(mode: String, dir: String) {
+        // A new start or a cancel ends whatever the last install showed; a cancel leaves nothing to check.
+        state.update { copy(install = null) }
+        if (mode == "cancel") prefs.otaExpect = 0
+        // What an install would put on the band; checked after its reboot only once the band
+        // accepted it (see followInstall), so a dropped or cancelled update leaves nothing to check.
+        installing = if (mode == "install" || mode == "update") {
+            val manifest = runCatching { JSONObject(java.io.File(dir, "manifest.json").readText()) }.getOrNull()
+            manifest?.optJSONArray("items")?.optJSONObject(0)?.optLong("version")
+        } else null
+        link.otaStart(mode, dir)
+    }
+
+
+    /** The band's handwriting into the text field in front (see WriteService). */
+    /** [before]: the field's text before the cursor, so a sentence's first word gets its capital. */
+    fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before, prefs.choicesPopup)
+    fun fieldEdits() = link.fieldEdits()
+    fun fieldPenDown() = link.fieldPenDown()
+    fun fieldChoose() = link.fieldChoose()
+    fun fieldChooseStep(forward: Boolean) = link.fieldChooseStep(forward)
+    fun fieldChoosePick() = link.fieldChoosePick()
+    fun fieldChooseCancel() = link.fieldChooseCancel()
+
+    /** Whether the band's firmware reads handwriting (a `hw_` model); null before it said. */
+    fun bandWrites(): Boolean? = link.deviceInfo()?.takeIf { it.has("handwriting") }?.optBoolean("handwriting")
+
+    /** Debug: the band's own handwriting (see BandLink.setBandHandwriting). */
+    fun setBandHandwriting(on: Boolean) = link.setBandHandwriting(on)
+    fun bandHandwriting(clear: Boolean = false) = link.bandHandwriting(clear)
+
+    /** What the band said about itself (see BandLink.deviceInfo). */
+    fun deviceInfo() = link.deviceInfo()
+
+    private val unlocked = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = nudge()
+    }
+
+    /** The band is probably near: connect directly if still waiting for it. */
+    fun nudge() = link.nudge()
+
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
         prefs.hand = hand
@@ -189,9 +239,13 @@ class BandService : Service(), BandLink.Listener {
     // BandLink.Listener: called from Bluetooth and link threads.
 
     override fun onPhase(phase: Phase, band: String?) = main.post {
-        state.update { copy(phase = phase, band = band ?: this.band) }
+        state.update {
+            val back = phase == Phase.CONNECTED && install?.stage == "restarting"
+            copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
+        }
         refreshNotification()
         watchIdle()
+        broadcastStatus()
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
@@ -218,16 +272,59 @@ class BandService : Service(), BandLink.Listener {
                 dial = status.optString("dial", dial),
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
+                firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
+                otaStatus = status.optString("ota_status").takeUnless { status.isNull("ota_status") },
+                otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
+                otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
+                otaBusy = status.optBoolean("ota_busy"),
+                otaCancellable = status.optBoolean("ota_cancellable", true),
+                otaItems = status.optJSONArray("ota_items")?.let { items ->
+                    (0 until items.length()).map { i ->
+                        val item = items.getJSONObject(i)
+                        OtaItem(item.getString("name"), item.getLong("size"), item.getLong("sent"), item.getString("stage"))
+                    }
+                }.orEmpty(),
             )
         }
         val now = state.value
+        if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
+        if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
         if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
         if (level != null && (level != before.battery || now.charging != before.charging)) {
             Alerts.battery(this, now.band, level, now.charging)
         }
         refreshNotification()
+        broadcastStatus()
     }.let {}
+
+    /** What [broadcastStatus] last sent, so an unchanged state sends nothing. */
+    private var sent: List<Any?>? = null
+
+    /**
+     * Tell the apps that announced themselves how the band is: from their side a flat battery
+     * and a lost connection look the same (the gestures stop). Only those apps, so the band's
+     * state isn't sent to the whole phone. [force]: send even if nothing changed (a new app).
+     */
+    private fun broadcastStatus(force: Boolean = false) {
+        val s = state.value
+        val connected = s.phase == Phase.CONNECTED
+        val now = listOf(s.battery, s.charging, connected, s.paused)
+        if (now == sent && !force) return
+        sent = now
+        for (pkg in prefs.announced) {
+            runCatching {
+                sendBroadcast(
+                    Intent(ACTION_STATUS)
+                        .setPackage(pkg)
+                        .putExtra(EXTRA_BATTERY, s.battery ?: -1)
+                        .putExtra(EXTRA_CHARGING, s.charging)
+                        .putExtra(EXTRA_CONNECTED, connected)
+                        .putExtra(EXTRA_CONTROLS, !s.paused),
+                )
+            }
+        }
+    }
 
     override fun onActions(actions: List<String>) = main.post {
         // In a lesson nothing runs; the lesson sees what would have.
@@ -268,6 +365,41 @@ class BandService : Service(), BandLink.Listener {
         prefs.practising = false
         if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused)
     }
+
+    /**
+     * After an install the band reboots; when it reconnects, say whether it now runs the firmware
+     * that was committed (as Meta AI checks), and ask its update status for the rest (state, ML).
+     */
+    private fun checkInstall(firmware: String) {
+        val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
+        prefs.otaExpect = 0
+        val installed = firmware == expected.toString()
+        onLog(if (installed) "ota: INSTALLED: the band runs $firmware"
+              else "ota: INSTALL NOT CONFIRMED: the band runs $firmware, not $expected")
+        state.update {
+            val began = install?.since ?: android.os.SystemClock.uptimeMillis()
+            copy(install = Install(expected, if (installed) "installed" else "failed", began, firmware))
+        }
+        // The band reports its version before it accepts requests: ask a moment later.
+        main.postDelayed({ otaStatus() }, 3_000)
+    }
+
+    /**
+     * The update's latest line: once the band accepts Install it restarts (the stage shows
+     * that until it's back); a refused or failed update leaves nothing to check afterwards.
+     */
+    private fun followInstall(line: String?) {
+        line ?: return
+        val expected = installing ?: return
+        if (line.startsWith("COMMITTED") || line.startsWith("no answer to Commit")) {
+            installing = null
+            prefs.otaExpect = expected
+            state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
+        }
+    }
+
+    /** The firmware an install or update in progress would put on the band. */
+    private var installing: Long? = null
 
     override fun onLog(line: String) = main.post {
         android.util.Log.i("AirGestures", line)
@@ -327,7 +459,30 @@ class BandService : Service(), BandLink.Listener {
         val claiming: Boolean = false,
         /** The profile in force; null while there's only one (nothing to tell apart). */
         val profile: String? = null,
+        /** The firmware version the band reported on connecting. */
+        val firmware: String? = null,
+        /** The band's last update status, the latest line of the running or last update, and whether one runs. */
+        val otaStatus: String? = null,
+        /** The key version the band reported with its update status. */
+        val otaKek: Long? = null,
+        val otaProgress: String? = null,
+        val otaBusy: Boolean = false,
+        /** Cancelling is safe now: the band hasn't been told to install. */
+        val otaCancellable: Boolean = true,
+        /** Each file of that update and how far it is. */
+        val otaItems: List<OtaItem> = emptyList(),
+        /** The install after the band accepted it: restarting, then checked. */
+        val install: Install? = null,
     )
+
+    /**
+     * An install the band accepted: [stage] is "restarting", "checking", "installed" or
+     * "failed"; [since] (uptime ms) when it began; [running] what the band reported back.
+     */
+    data class Install(val version: Long, val stage: String, val since: Long, val running: String? = null)
+
+    /** One file of a firmware update: [stage] is "waiting", "sending", "checking" or "done". */
+    data class OtaItem(val name: String, val size: Long, val sent: Long, val stage: String)
 
     /** A tiny main-thread observable (no AndroidX in this app). */
     class Observable<T>(initial: T) {
@@ -367,6 +522,18 @@ class BandService : Service(), BandLink.Listener {
         const val ACTION_STOP = "dev.kb896.airgestures.STOP"
         const val ACTION_START = "dev.kb896.airgestures.START"
 
+        /** From an app: `profile` = its package as it comes to the front, "" as it leaves. */
+        const val ACTION_SET_PROFILE = "dev.kb896.airgestures.SET_PROFILE"
+        const val EXTRA_PROFILE = "profile"
+
+        /** The band's state, sent to the apps that have announced themselves. */
+        const val ACTION_STATUS = "dev.kb896.airgestures.STATUS"
+        const val EXTRA_BATTERY = "battery"
+        const val EXTRA_CHARGING = "charging"
+        const val EXTRA_CONNECTED = "connected"
+        /** The controls are on (false while the middle hold, a tile or the app turned them off). */
+        const val EXTRA_CONTROLS = "controls"
+
         val state = Observable(State())
         var instance: BandService? = null
             private set
@@ -397,11 +564,27 @@ class BandService : Service(), BandLink.Listener {
          * The accessibility service saw [pkg] come to the front: if that changes the profile
          * in force (into or out of an app's own), the band gets it and the user is told.
          */
-        fun foreground(context: Context, pkg: String?) {
+        fun foreground(context: Context, pkg: String?) = front(context) { Profiles.seen = pkg }
+
+        /**
+         * An app said it came to the front ([pkg]) or left (null): its own profile applies until
+         * it leaves, wherever the accessibility service thinks the user is. It also gets the
+         * band's state from now on ([ACTION_STATUS]), and once right away.
+         */
+        fun announce(context: Context, pkg: String?) {
+            front(context) { Profiles.announced = pkg }
+            if (pkg == null) return
+            val prefs = Prefs(context)
+            val first = pkg !in prefs.announced
+            prefs.recordAnnounced(pkg)
+            if (first) instance?.broadcastStatus(force = true)
+        }
+
+        private fun front(context: Context, change: () -> Unit) {
             val list = Profiles.load(context)
             val before = list.active(Profiles.foreground)
-            Profiles.foreground = pkg
-            val after = list.active(pkg)
+            change()
+            val after = list.active(Profiles.foreground)
             if (after.id != before.id) instance?.switched(after)
         }
 

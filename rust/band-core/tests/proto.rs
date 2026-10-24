@@ -170,3 +170,28 @@ fn a_whole_block_of_padding_after_an_aligned_frame_is_dropped() {
     assert_eq!(frames[0].words, vec![0x02002001]);
     assert_eq!(frames[0].payload, second);
 }
+
+/// Build 64 splits frames across records and pads every record. A record ending in a
+/// partial frame exactly 4 bytes short, padded with 4 bytes of 0xc4, must not be read as
+/// that frame complete (the next frame would start 4 bytes early): seen mid-update.
+#[test]
+fn a_split_frame_padded_to_its_missing_length_is_not_completed_by_the_padding() {
+    let mut receiver = DataXReceiver::default();
+    // Every record padded: first a frame on a block boundary with a whole block of 0xd0.
+    let aligned = encode_frame(2, &[0x02003001], &(0..24).collect::<Vec<u8>>()).unwrap();
+    assert_eq!(receiver.feed(&[aligned, vec![0xd0; 16]].concat()).unwrap().len(), 1);
+    // A 48-byte gyro frame split 44 + 4: the first record carries 44 bytes + 4 of 0xc4,
+    // exactly as long as the whole frame.
+    let payload: Vec<u8> = (0..40).collect();
+    let gyro = encode_frame(5, &[0x0200020f], &payload).unwrap();
+    assert_eq!(gyro.len(), 48);
+    let next = encode_frame(5, &[0x0200020f], &[7; 8]).unwrap();
+    let first = [gyro[..44].to_vec(), vec![0xc4; 4]].concat();
+    assert!(receiver.feed(&first).unwrap().is_empty(), "44 of 48 bytes: not a frame yet");
+    let rest = [gyro[44..].to_vec(), next.clone()].concat();
+    let pad = 16 - rest.len() % 16;
+    let frames = receiver.feed(&[rest, vec![0xc0 + pad as u8; pad]].concat()).unwrap();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0].payload, payload);
+    assert_eq!(frames[1].payload, vec![7; 8]);
+}

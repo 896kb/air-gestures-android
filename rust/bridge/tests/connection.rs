@@ -156,3 +156,26 @@ fn a_band_on_the_other_wrist_is_set_to_the_chosen_hand_after_connecting() {
         connection.status_json()
     );
 }
+
+#[test]
+fn the_stream_probe_logs_the_flags_and_every_gesture_in_full() {
+    let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
+    let mut connection = Connection::new(&identity.private_bytes(), 0, false, "volume", "").unwrap();
+    connection.set_probe("1, 4,7,x");
+    let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
+    let request = connection.request().unwrap();
+    pump(&mut connection, &mut band, request, 1.0);
+    let log = connection.take_log();
+    assert!(log.contains(&"connected".to_owned()));
+    assert!(log.iter().any(|line| line.starts_with("probe: stream flags (request 3): ")), "{log:?}");
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    let log = connection.take_log();
+    assert!(log.iter().any(|line| line.starts_with("probe gesture thumb down unknown: 1=")), "{log:?}");
+}
+
+#[test]
+fn without_the_probe_the_session_notes_stay_out_of_the_log() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    assert!(!connection.take_log().iter().any(|line| line.starts_with("probe")));
+}

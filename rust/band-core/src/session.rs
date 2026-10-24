@@ -23,9 +23,20 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
+use crate::handwriting::{Decoder, PAUSE, SYMBOLS, Written, scores, symbol};
+use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
+/// The request id of [`BandSession::request_active`], apart from the counted ones.
+const ACTIVE_REQUEST: u64 = 1 << 20;
+/// The request id of [`BandSession::set_band_handwriting`]'s state change.
+const HANDWRITING_REQUEST: u64 = (1 << 20) + 1;
+/// Gyro and orientation: off while a firmware update runs (see [`BandSession::ota_start`]).
+const MOTION_FIELDS: [u32; 2] = [6, 8];
+/// The stream probe shows this many messages of each kind, then one in [`PROBE_EVERY`].
+const PROBE_SHOWN: usize = 40;
+const PROBE_EVERY: usize = 200;
 /// The channel as the protocol logic knows it: the direction flag and the low
 /// byte. Newer firmware sets extra bits (0x1c00) on channels it answers or
 /// opens: 0x9c01 for 0x8001, 0x9c02 for 0x8002.
@@ -42,10 +53,14 @@ const SERVICE_OPEN: [u32; 2] = [0x8100ce56, 0x02000314];
 const RPC_RESPONSE: u32 = 0x02000315;
 const SERVICE_REJECTED: u32 = 0x0300c001;
 const RAW_EMG: u32 = 0x0200020a;
+/// The on-band model's output (`RawInferenceSample`): 9 gesture scores, or 100 in handwriting.
+const RAW_INFERENCE: u32 = 0x0200020c;
 const GESTURE: u32 = 0x0200020d;
 const GYRO: u32 = 0x0200020f;
 const ORIENTATION: u32 = 0x02000212;
 const LINK_SETUP: u32 = 0x02001000;
+/// The firmware's log lines, sent once some stream flag beyond 3/6/8 is on (found by the probe).
+const BAND_LOG: u32 = 0x02000316;
 
 const FINGERS: [&str; 5] = ["unknown", "thumb", "index", "middle", "notApplicable"];
 const ACTIONS: [&str; 21] = [
@@ -141,6 +156,8 @@ struct HandRequest {
     hand: Option<Hand>,
     reading: bool,
     deadline: f64,
+    /// A probe's config write ([`BandSession::probe_config`]), not the hand.
+    probe: bool,
 }
 
 /// What one `feed` produced: bytes to write to the band and events to act on.
@@ -169,8 +186,16 @@ pub struct BandSession {
     guessing: bool,
     /// Traffic the session skipped, described for the log.
     diagnostics: Vec<String>,
+    /// What the band said about itself while connecting.
+    device_info: Option<DeviceInfo>,
     /// Describe every frame once streaming, too (debug logging).
     log_frames: bool,
+    /// Extra stream flags to request, to find out what else the band sends (see `set_probe`).
+    probe: Vec<u32>,
+    /// The last stream flags the band reported while probing, so only a change is logged.
+    probe_flags: Option<String>,
+    /// Messages of each unknown type seen while probing, to keep the log readable.
+    probe_counts: HashMap<u32, usize>,
     peer_seed: Option<Vec<u8>>,
     pending: Vec<u8>,
     transmitter: Option<AirShieldCipher>,
@@ -208,6 +233,35 @@ pub struct BandSession {
     configuration_id: u64,
     hand_request: Option<HandRequest>,
     hand: Option<Hand>,
+    /// The id of an asked update status ([`BandSession::ota_status`]) not yet answered.
+    ota_request: Option<u64>,
+    /// A firmware update in progress ([`BandSession::ota_start`]).
+    ota_job: Option<OtaJob>,
+    /// The band's last update status, and the last line of the update in progress (or done).
+    ota_last: Option<OtaStatus>,
+    ota_progress: Option<String>,
+    /// The files of the running (or last) update and how far each is.
+    ota_items: Vec<OtaItemProgress>,
+    /// Gyro and orientation are paused for an update: less traffic from the band while it
+    /// acknowledges chunks (with them on, build 64 updates kept losing their place).
+    ota_quiet: bool,
+    /// Debug: the band's own handwriting ([`BandSession::set_band_handwriting`]), and what it sent.
+    band_handwriting: Option<BandHandwriting>,
+}
+
+/// What the band's handwriting mode has sent so far.
+#[derive(Default)]
+pub struct BandHandwriting {
+    pub on: bool,
+    pub decoder: Decoder,
+    /// Symbols as they came: (index, symbol, margin over the runner-up).
+    pub tokens: Vec<(usize, &'static str, f32)>,
+    pub samples: usize,
+    /// The last sample's `pipeline_type` and score count.
+    pub pipeline: u64,
+    pub floats: usize,
+    /// Symbols not yet taken by [`BandSession::take_written`] (for typing into text fields).
+    pending: Vec<Written>,
 }
 
 impl BandSession {
@@ -235,7 +289,11 @@ impl BandSession {
             variant: SCHEME_3,
             guessing: false,
             diagnostics: Vec::new(),
+            device_info: None,
             log_frames: false,
+            probe: Vec::new(),
+            probe_flags: None,
+            probe_counts: HashMap::new(),
             peer_seed: None,
             pending: Vec::new(),
             transmitter: None,
@@ -273,6 +331,13 @@ impl BandSession {
             configuration_id: 0,
             hand_request: None,
             hand: None,
+            ota_request: None,
+            ota_job: None,
+            ota_last: None,
+            ota_progress: None,
+            ota_items: Vec::new(),
+            ota_quiet: false,
+            band_handwriting: None,
         }
     }
 
@@ -298,6 +363,36 @@ impl BandSession {
 
     /// Describe what was skipped since the last call (relay/control records,
     /// frames nothing handles), for the log. Types and sizes only, no payloads.
+    /// Also request these stream flags, and describe what comes back: the flags the band
+    /// reports, every gesture message in full, and any message type the session doesn't
+    /// know. For finding streams beyond gestures and motion (handwriting?). Set before
+    /// connecting; the known flags (2 = raw sEMG, 3, 6, 8) are left out.
+    pub fn set_probe(&mut self, fields: Vec<u32>) {
+        self.probe = fields
+            .into_iter()
+            .filter(|field| *field != 0 && *field != 2 && !STREAM_FIELDS.contains(field))
+            .collect();
+    }
+
+    fn probing(&self) -> bool {
+        !self.probe.is_empty()
+    }
+
+    /// The first [`PROBE_SHOWN`] messages of a kind, then every [`PROBE_EVERY`]th, with its count.
+    fn probe_note(&mut self, kind: u32, line: impl FnOnce() -> String) {
+        let count = self.probe_counts.entry(kind).or_default();
+        *count += 1;
+        let count = *count;
+        if count <= PROBE_SHOWN || count % PROBE_EVERY == 0 {
+            self.diagnostics.push(format!("probe #{count} {}", line()));
+        }
+    }
+
+    /// What the band said about itself while connecting (none before then).
+    pub fn device_info(&self) -> Option<&DeviceInfo> {
+        self.device_info.as_ref()
+    }
+
     pub fn take_diagnostics(&mut self) -> Vec<String> {
         if let Some(receiver) = self.receiver.as_mut() {
             self.diagnostics.append(&mut receiver.skipped);
@@ -533,6 +628,9 @@ impl BandSession {
                     }
                 })?;
             self.pending.clear();
+            if self.receiver.as_ref().is_some_and(|receiver| receiver.cipher.pads_aligned()) {
+                self.datax.set_always_padded();
+            }
             for plaintext in records {
                 self.authenticated_packets += 1;
                 let frames = self.datax.feed(&plaintext)?;
@@ -568,7 +666,28 @@ impl BandSession {
                             frame.payload.len()
                         ));
                     }
-                    let produced = self.input(&frame, time, &mut outgoing)?;
+                    let produced = match self.input(&frame, time, &mut outgoing) {
+                        // A frame whose protobuf doesn't parse (seen mid-update on build 64) is
+                        // dropped, not the connection: the record carrying it was authenticated.
+                        Err(BandError::Protocol(message))
+                            if self.setup_stage == SetupStage::Input && message.contains("protobuf") =>
+                        {
+                            let head: String = frame.payload.iter().take(24).map(|b| format!("{b:02x}")).collect();
+                            self.diagnostics.push(format!(
+                                "skipped a frame ({message}): ch {:#x} words {:08x?} {}B {head}",
+                                frame.channel,
+                                frame.words,
+                                frame.payload.len()
+                            ));
+                            // The records just before, to see how the reading lost its place.
+                            for (age, record) in self.datax.recent().iter().enumerate() {
+                                let hex: String = record.iter().map(|b| format!("{b:02x}")).collect();
+                                self.diagnostics.push(format!("skipped: record -{age} ({}B) {hex}", record.len()));
+                            }
+                            Vec::new()
+                        }
+                        other => other?,
+                    };
                     events.extend(produced);
                 }
                 if self.streaming && !self.stopping && time - self.last_heartbeat >= 0.2 {
@@ -665,6 +784,7 @@ impl BandSession {
         self.raw_requested = true;
         let control: Vec<u8> = std::iter::once(field_int(2, u64::from(enabled)))
             .chain(STREAM_FIELDS.iter().map(|&field| field_int(field, 1)))
+            .chain(self.probe.iter().map(|&field| field_int(field, 1)))
             .flatten()
             .collect();
         let frame = encode_frame(
@@ -688,6 +808,23 @@ impl BandSession {
         }
         self.dial = PinchDial::default();
         self.request_hand(Some(hand), false, time)
+    }
+
+    /// Put the band in its active state (`ConfigReq.deviceState` = ACTIVE), as Meta AI's gesture
+    /// screens do. The band can come up in standby, notably after a firmware update (seen after
+    /// installing build 70): it then runs its wake model (`ia_od_…`), whose only gesture, "IA",
+    /// it drops before sending (`index_ia_enabled=no`), so the app sees nothing at all. We can't
+    /// watch for IA for that reason; asking for active on every connection covers it instead.
+    /// The answer isn't needed.
+    /// Sent right after the hand read (which opens the service), under its own request id
+    /// so the hand requests keep theirs.
+    fn request_active(&mut self) -> Result<Vec<u8>> {
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            &[],
+            &[field_int(1, ACTIVE_REQUEST), field_bytes(5, &field_int(6, 2))].concat(),
+        )?;
+        self.encrypt(&frame)
     }
 
     fn request_hand(&mut self, hand: Option<Hand>, reading: bool, time: f64) -> Result<Vec<u8>> {
@@ -715,8 +852,204 @@ impl BandSession {
             hand,
             reading,
             deadline: time + 5.0,
+            probe: false,
         });
         Ok(bytes)
+    }
+
+    /// Probe only: write `body` as a ConfigReq (the fields of the config read, e.g. 46 =
+    /// `{3=1}`), log the band's answer, then read the whole config back into the log.
+    pub fn probe_config(&mut self, body: &[u8], time: f64) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        ProtoFields::parse(body)?;
+        let id = self.configuration_id + 1;
+        let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            words,
+            &[field_int(1, id), field_bytes(5, body)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        self.diagnostics.push(format!("probe: writing config {}", ProtoFields::parse(body)?.describe_nested(0)));
+        self.hand_request = Some(HandRequest {
+            id,
+            hand: None,
+            reading: false,
+            deadline: time + 5.0,
+            probe: true,
+        });
+        Ok(bytes)
+    }
+
+    /// Debug: ask the band's update service for its status, read only: an empty
+    /// `OtaReq.deviceInfoRequest` (field 7 of the RPC request, beside ConfigReq's 5, on the
+    /// same service). The answer (`OtaResp.deviceInfoResponse`: protocol version, state,
+    /// firmware and model versions, key version) goes to the log.
+    pub fn ota_status(&mut self) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() || self.ota_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        let id = self.configuration_id + 1;
+        let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+        let ota = field_bytes(1, &[]);
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            words,
+            &[field_int(1, id), field_bytes(7, &ota)].concat(),
+        )?;
+        let bytes = self.encrypt(&frame)?;
+        self.configuration_id = id;
+        self.ota_request = Some(id);
+        self.diagnostics.push(format!("ota: asking the band's update status (request {id})"));
+        Ok(bytes)
+    }
+
+    /// The band's last reported update status (see [`ota_status`](Self::ota_status)).
+    pub fn ota_last_status(&self) -> Option<OtaStatus> {
+        self.ota_last
+    }
+
+    /// The latest line of the running (or last) update, and whether one is running.
+    pub fn ota_progress(&self) -> (Option<&str>, bool) {
+        (self.ota_progress.as_deref(), self.ota_job.is_some())
+    }
+
+    /// Whether a Cancel is safe now: no update running, or one that hasn't sent Commit.
+    pub fn ota_cancellable(&self) -> bool {
+        self.ota_job.as_ref().is_none_or(OtaJob::cancellable)
+    }
+
+    /// The files of the running (or last) update and how far each is.
+    pub fn ota_items(&self) -> &[OtaItemProgress] {
+        &self.ota_items
+    }
+
+    fn ota_log(&mut self, lines: Vec<String>) {
+        if let Some(last) = lines.last() {
+            self.ota_progress = Some(last.trim_start_matches("ota: ").to_owned());
+        }
+        self.diagnostics.extend(lines);
+    }
+
+    /// Debug: run a firmware update (see [`crate::ota`]): a trial that ends with Abort, or an
+    /// install that ends with Commit. Progress goes to the log; returns the first bytes to write.
+    pub fn ota_start(&mut self, plan: OtaPlan, time: f64) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() || self.ota_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        // Cancel stops a running update (before its Commit), then aborts what the band holds.
+        if let Some(job) = &self.ota_job {
+            if plan.mode != crate::ota::OtaMode::Cancel || job.mode() == crate::ota::OtaMode::Cancel {
+                return Err(BandError::Busy("An update is already running.".into()));
+            }
+            if !job.cancellable() {
+                return Err(BandError::Busy("The band is installing: it isn't safe to cancel now.".into()));
+            }
+            self.ota_job = None;
+            self.diagnostics.push("ota: stopping the update".into());
+        }
+        let mut job = OtaJob::new(plan);
+        let mut ids = self.configuration_id;
+        let bodies = job.begin(&mut ids, time);
+        let mut bytes = self.ota_frames(bodies, ids)?;
+        bytes.extend(self.set_ota_quiet(true)?);
+        let lines = job.log();
+        self.ota_log(lines);
+        self.ota_items = job.items();
+        self.ota_job = Some(job);
+        Ok(bytes)
+    }
+
+    /// Debug: resend late update chunks and give up on silent requests; bytes to write.
+    pub fn ota_tick(&mut self, time: f64) -> Result<Vec<u8>> {
+        let Some(mut job) = self.ota_job.take() else { return Ok(Vec::new()) };
+        if self.stopping {
+            return Ok(Vec::new());
+        }
+        let mut ids = self.configuration_id;
+        let bodies = job.tick(&mut ids, time);
+        let lines = job.log();
+        self.ota_log(lines);
+        self.ota_items = job.items();
+        let mut bytes = self.ota_frames(bodies, ids)?;
+        if job.done() {
+            bytes.extend(self.set_ota_quiet(false)?);
+        } else {
+            self.ota_job = Some(job);
+        }
+        Ok(bytes)
+    }
+
+    /// Debug: the band's own handwriting on or off. On: `deviceState` HANDWRITING_CC (4), with
+    /// standby off (as Meta AI's handwriting check sets it), and the RawInference stream; off:
+    /// back to ACTIVE (2), without it. What it sends is decoded as it comes ([`Self::band_handwriting`]).
+    pub fn set_band_handwriting(&mut self, on: bool) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.ota_job.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        let state = if on { field_int(6, 4) } else { field_int(6, 2) };
+        let config = if on { [state, field_int(13, 0), field_int(21, 0)].concat() } else { state };
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            &[],
+            &[field_int(1, HANDWRITING_REQUEST), field_bytes(5, &config)].concat(),
+        )?;
+        let mut bytes = self.encrypt(&frame)?;
+        let handwriting = self.band_handwriting.get_or_insert_with(BandHandwriting::default);
+        if on && !handwriting.on {
+            *handwriting = BandHandwriting::default();
+        }
+        handwriting.on = on;
+        bytes.extend(self.stream_request(3, Some(true))?);
+        Ok(bytes)
+    }
+
+    /// Debug: what the band's handwriting mode has sent (None before it was turned on).
+    pub fn band_handwriting(&self) -> Option<&BandHandwriting> {
+        self.band_handwriting.as_ref()
+    }
+
+    /// The symbols the band wrote since the last call, oldest first.
+    pub fn take_written(&mut self) -> Vec<Written> {
+        self.band_handwriting.as_mut().map(|h| std::mem::take(&mut h.pending)).unwrap_or_default()
+    }
+
+    /// Whether the band is in its handwriting state (as asked).
+    pub fn band_writing(&self) -> bool {
+        self.band_handwriting.as_ref().is_some_and(|h| h.on)
+    }
+
+    /// Debug: forget what the band's handwriting sent so far.
+    pub fn clear_band_handwriting(&mut self) {
+        if let Some(handwriting) = &mut self.band_handwriting {
+            let on = handwriting.on;
+            *handwriting = BandHandwriting { on, ..BandHandwriting::default() };
+        }
+    }
+
+    /// Pause (or resume) gyro and orientation for an update; the bytes to write.
+    fn set_ota_quiet(&mut self, quiet: bool) -> Result<Vec<u8>> {
+        if self.ota_quiet == quiet {
+            return Ok(Vec::new());
+        }
+        self.ota_quiet = quiet;
+        self.stream_request(3, Some(true))
+    }
+
+    /// Frame and encrypt update requests on the configuration service; `ids` is the counter after them.
+    fn ota_frames(&mut self, bodies: Vec<Vec<u8>>, ids: u64) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        for body in bodies {
+            let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+            let frame = encode_frame(CONFIGURATION_CHANNEL, words, &body)?;
+            out.extend(self.encrypt(&frame)?);
+            self.configuration_id = self.configuration_id.max(1);
+        }
+        self.configuration_id = self.configuration_id.max(ids);
+        Ok(out)
     }
 
     fn receive_hand(
@@ -732,6 +1065,15 @@ impl BandSession {
             return Ok(Vec::new());
         }
         self.hand_request = None;
+        if request.probe {
+            self.diagnostics.push(format!("probe: config write answer: {}", fields.describe_nested(0)));
+            outgoing.extend(self.request_hand(None, true, time)?);
+            return Ok(Vec::new());
+        }
+        if self.probing() && request.reading {
+            // Every setting the band reports, to find ones beyond the hand (a model choice?).
+            self.diagnostics.push(format!("probe: band config: {}", fields.describe_nested(0)));
+        }
         let failure = |message: &str| vec![Event::HandednessFailure(message.to_owned())];
         if time >= request.deadline {
             self.hand = None;
@@ -1046,10 +1388,15 @@ impl BandSession {
         if enabled == Some(false) && self.raw_requested {
             selected.insert(0, 2);
         }
+        selected.extend(&self.probe);
+        let quiet = self.ota_quiet;
+        let inference = self.band_handwriting.as_ref().map(|h| h.on);
         let control: Vec<u8> = match enabled {
             Some(on) => selected
                 .iter()
-                .flat_map(|&field| field_int(field, u64::from(on)))
+                .flat_map(|&field| field_int(field, u64::from(on && !(quiet && MOTION_FIELDS.contains(&field)))))
+                // The model's raw output (field 4), only while the band writes.
+                .chain(inference.map_or_else(Vec::new, |write| field_int(4, u64::from(on && write))))
                 .collect(),
             None => Vec::new(),
         };
@@ -1152,6 +1499,10 @@ impl BandSession {
                     "The band rejected the input subscription. Try reconnecting.",
                 ));
             }
+            if route(frame.channel) == 6 && self.ota_request.take().is_some() {
+                self.diagnostics.push("ota: the band rejected the update status request".into());
+                return Ok(Vec::new());
+            }
             if route(frame.channel) == 6 && self.hand_request.is_some() {
                 self.hand_request = None;
                 self.hand = None;
@@ -1162,7 +1513,48 @@ impl BandSession {
             return Ok(Vec::new());
         }
         // Ignore unrelated services without trying to interpret their protobuf schema.
+        if kind == RAW_INFERENCE
+            && let Some(handwriting) = &mut self.band_handwriting
+            && handwriting.on
+        {
+            if let Ok(sample) = ProtoFields::parse(&frame.payload) {
+                let floats = sample.bytes(3).map(scores).unwrap_or_default();
+                handwriting.samples += 1;
+                handwriting.pipeline = sample.integer(10).unwrap_or(0);
+                handwriting.floats = floats.len();
+                if floats.len().is_multiple_of(SYMBOLS) {
+                    for chunk in floats.chunks(SYMBOLS) {
+                        if let Some((index, margin)) = handwriting.decoder.push(chunk) {
+                            let shown = if index == PAUSE { "pause" } else { symbol(index) };
+                            handwriting.tokens.push((index, shown, margin));
+                            if handwriting.tokens.len() > 500 {
+                                handwriting.tokens.drain(..100);
+                            }
+                        }
+                    }
+                    handwriting.pending.append(&mut handwriting.decoder.finished);
+                }
+            }
+            return Ok(Vec::new());
+        }
         if ![RPC_RESPONSE, RAW_EMG, GESTURE, GYRO, ORIENTATION].contains(&kind) {
+            if self.probing() && self.setup_stage == SetupStage::Input {
+                // The firmware's own log lines (`[time] <inf> module: text`): every one, as text.
+                if kind == BAND_LOG
+                    && let Some(text) = ProtoFields::parse(&frame.payload)
+                        .ok()
+                        .and_then(|fields| ProtoFields::parse(fields.bytes(3).ok()?).ok())
+                        .and_then(|line| String::from_utf8(line.bytes(1).ok()?.to_vec()).ok())
+                {
+                    self.diagnostics.push(format!("band log: {}", text.trim_end()));
+                    return Ok(Vec::new());
+                }
+                let shown = ProtoFields::parse(&frame.payload)
+                    .map_or_else(|_| "not protobuf".to_owned(), |fields| fields.describe());
+                let channel = frame.channel;
+                let size = frame.payload.len();
+                self.probe_note(kind, || format!("unknown kind {kind:08x} ch {channel:#x} {size}B: {shown}"));
+            }
             return Ok(Vec::new());
         }
         if kind == RPC_RESPONSE
@@ -1171,6 +1563,11 @@ impl BandSession {
             && !self.stopping
         {
             let fields = ProtoFields::parse(&frame.payload)?;
+            self.device_info = DeviceInfo::find(&fields, 0).or(self.device_info.take());
+            if self.probing() {
+                // DeviceInfoResp: firmware, model ids, protocol version, features (handwriting).
+                self.diagnostics.push(format!("probe: device info: {}", fields.describe_nested(0)));
+            }
             if fields.required_integer(1)? != 1 {
                 return Ok(Vec::new());
             }
@@ -1181,9 +1578,11 @@ impl BandSession {
             let open = self.stream_request(2, None)?;
             let enable = self.stream_request(3, Some(true))?;
             let hand = self.request_hand(None, true, time)?;
+            let active = self.request_active()?;
             outgoing.extend(open);
             outgoing.extend(enable);
             outgoing.extend(hand);
+            outgoing.extend(active);
             return Ok(Vec::new());
         }
         if self.setup_stage != SetupStage::Input {
@@ -1194,6 +1593,33 @@ impl BandSession {
                 return Ok(Vec::new());
             }
             let fields = ProtoFields::parse(&frame.payload)?;
+            if let Some(mut job) = self.ota_job.take() {
+                let seq = fields.integer(1).unwrap_or(0);
+                if job.owns(seq) {
+                    let mut ids = self.configuration_id;
+                    let bodies = job.receive(&fields, &mut ids, time);
+                    let lines = job.log();
+                    self.ota_log(lines);
+                    self.ota_items = job.items();
+                    outgoing.extend(self.ota_frames(bodies, ids)?);
+                    if job.done() {
+                        outgoing.extend(self.set_ota_quiet(false)?);
+                    } else {
+                        self.ota_job = Some(job);
+                    }
+                    return Ok(Vec::new());
+                }
+                self.ota_job = Some(job);
+            }
+            if self.ota_request.is_some() && self.ota_request == fields.integer(1).ok() {
+                self.ota_request = None;
+                self.ota_last = OtaStatus::from_response(&fields);
+                match self.ota_last {
+                    Some(status) => self.diagnostics.push(format!("ota: update status: {status}")),
+                    None => self.diagnostics.push(format!("ota: update status: {}", fields.describe_nested(0))),
+                }
+                return Ok(Vec::new());
+            }
             return self.receive_hand(&fields, time, outgoing);
         }
         if kind == RPC_RESPONSE
@@ -1214,10 +1640,29 @@ impl BandSession {
                     return Ok(Vec::new());
                 }
                 if fields.integer(2)? != 1 {
+                    if self.probing() {
+                        // The extra flags may be what it rejects: subscribe again without them.
+                        self.diagnostics.push(format!(
+                            "probe: the band rejected the subscription with flags {:?} ({}); retrying without",
+                            self.probe,
+                            fields.describe()
+                        ));
+                        self.probe.clear();
+                        outgoing.extend(self.stream_request(3, Some(true))?);
+                        return Ok(Vec::new());
+                    }
                     return Err(perr("The band rejected the input subscription"));
                 }
                 let flags = ProtoFields::parse(fields.bytes(5)?)?;
-                self.streams_enabled = all_set(&flags, &STREAM_FIELDS, 1)?;
+                if self.probing() {
+                    let shown = flags.describe();
+                    if self.probe_flags.as_deref() != Some(shown.as_str()) {
+                        self.diagnostics.push(format!("probe: stream flags (request {request}): {shown}"));
+                        self.probe_flags = Some(shown);
+                    }
+                }
+                let wanted: &[u32] = if self.ota_quiet { &STREAM_FIELDS[..1] } else { &STREAM_FIELDS };
+                self.streams_enabled = all_set(&flags, wanted, 1)?;
                 if !self.streams_enabled {
                     return Err(perr("The band input subscription stopped"));
                 }
@@ -1271,6 +1716,12 @@ impl BandSession {
                 synthetic: fields.integer(12)? != 0,
                 received_at: time,
             };
+            if self.probing() {
+                let shown = fields.describe();
+                let name = format!("{} {} {}", gesture.finger, gesture.action, gesture.derived_action);
+                // Every one: they're few, and the ones during handwriting are the point.
+                self.diagnostics.push(format!("probe gesture {name}: {shown}"));
+            }
             self.dial.gesture(&gesture, time);
             events.push(Event::Gesture(gesture));
             events.extend(self.engagement_events());
@@ -1390,5 +1841,84 @@ impl BandSession {
                 Ok(Some(vec![Event::RawEmgState(pending.enabled)]))
             }
         }
+    }
+}
+
+/// The band's DeviceInfoResp (Meta AI's schema): its firmware and serial number.
+#[derive(Clone, Default, PartialEq)]
+pub struct DeviceInfo {
+    pub firmware: String,
+    pub software: String,
+    pub hardware: String,
+    pub serial: String,
+    pub release_branch: String,
+    /// The EMG model the band runs now (`DeviceInfoResp.modelId`): `cc_od_…` for gestures,
+    /// `ia_od_…` for the wake model of a band in standby.
+    pub model: String,
+    /// Every model on the band (`allModelIds`); a `hw_…` one means it reads handwriting
+    /// (firmware build 64 and later; the factory firmware has none).
+    pub models: Vec<String>,
+}
+
+impl DeviceInfo {
+    /// Whether the band's firmware has a handwriting model.
+    pub fn handwriting(&self) -> bool {
+        self.models.iter().any(|model| model.starts_with("hw_"))
+    }
+}
+
+/// Leaves the serial out.
+impl std::fmt::Debug for DeviceInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceInfo")
+            .field("firmware", &self.firmware)
+            .field("software", &self.software)
+            .field("hardware", &self.hardware)
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeviceInfo {
+    /// The DeviceInfoResp inside an RPC response: the nested message with a printable serial
+    /// (field 6) and a firmware revision (2).
+    fn find(fields: &ProtoFields, depth: usize) -> Option<Self> {
+        let serial = fields.text(6).filter(|s| (4..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric()));
+        if let (Some(serial), Some(firmware)) = (serial, fields.text(2)) {
+            return Some(Self {
+                firmware,
+                software: fields.text(3).unwrap_or_default(),
+                hardware: fields.text(4).unwrap_or_default(),
+                serial,
+                release_branch: fields.text(13).unwrap_or_default(),
+                model: fields.text(5).unwrap_or_default(),
+                models: fields
+                    .byte_fields()
+                    .into_iter()
+                    .filter(|(field, _)| *field == 10)
+                    .filter_map(|(_, bytes)| std::str::from_utf8(bytes).ok().map(str::to_owned))
+                    .collect(),
+            });
+        }
+        if depth >= 3 {
+            return None;
+        }
+        fields
+            .byte_fields()
+            .into_iter()
+            .find_map(|(_, bytes)| ProtoFields::parse(bytes).ok().and_then(|inner| Self::find(&inner, depth + 1)))
+    }
+}
+
+#[cfg(test)]
+mod device_info_tests {
+    use super::*;
+    use crate::proto::{field_bytes, field_int};
+
+    #[test]
+    fn device_info_is_found_inside_the_response() {
+        let info = [field_bytes(2, b"1.2.3"), field_bytes(4, b"PVT"), field_bytes(6, b"ABC123XYZ")].concat();
+        let response = [field_int(1, 1), field_int(2, 1), field_bytes(3, &field_bytes(5, &info))].concat();
+        let found = DeviceInfo::find(&ProtoFields::parse(&response).unwrap(), 0).unwrap();
+        assert_eq!((found.firmware.as_str(), found.hardware.as_str(), found.serial.as_str()), ("1.2.3", "PVT", "ABC123XYZ"));
     }
 }

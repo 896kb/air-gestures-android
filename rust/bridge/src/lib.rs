@@ -14,10 +14,13 @@ use serde::Serialize;
 pub mod claim;
 pub mod config;
 pub mod controller;
+pub mod fieldtext;
+pub mod firmware;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
 pub mod status;
+pub mod words;
 
 use config::{Config, DIAL_TOGGLE, DialTarget};
 use controller::{Command, Controller};
@@ -32,7 +35,6 @@ fn config_with(mapping: &str) -> Config {
 /// Battery query period and the quiet time before a stream-state query.
 const BATTERY_EVERY: f64 = 5.0;
 const QUIET_QUERY: f64 = 2.0;
-
 pub struct Connection {
     session: BandSession,
     controller: Controller,
@@ -42,11 +44,28 @@ pub struct Connection {
     next_battery: f64,
     actions: Vec<String>,
     log: Vec<String>,
+    /// The stream probe is on: the session's notes go to the log.
+    probing: bool,
+    /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
+    field: Option<fieldtext::FieldTyping>,
 }
 
 #[derive(Serialize)]
 struct Snapshot<'a> {
     connected: bool,
+    /// The firmware the band runs, as it reports it on connecting (its "software" version).
+    firmware: Option<String>,
+    /// The band's last update status ("IDLE stable firmware, active …"), the latest line of
+    /// the running or last firmware update, and whether one is running.
+    ota_status: Option<String>,
+    /// The key (KEK) version the band has, from that status.
+    ota_kek: Option<u64>,
+    ota_progress: Option<&'a str>,
+    ota_busy: bool,
+    /// Whether cancelling is safe now (Commit not sent).
+    ota_cancellable: bool,
+    /// Each file of that update: `{"name", "size", "sent", "stage"}`.
+    ota_items: Vec<serde_json::Value>,
     #[serde(flatten)]
     status: &'a Status,
 }
@@ -85,6 +104,8 @@ impl Connection {
             next_battery: 0.0,
             actions: Vec::new(),
             log: Vec::new(),
+            probing: false,
+            field: None,
         })
     }
 
@@ -101,6 +122,7 @@ impl Connection {
         for event in &result.events {
             outgoing.extend(self.on_event(event, now)?);
         }
+        self.type_written(now);
         Ok(outgoing)
     }
 
@@ -110,6 +132,7 @@ impl Connection {
         for event in self.session.tick(now) {
             outgoing.extend(self.on_event(&event, now)?);
         }
+        outgoing.extend(self.session.ota_tick(now).map_err(|e| e.to_string())?);
         if self.controller.held_tap_due().is_some_and(|due| now >= due) {
             for command in self.controller.fire_held_tap(now) {
                 outgoing.extend(self.apply(command, now)?);
@@ -144,6 +167,9 @@ impl Connection {
 
     /// Log lines since the last call ("connected", "gesture swipe left", …).
     pub fn take_log(&mut self) -> Vec<String> {
+        if self.probing {
+            self.log.extend(self.session.take_diagnostics());
+        }
         std::mem::take(&mut self.log)
     }
 
@@ -169,6 +195,208 @@ impl Connection {
         }
     }
 
+    /// Before the first `request`: also ask the band for these stream flags (comma-separated,
+    /// e.g. `1,4,5,7`) and log what it sends that the session doesn't know. Empty = off.
+    pub fn set_probe(&mut self, fields: &str) {
+        let fields: Vec<u32> = fields.split(',').filter_map(|field| field.trim().parse().ok()).collect();
+        self.probing = !fields.is_empty();
+        self.session.set_probe(fields);
+    }
+
+    /// Probe only: write a ConfigReq given as hex (see `BandSession::probe_config`); returns
+    /// the bytes to write. The answer and the config read back go to the log.
+    pub fn probe_config(&mut self, hex: &str, now: f64) -> Result<Vec<u8>, String> {
+        let hex: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+        if hex.len() % 2 != 0 {
+            return Err("odd number of hex digits".into());
+        }
+        let body = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| e.to_string()))
+            .collect::<Result<Vec<u8>, String>>()?;
+        self.probing = true;
+        self.session.probe_config(&body, now).map_err(|e| e.to_string())
+    }
+
+    /// Debug: ask the band's update status, read only (see `BandSession::ota_status`); returns
+    /// the bytes to write. The answer goes to the log.
+    pub fn ota_status(&mut self) -> Result<Vec<u8>, String> {
+        self.probing = true;
+        self.session.ota_status().map_err(|e| e.to_string())
+    }
+
+    /// Debug: one step of a firmware update (see [`band_core::ota::OtaMode`]): "key", "send",
+    /// "trial", "install" or "update" (all of it in one connection) from the package unzipped into `dir` (see [`firmware::ota_plan`]),
+    /// or "cancel". "install" commits only that package's version, and only once it's staged.
+    /// Returns the first bytes to write; progress goes to the log.
+    pub fn ota_start(&mut self, mode: &str, dir: &str, now: f64) -> Result<Vec<u8>, String> {
+        use band_core::ota::{OtaMode, OtaPlan};
+        let mode = match mode {
+            "key" => OtaMode::Key,
+            "send" => OtaMode::Send,
+            "trial" => OtaMode::Trial,
+            "cancel" => OtaMode::Cancel,
+            "install" => OtaMode::Install,
+            "update" => OtaMode::Update,
+            other => return Err(format!("unknown update step {other}")),
+        };
+        let plan = if mode == OtaMode::Cancel {
+            OtaPlan { version: 0, firmware: Vec::new(), firmware_md5: [0; 16], model: None, kek: None, mode, resume: false }
+        } else {
+            let (plan, summary) = firmware::ota_plan(dir, mode)?;
+            self.log.push(format!("ota: {summary}"));
+            plan
+        };
+        self.probing = true;
+        self.session.ota_start(plan, now).map_err(|e| e.to_string())
+    }
+
+    /// The band's handwriting into a text field: on puts the band in its handwriting state and
+    /// starts a fresh word (`before`: the field's text before the cursor, for capitals); off
+    /// puts it back to gestures. Bytes to write.
+    pub fn set_field_typing(&mut self, on: bool, before: &str, popup: bool, now: f64) -> Result<Vec<u8>, String> {
+        let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string())?;
+        self.field = on.then(|| {
+            let mut field = fieldtext::FieldTyping::new(before, now);
+            field.set_popup(popup);
+            field
+        });
+        Ok(bytes)
+    }
+
+    /// The edits for the text field since the last call, and whether the pen is down, as JSON:
+    /// `{"edits": [{"delete", "insert"}], "pen": bool}`.
+    pub fn field_edits(&mut self, now: f64) -> String {
+        let Some(field) = self.field.as_mut() else {
+            return r#"{"active":false,"edits":[],"pen":false}"#.to_owned();
+        };
+        field.tick(now);
+        let choices = field.choices();
+        serde_json::json!({
+            "active": true,
+            "edits": field.take_edits(),
+            "pen": field.pen(),
+            "choosing": field.choosing(),
+            "next": field.choosing_next(),
+            "suggestions": choices.as_ref().map(|(list, _)| list.clone()),
+            "highlight": choices.as_ref().map(|(_, pick)| *pick),
+        })
+        .to_string()
+    }
+
+    /// A swipe left in a text field: take back the last word. False when none of ours was left
+    /// (the app then trims the field's own text).
+    pub fn field_delete_word(&mut self, now: f64) -> bool {
+        let words = words::dictionary();
+        self.field.as_mut().is_some_and(|field| field.delete_word(words.as_deref(), now))
+    }
+
+    /// A swipe up in a text field: the suggestions for the word show in its place. False when
+    /// there's nothing to choose for.
+    pub fn field_choose(&mut self) -> bool {
+        let words = words::dictionary();
+        self.field.as_mut().is_some_and(|field| field.choose(words.as_deref()))
+    }
+
+    /// While choosing: the next or previous suggestion first.
+    pub fn field_choose_step(&mut self, forward: bool) {
+        if let Some(field) = &mut self.field {
+            field.choose_step(forward);
+        }
+    }
+
+    /// While choosing: take the first.
+    pub fn field_choose_pick(&mut self, now: f64) {
+        let words = words::dictionary();
+        if let Some(field) = &mut self.field {
+            field.choose_pick(words.as_deref(), now);
+        }
+    }
+
+    /// While choosing: leave it with the word as it was.
+    pub fn field_choose_cancel(&mut self, now: f64) {
+        let words = words::dictionary();
+        if let Some(field) = &mut self.field {
+            field.choose_cancel(words.as_deref(), now);
+        }
+    }
+
+    /// A double tap in a text field: the pen goes down.
+    pub fn field_pen_down(&mut self, now: f64) {
+        if let Some(field) = &mut self.field {
+            field.pen_down(now);
+        }
+    }
+
+    /// What the band wrote goes to the text field being typed in, if any.
+    fn type_written(&mut self, now: f64) {
+        let written = self.session.take_written();
+        if let Some(field) = &mut self.field {
+            let words = words::dictionary();
+            for symbol in &written {
+                let typed = field.take(symbol, words.as_deref(), now);
+                {
+                    self.log.push(format!(
+                        "handwriting: {} ({}, sure {:.1}){}",
+                        band_core::handwriting::symbol(symbol.index),
+                        symbol.index,
+                        symbol.margin,
+                        if typed { "" } else { " not typed" }
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Debug: the band's own handwriting on or off (see `BandSession::set_band_handwriting`);
+    /// returns the bytes to write.
+    pub fn set_band_handwriting(&mut self, on: bool) -> Result<Vec<u8>, String> {
+        self.session.set_band_handwriting(on).map_err(|e| e.to_string())
+    }
+
+    /// Debug: what the band's handwriting has sent, as JSON: `{"on", "text", "tokens":
+    /// [{"index", "symbol", "margin"}], "frames", "samples", "pipeline", "floats"}` (`{}` before it ran).
+    /// `clear` forgets it afterwards.
+    pub fn band_handwriting(&mut self, clear: bool) -> String {
+        let json = self.session.band_handwriting().map_or_else(
+            || "{}".to_owned(),
+            |hw| {
+                serde_json::json!({
+                    "on": hw.on,
+                    "text": hw.decoder.text,
+                    "tokens": hw.tokens.iter().map(|(index, symbol, margin)| serde_json::json!({
+                        "index": index, "symbol": symbol, "margin": margin,
+                    })).collect::<Vec<_>>(),
+                    "frames": hw.decoder.frames,
+                    "samples": hw.samples,
+                    "pipeline": hw.pipeline,
+                    "floats": hw.floats,
+                })
+                .to_string()
+            },
+        );
+        if clear {
+            self.session.clear_band_handwriting();
+        }
+        json
+    }
+
+    /// What the band said about itself (`{}` before it has): firmware, software, hardware,
+    /// serial, release branch. For the firmware archive; the serial isn't logged.
+    pub fn device_info(&self) -> String {
+        self.session.device_info().map_or_else(
+            || "{}".into(),
+            |info| {
+                serde_json::json!({
+                    "firmware": info.firmware, "software": info.software, "hardware": info.hardware,
+                    "serial": info.serial, "release_branch": info.release_branch,
+                    "models": info.models, "handwriting": info.handwriting(),
+                })
+                .to_string()
+            },
+        )
+    }
+
     pub fn set_dial(&mut self, dial: &str) {
         self.controller.set_dial_target(DialTarget::from_name(dial));
     }
@@ -178,6 +406,18 @@ impl Connection {
     pub fn status_json(&self) -> String {
         serde_json::to_string(&Snapshot {
             connected: self.live,
+            firmware: self.session.device_info().map(|info| info.software.clone()).filter(|v| !v.is_empty()),
+            ota_status: self.session.ota_last_status().map(|status| status.to_string()),
+            ota_kek: self.session.ota_last_status().map(|status| status.kek),
+            ota_progress: self.session.ota_progress().0,
+            ota_busy: self.session.ota_progress().1,
+            ota_cancellable: self.session.ota_cancellable(),
+            ota_items: self
+                .session
+                .ota_items()
+                .iter()
+                .map(|item| serde_json::json!({"name": item.name, "size": item.size, "sent": item.sent, "stage": item.stage}))
+                .collect(),
             status: self.controller.status(),
         })
         .expect("status serializes")
@@ -188,6 +428,12 @@ impl Connection {
             Event::Connected => {
                 self.live = true;
                 self.log.push("connected".into());
+                // Seen after a firmware update: the session's active request switches it.
+                if let Some(info) = self.session.device_info()
+                    && info.model.starts_with("ia_")
+                {
+                    self.log.push(format!("the band was in standby on its wake model {}; asked for active", info.model));
+                }
             }
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
             _ => {}
