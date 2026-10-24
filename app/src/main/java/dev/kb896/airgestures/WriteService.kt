@@ -153,7 +153,7 @@ class WriteService : AccessibilityService() {
                     choosing = false
                     popup.hide()
                 }
-                "swipe up", "swipe down" -> {
+                "swipe down" -> {
                     service.fieldChooseCancel()
                     choosing = false
                     popup.hide()
@@ -192,7 +192,7 @@ class WriteService : AccessibilityService() {
         when (label) {
             "swipe left" -> menu = open.copy(pick = (open.pick + n - 1) % n)
             "swipe right" -> menu = open.copy(pick = (open.pick + 1) % n)
-            "swipe down", "swipe up" -> menu = if (open.items === MAIN) null else Menu(MAIN, 0)
+            "swipe up" -> menu = if (open.items === MAIN) null else Menu(MAIN, 0)
             "index tap" -> {
                 val item = open.items[open.pick]
                 menu = null
@@ -335,8 +335,8 @@ class WriteService : AccessibilityService() {
     }
 
     companion object {
-        const val CHOOSE_HINT = "Swipe to choose · tap to take · up or down to cancel"
-        const val MENU_HINT = "Swipe to choose · tap to do · down to close"
+        const val CHOOSE_HINT = "Swipe to choose · tap to take · down to cancel"
+        const val MENU_HINT = "Swipe to choose · tap to do · up to close"
         const val DELETE_WORD = "Delete word"
         const val DELETE_ALL = "Delete all"
         const val NEW_LINE = "New line"
