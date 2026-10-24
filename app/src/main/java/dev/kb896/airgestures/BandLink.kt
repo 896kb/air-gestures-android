@@ -142,65 +142,10 @@ class BandLink(
         org.json.JSONObject(Bridge.bandHandwriting(handle, clear))
     }
 
-    /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
-    fun rawEmg(on: Boolean) {
-        // Raw sEMG needs most of the link: ask for the shortest connection interval while it runs
-        // (other Bluetooth devices, e.g. glasses, otherwise crowd it out and batches are lost).
-        runCatching {
-            gatt?.requestConnectionPriority(if (on) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED)
-        }
-        debugSend { Bridge.setRawEmg(it, on, now()) }
-    }
-
-    /** Debug: start recording raw sEMG and marks into [dir]; false when the band isn't connected. */
-    fun recordStart(dir: String): Boolean = synchronized(lock) {
-        if (handle == 0L) return false
-        Bridge.recordStart(handle, dir)
-        true
-    }
-
-    /** A labelled moment, at [at] on the [clock] (default: now). */
-    fun recordMark(event: String, label: String, at: Double = now()) = synchronized(lock) {
-        if (handle != 0L) Bridge.recordMark(handle, event, label, at)
-    }
-
-    /** The clock the recording's times are on (seconds). */
-    fun clock() = now()
-
-    /** The recording's counts, or null when none runs (e.g. the band reconnected meanwhile). */
-    fun recordStats(): org.json.JSONObject? = synchronized(lock) {
-        if (handle == 0L) return null
-        org.json.JSONObject(Bridge.recordStats(handle)).takeIf { it.length() > 0 }
-    }
-
-    /** The letters nearest to the one written in [start]..[end], nearest first (see Bridge.recordGuess). */
-    fun recordGuess(label: String, start: Double, end: Double): List<String> = synchronized(lock) {
-        if (handle == 0L) return emptyList()
-        val guesses = org.json.JSONArray(Bridge.recordGuess(handle, label, start, end))
-        List(guesses.length()) { guesses.getJSONObject(it).getString("letter") }
-    }
-
     /** What the band said about itself (see Bridge.deviceInfo); null before it has. */
     fun deviceInfo(): org.json.JSONObject? = synchronized(lock) {
         if (handle == 0L) return null
         org.json.JSONObject(Bridge.deviceInfo(handle)).takeIf { it.length() > 0 }
-    }
-
-    /** Words mode (see Bridge.recordWrite); null when no recording runs. */
-    fun recordWrite(start: Double, end: Double): org.json.JSONObject? = synchronized(lock) {
-        if (handle == 0L) return null
-        org.json.JSONObject(Bridge.recordWrite(handle, start, end)).takeIf { it.length() > 0 }
-    }
-
-    /** Words mode (see Bridge.recordEdit); null when no recording runs. */
-    fun recordEdit(edit: String): org.json.JSONObject? = synchronized(lock) {
-        if (handle == 0L) return null
-        org.json.JSONObject(Bridge.recordEdit(handle, edit, now())).takeIf { it.length() > 0 }
-    }
-
-    fun recordStop() = synchronized(lock) {
-        if (handle != 0L) Bridge.recordStop(handle)
-        drain()
     }
 
     /** Send what [request] returns for the open session, off the main thread; problems go to the log. */

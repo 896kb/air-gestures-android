@@ -2,30 +2,6 @@
 <!-- Debug builds only: the test hook (see DebugActions). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <!-- The handwriting recorder, with its own launcher entry (debug builds only). -->
-        <activity
-            android:name=".RecordActivity"
-            android:exported="true"
-            android:label="Handwriting recorder"
-            android:taskAffinity="dev.kb896.airgestures.handwriting"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <!-- Writing words with the band (debug builds only), its own launcher entry too. -->
-        <activity
-            android:name=".WriteActivity"
-            android:exported="true"
-            android:label="Handwriting: words"
-            android:taskAffinity="dev.kb896.airgestures.words"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
         <!-- The band's own handwriting, token by token (debug builds only), its own launcher entry. -->
         <activity
             android:name=".BandWriteActivity"

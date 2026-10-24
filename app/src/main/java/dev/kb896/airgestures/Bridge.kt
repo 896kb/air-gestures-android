@@ -31,25 +31,6 @@ object Bridge {
     /** Debug: ask the band's update status (read only); returns bytes to write. The answer goes to the log. */
     @JvmStatic external fun otaStatus(handle: Long): ByteArray
     @JvmStatic external fun otaStart(handle: Long, mode: String, dir: String, now: Double): ByteArray
-    /** Debug: the raw sEMG stream on or off; returns bytes to write. Its rate goes to the log. */
-    @JvmStatic external fun setRawEmg(handle: Long, on: Boolean, now: Double): ByteArray
-    /** Debug: record raw sEMG and marks into `dir` (emg.bin, marks.csv) until [recordStop]. */
-    @JvmStatic external fun recordStart(handle: Long, dir: String)
-    @JvmStatic external fun recordMark(handle: Long, event: String, label: String, now: Double)
-    /** `{"batches", "missing", "unreadable", "marks"}`, or `{}` when no recording runs. */
-    @JvmStatic external fun recordStats(handle: Long): String
-    /**
-     * The letter written between [start] and [end] read against the known ones:
-     * `[{"letter", "distance"}…]`, nearest first. With a [label] it's known from then on.
-     */
-    @JvmStatic external fun recordGuess(handle: Long, label: String, start: Double, end: Double): String
-    /**
-     * Words mode: the letter written between [start] and [end] joins the word under way. The
-     * writer's state: `{"text", "word", "suggestions", "highlight", "letters"}` (`{}`: no recording).
-     */
-    @JvmStatic external fun recordWrite(handle: Long, start: Double, end: Double): String
-    /** Words mode: "space", "backspace", "next", "previous" or "clear"; the state as for [recordWrite]. */
-    @JvmStatic external fun recordEdit(handle: Long, edit: String, now: Double): String
     /** What the band said about itself: `{"firmware", "software", "hardware", "serial", "release_branch"}` (`{}` before). */
     @JvmStatic external fun deviceInfo(handle: Long): String
     /**
@@ -79,7 +60,6 @@ object Bridge {
     @JvmStatic external fun fieldPenDown(handle: Long, now: Double)
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
     @JvmStatic external fun wordsLoad(text: String): Int
-    @JvmStatic external fun recordStop(handle: Long)
     @JvmStatic external fun close(handle: Long)
 
     // Meta sign-in (blocking HTTP: never on the main thread). The session JSON is secret: never log it.

@@ -202,8 +202,6 @@ class BandService : Service(), BandLink.Listener {
         link.otaStart(mode, dir)
     }
 
-    /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
-    fun rawEmg(on: Boolean) = link.rawEmg(on)
 
     /** The band's handwriting into the text field in front (see WriteService). */
     /** [before]: the field's text before the cursor, so a sentence's first word gets its capital. */
@@ -224,9 +222,6 @@ class BandService : Service(), BandLink.Listener {
 
     /** What the band said about itself (see BandLink.deviceInfo). */
     fun deviceInfo() = link.deviceInfo()
-
-    /** Debug: a handwriting recording (see BandLink.recordStart). */
-    val recording get() = link
 
     private val unlocked = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = nudge()

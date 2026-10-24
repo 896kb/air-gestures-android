@@ -19,6 +19,7 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 /** Same Ko-fi page the website links. */
@@ -39,7 +40,6 @@ class MainActivity : Screen() {
     private lateinit var lastGesture: TextView
     private lateinit var profile: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
-    private var handwriting: Pair<TextView, NeuDrawable>? = null
     private lateinit var fields: Pair<TextView, NeuDrawable>
     private lateinit var fieldsDetail: TextView
     private lateinit var choicesPopup: TextView
@@ -339,6 +339,25 @@ class MainActivity : Screen() {
         render(BandService.state.value)
     }
 
+    /** What writing in a text field does, and the gestures meanwhile (the ? by its switch). */
+    private fun fieldsHelp() {
+        val body = column(gap = 14f)
+        for ((heading, text) in FIELDS_HELP) {
+            body.addView(column(gap = 4f).apply {
+                addView(Cb.text(context, 15f, R.font.geist_semibold, Cb.INK_900).apply { this.text = heading })
+                addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
+                    this.text = text
+                    setLineSpacing(0f, 1.3f)
+                })
+            })
+        }
+        val scroll = ScrollView(this).apply {
+            addView(body)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .6f).toInt())
+        }
+        sheet("Handwriting in text fields", scroll, "Got it", cancel = false) { true }
+    }
+
     private fun togglesBlock() = column(gap = 16f).apply {
         controls = pill("Controls on", R.drawable.ic_hand) {
             BandService.instance?.setPaused(!BandService.state.value.paused)
@@ -349,7 +368,17 @@ class MainActivity : Screen() {
         fieldsDetail = Cb.text(context, 13f, color = Cb.INK_500)
         addView(row(gap = 12f).apply {
             addView(column(gap = 4f).apply {
-                addView(Cb.label(context, "Handwriting in text fields"))
+                addView(row(gap = 6f).apply {
+                    addView(Cb.label(context, "Handwriting in text fields"))
+                    addView(FrameLayout(context).apply {
+                        addView(icon(R.drawable.ic_help, 18f, Cb.INK_500), FrameLayout.LayoutParams(dpi(18f), dpi(18f), Gravity.CENTER))
+                        layoutParams = LinearLayout.LayoutParams(dpi(30f), dpi(30f))
+                        contentDescription = "How handwriting in text fields works"
+                        isClickable = true
+                        background = ripple(999f)
+                        setOnClickListener { fieldsHelp() }
+                    })
+                })
                 addView(fieldsDetail)
             }, weighted())
             addView(fields.first)
@@ -357,10 +386,6 @@ class MainActivity : Screen() {
         choicesPopup = segment("Popup") { Prefs(context).choicesPopup = true; render(BandService.state.value) }
         choicesInline = segment("In the field") { Prefs(context).choicesPopup = false; render(BandService.state.value) }
         addView(settingRow("Word choices", "Swipe up while writing for a word's other readings", segmented(choicesPopup, choicesInline)))
-        if (Handwriting.available(context)) {
-            handwriting = pill("Handwriting off", R.drawable.ic_pencil) { Handwriting.toggle(context); render(BandService.state.value) }
-                .also { addView(settingRow("Handwriting", "Write letters on a table with a finger", it.first)) }
-        }
         wristLeft = segment("Left") { setHand("left") }
         wristRight = segment("Right") { setHand("right") }
         addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
@@ -442,10 +467,6 @@ class MainActivity : Screen() {
             writing && !WriteService.enabled(this) -> "Turn on its accessibility service to start"
             else -> "In a text field, write letters on a table with a finger"
         }
-        handwriting?.let { (view, shape) ->
-            view.text = if (Handwriting.on) "Handwriting on" else "Handwriting off"
-            if ((shape.pressed > .5f) != Handwriting.on) shape.press(Handwriting.on)
-        }
         // The wrist chosen here, else what the band reports.
         val wrist = Prefs(this).hand.takeIf { it != "band" } ?: state.hand
         for ((view, name) in listOf(wristLeft to "left", wristRight to "right")) {
@@ -493,3 +514,32 @@ class MainActivity : Screen() {
     }
 
 }
+
+/** The help behind the ? by "Handwriting in text fields": headings and their text. */
+private val FIELDS_HELP = listOf(
+    "Writing" to "Tap into any text field and write with your index finger on a table, your leg or any " +
+        "surface. The band reads each letter and the dictionary corrects the word as you go. Draw a " +
+        "short line to the right for a space (a clear pause between words often does too), and the " +
+        "band's backspace stroke to take back a letter.",
+    "The pen" to "The pen is down when you enter a field (one buzz): what you write is typed. After 8 " +
+        "seconds with nothing written it lifts (two buzzes), so other hand movements don't type. To " +
+        "put it down again, double tap your index finger or write two dots (..).",
+    "Word choices: swipe up" to "Swipe up for the other readings of the word you're writing (or the " +
+        "last one). Right after a space, swipe up shows the likely next words instead; swipe up " +
+        "again for the last word's readings. Swipe left and right to move through them, tap to " +
+        "take one, swipe down to cancel.",
+    "Popup or In the field" to "Popup shows the choices in a row just above the text field and " +
+        "leaves the field as it is until you take one. In the field puts the choices into the text " +
+        "itself in place of the word (\"there · three · these\"), the current one first, for apps " +
+        "where a popup is in the way.",
+    "The edit menu: swipe down" to "Swipe down for a menu above the keyboard: Del word, Del all, ↵ " +
+        "(a new line) and 🙂 (emoji). Swipe left and right to choose, tap to do it, swipe up to " +
+        "close.",
+    "The cursor and selecting" to "Swipe left or right to move the cursor a letter. Tap your index " +
+        "finger to start selecting: left and right then grow the selection, and a second tap stops. " +
+        "Writing replaces what's selected.",
+    "Your keyboard and touch" to "You can still type on the keyboard or tap the screen to move the " +
+        "cursor; writing carries on from wherever the cursor is.",
+    "Back to gestures" to "Leaving the field, switching apps or five minutes without writing turns " +
+        "the band back to its usual gestures.",
+)

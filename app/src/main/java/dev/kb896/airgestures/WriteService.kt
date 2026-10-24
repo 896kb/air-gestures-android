@@ -173,7 +173,7 @@ class WriteService : AccessibilityService() {
      * - otherwise swipe left and right move the cursor, and a tap starts selecting: then
      *   left and right grow the selection from where the tap was, until the next tap (writing
      *   replaces what's selected);
-     * - swipe down (with popups on): the edit menu above the keyboard: delete word, delete all,
+     * - swipe down: the edit menu above the keyboard (a popup whichever way word choices show): delete word, delete all,
      *   new line, and a list of emoji; left and right choose, a tap does it, swipe up closes
      *   (or goes back from the list);
      * - a double tap puts the pen down.
@@ -217,7 +217,7 @@ class WriteService : AccessibilityService() {
                 choosing = service.fieldChoose()
                 if (!choosing) buzz(false)
             }
-            label == "swipe down" && Prefs(this).choicesPopup -> {
+            label == "swipe down" -> {
                 anchor = null
                 menu = Menu(MAIN, 0)
                 showMenu(node)

@@ -79,11 +79,6 @@ class DebugActions : BroadcastReceiver() {
             }
             return
         }
-        if (intent.hasExtra("emg")) {
-            val on = intent.getBooleanExtra("emg", false)
-            BandService.instance?.rawEmg(on) ?: Log.i("AirGestures", "debug emg: the band service isn't running")
-            return
-        }
         intent.getStringExtra("config")?.let { hex ->
             BandService.instance?.probeConfig(hex) ?: Log.i("AirGestures", "debug config: the band service isn't running")
             return
@@ -110,7 +105,7 @@ class DebugActions : BroadcastReceiver() {
         }
         intent.getStringExtra("firmware")?.let { version ->
             val session = SessionStore.load(context) ?: return run { Log.i("AirGestures", "debug firmware: not signed in to Meta") }
-            val info = BandService.instance?.recording?.deviceInfo()
+            val info = BandService.instance?.deviceInfo()
             val serial = info?.optString("serial")?.takeIf { it.isNotEmpty() }
                 ?: return run { Log.i("AirGestures", "debug firmware: the band hasn't said its serial yet (connect it)") }
             // What the band runs, without its serial.
