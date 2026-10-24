@@ -8,6 +8,8 @@ import kotlin.concurrent.thread
 
 /** The Meta sign-in's request code (then the check). */
 private const val SIGN_IN = 1
+/** Off its charger, the band must be at least this (%) to start an update: a margin of ours, not Meta's. */
+private const val MIN_BATTERY = 50
 
 /**
  * Setup › Firmware: what the band runs, the builds Meta offers it, and installing one: the key
@@ -270,6 +272,27 @@ class FirmwareActivity : Screen() {
         }
     }
 
+    /**
+     * Before changing the band: on its charger, or charged enough to get through a send and
+     * the restart. The band refuses updates when low too, but only when one starts.
+     */
+    private fun powered(): Boolean {
+        val state = BandService.state.value
+        val level = state.battery
+        if (state.charging || (level != null && level >= MIN_BATTERY)) return true
+        sheet(
+            "Charge the band first",
+            Cb.text(this, 14f, color = Cb.INK_500).apply {
+                text = (if (level == null) "The band hasn't said how charged it is yet. " else "The band is at $level %. ") +
+                    "Put it on its charger, or charge it to at least $MIN_BATTERY %, before updating: a send takes about " +
+                    "15 minutes, and running out partway through the install could leave it unusable."
+                setLineSpacing(0f, 1.3f)
+            },
+            "OK",
+        ) { true }
+        return false
+    }
+
     private fun ask() = ready()?.otaStatus()
 
     private fun cancel() = confirm(
@@ -283,7 +306,9 @@ class FirmwareActivity : Screen() {
         else service.otaStart("cancel", "")
     }
 
-    private fun update(pkg: Firmware.Package) = confirm(
+    private fun update(pkg: Firmware.Package) = if (powered()) confirmUpdate(pkg) else Unit
+
+    private fun confirmUpdate(pkg: Firmware.Package) = confirm(
         "Install ${pkg.title}?",
         "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and installed " +
             "in the same connection. Keep the band on its charger and near the phone for about 15 minutes; it " +
@@ -291,7 +316,9 @@ class FirmwareActivity : Screen() {
         "Install",
     ) { run(pkg, "update") }
 
-    private fun installKey(pkg: Firmware.Package, key: Long) = confirm(
+    private fun installKey(pkg: Firmware.Package, key: Long) = if (powered()) confirmKey(pkg, key) else Unit
+
+    private fun confirmKey(pkg: Firmware.Package, key: Long) = confirm(
         "Install key $key?",
         "The band needs this key to read ${pkg.title}. It stays on the band, replacing the key it has; " +
             "it doesn't change the firmware the band runs.",
@@ -299,6 +326,8 @@ class FirmwareActivity : Screen() {
     ) { run(pkg, "key") }
 
     private fun run(pkg: Firmware.Package, mode: String) {
+        // Checked again: the band may have come off its charger while the question was open.
+        if (!powered()) return
         val service = ready() ?: return
         thread(name = "firmware-unpack") {
             val dir = runCatching { Firmware.unpack(this, pkg) }
