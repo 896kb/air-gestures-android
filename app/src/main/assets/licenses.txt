@@ -1,0 +1,16 @@
+# Setup › Licenses. "## " starts a section; see assets/fields-help.txt for the format.
+
+## Air Gestures
+MIT License, copyright 2026 896kb. The band protocol core derives from kinesis (MIT License, copyright 2026 callbacked). The full texts are in LICENSE and LICENSE-kinesis in the source.
+
+## Geist font
+Copyright 2024 The Geist Project Authors (github.com/vercel/geist-font), under the SIL Open Font License 1.1 (openfontlicense.org).
+
+## Lucide icons
+Copyright 2026 Lucide Icons and Contributors (lucide.dev), under the ISC License.
+
+## Handwriting dictionary
+The words and how often they're used come from FrequencyWords by Hermit Dave (github.com/hermitdave/FrequencyWords), counted from OpenSubtitles 2018 (opus.nlpl.eu). Its word lists are under CC BY-SA 4.0 (creativecommons.org/licenses/by-sa/4.0). This app's list is filtered from en_50k and is shared under the same licence.
+
+## Next-word suggestions
+Word-pair counts derived from Tatoeba's English sentences (tatoeba.org), under CC BY 2.0 FR (creativecommons.org/licenses/by/2.0/fr).

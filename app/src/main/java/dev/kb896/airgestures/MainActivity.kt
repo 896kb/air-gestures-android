@@ -342,7 +342,7 @@ class MainActivity : Screen() {
     /** What writing in a text field does, and the gestures meanwhile (the ? by its switch). */
     private fun fieldsHelp() {
         val body = column(gap = 14f)
-        for ((heading, text) in helpSections(assets.open("fields-help.txt").bufferedReader().use { it.readText() })) {
+        for ((heading, text) in Sections.read(this, "fields-help.txt")) {
             body.addView(column(gap = 4f).apply {
                 addView(Cb.text(context, 15f, R.font.geist_semibold, Cb.INK_900).apply { this.text = heading })
                 addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
@@ -356,21 +356,6 @@ class MainActivity : Screen() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .6f).toInt())
         }
         sheet("Handwriting in text fields", scroll, "Got it", cancel = false) { true }
-    }
-
-    /** Help text: `## heading` lines and their text (lines joined, blank lines between paragraphs, `#` notes skipped). */
-    private fun helpSections(text: String): List<Pair<String, String>> {
-        val sections = mutableListOf<Pair<String, MutableList<String>>>()
-        for (line in text.lines()) {
-            when {
-                line.startsWith("## ") -> sections += line.removePrefix("## ").trim() to mutableListOf()
-                line.startsWith("#") -> Unit
-                else -> sections.lastOrNull()?.second?.add(line.trim())
-            }
-        }
-        return sections.map { (heading, lines) ->
-            heading to lines.joinToString("\n").trim().split(Regex("\n\\s*\n")).joinToString("\n\n") { it.replace('\n', ' ') }
-        }
     }
 
     private fun togglesBlock() = column(gap = 16f).apply {

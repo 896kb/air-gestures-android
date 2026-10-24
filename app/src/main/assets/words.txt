@@ -1,4 +1,4 @@
-# word count: FrequencyWords en_50k (MIT, OpenSubtitles 2018), filtered by scripts/words.py
+# word count: FrequencyWords en_50k (CC BY-SA 4.0, OpenSubtitles 2018), filtered by scripts/words.py; this list is CC BY-SA 4.0 too
 you 28787591
 i 27086011
 the 22761659

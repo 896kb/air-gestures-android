@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build the handwriting dictionary (app/src/main/assets/words.txt): English words and how
-often they're used, from FrequencyWords (github.com/hermitdave/FrequencyWords, MIT; counts
+often they're used, from FrequencyWords (github.com/hermitdave/FrequencyWords; its lists are CC BY-SA 4.0, so this one is too; counts
 from OpenSubtitles 2018, so it leans conversational).
 
     curl -LO https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/en/en_50k.txt
@@ -17,7 +17,7 @@ COMMON = 3000
 
 def main(path):
     known = {w.strip() for w in open("/usr/share/dict/american-english") if w.strip().isalpha()}
-    print("# word count: FrequencyWords en_50k (MIT, OpenSubtitles 2018), filtered by scripts/words.py")
+    print("# word count: FrequencyWords en_50k (CC BY-SA 4.0, OpenSubtitles 2018), filtered by scripts/words.py; this list is CC BY-SA 4.0 too")
     rank = 0
     for line in open(path, encoding="utf-8"):
         word, count = line.split()
