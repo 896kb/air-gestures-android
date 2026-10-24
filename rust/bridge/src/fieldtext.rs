@@ -54,6 +54,16 @@ pub struct FieldTyping {
     pen: bool,
     last_confident: f64,
     last_dot: Option<f64>,
+    /// The last word taken with a space (as shown, and its letters), to choose again later.
+    last_word: Option<(String, Vec<crate::words::LetterOdds>)>,
+    /// Choosing among the suggestions (a swipe up): shown in place of the word, the current
+    /// pick first; the word went back to "under way" and takes its space again when picked.
+    choosing: Option<Choosing>,
+}
+
+struct Choosing {
+    /// The word had been taken with a space (it gets it back when picked).
+    spaced: bool,
 }
 
 impl FieldTyping {
@@ -82,6 +92,59 @@ impl FieldTyping {
         true
     }
 
+    /// Start choosing among the suggestions for the word under way, or else the last word taken
+    /// with a space (a swipe up): they're shown in its place, the current pick first. False when
+    /// there's nothing to choose for.
+    pub fn choose(&mut self, words: Option<&Dictionary>) -> bool {
+        if self.choosing.is_some() {
+            return true;
+        }
+        let spaced = if !self.writer.letters().is_empty() {
+            false
+        } else if let Some((word, letters)) = self.last_word.take()
+            && self.writer.reopen(&word, letters, words)
+        {
+            true
+        } else {
+            return false;
+        };
+        if self.writer.state().suggestions.len() < 2 {
+            if spaced {
+                self.writer.space(words);
+            }
+            return false;
+        }
+        self.choosing = Some(Choosing { spaced });
+        self.sync();
+        true
+    }
+
+    /// While choosing: the next (or previous) suggestion comes first (a swipe right or left).
+    pub fn choose_step(&mut self, forward: bool) {
+        if self.choosing.is_some() {
+            self.writer.step(forward);
+            self.sync();
+        }
+    }
+
+    /// While choosing: take the one shown first (a tap); the list goes and the word stays.
+    pub fn choose_pick(&mut self, words: Option<&Dictionary>, now: f64) {
+        let Some(choosing) = self.choosing.take() else { return };
+        if choosing.spaced {
+            let word = self.writer.state().word;
+            let letters = self.writer.letters().to_vec();
+            self.writer.space(words);
+            self.last_word = Some((word, letters));
+        }
+        self.last_confident = now;
+        self.sync();
+    }
+
+    /// Whether the suggestions are showing.
+    pub fn choosing(&self) -> bool {
+        self.choosing.is_some()
+    }
+
     /// Put the pen down (a double tap gesture), as "..." written does.
     pub fn pen_down(&mut self, now: f64) {
         self.pen = true;
@@ -106,6 +169,9 @@ impl FieldTyping {
     /// with the pen up, only a double full stop counts (it puts the pen down).
     pub fn take(&mut self, written: &Written, words: Option<&Dictionary>, now: f64) {
         self.tick(now);
+        if self.choosing.is_some() {
+            return;
+        }
         if !self.pen {
             if written.index == PERIOD && written.margin >= WAKE_MARGIN {
                 if self.last_dot.is_some_and(|at| now - at <= WAKE_GAP_S) {
@@ -146,7 +212,12 @@ impl FieldTyping {
                 return;
             }
             BACKSPACE => self.writer.backspace(words),
-            SPACE | UNDERSCORE_SPACE => self.writer.space(words),
+            SPACE | UNDERSCORE_SPACE => {
+                let word = self.writer.state().word;
+                let letters = self.writer.letters().to_vec();
+                self.writer.space(words);
+                self.last_word = (!letters.is_empty()).then_some((word, letters));
+            }
             index @ 52..=93 if index != PAUSE => {
                 let c = symbol(index).chars().next().unwrap_or(' ');
                 if matches!(c, '.' | ',' | '?' | '!') {
@@ -214,7 +285,25 @@ impl FieldTyping {
     /// What the field should show of ours now; the difference from what it shows as an edit.
     fn sync(&mut self) {
         let state = self.writer.state();
-        let wanted = self.capitalised(&state.text, &state.word);
+        let mut wanted = self.capitalised(&state.text, &state.word);
+        if self.choosing.is_some() && !state.suggestions.is_empty() {
+            // The suggestions in the word's place, the current pick first, in turn after it.
+            let shown = wanted.chars().count() - state.word.chars().count();
+            let n = state.suggestions.len();
+            // Each with the capital the word has where it stands.
+            let capital = wanted.chars().nth(shown).is_some_and(char::is_uppercase);
+            let list: Vec<String> = (0..n)
+                .map(|k| {
+                    let word = &state.suggestions[(state.highlight + k) % n];
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        Some(first) if capital => first.to_uppercase().chain(chars).collect(),
+                        _ => word.clone(),
+                    }
+                })
+                .collect();
+            wanted = wanted.chars().take(shown).collect::<String>() + &list.join(" · ");
+        }
         let common = self.shown.chars().zip(wanted.chars()).take_while(|(a, b)| a == b).count();
         let delete = self.shown.chars().count() - common;
         let insert: String = wanted.chars().skip(common).collect();
@@ -332,6 +421,30 @@ mod tests {
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "x ");
         assert!(!typing.delete_word(None, 1.0), "the field's own text is the caller's");
+    }
+
+    #[test]
+    fn a_swipe_up_lists_the_suggestions_and_a_tap_takes_one() {
+        let words = Dictionary::parse("where 100000\nwhen 90000\nwere 80000\nwire 1000\n");
+        let mut typing = FieldTyping::new("", 0.0);
+        let mut field = String::new();
+        for c in "were".chars() {
+            typing.write(&letter(c, 0.9), Some(&words));
+        }
+        typing.write(&Written { index: SPACE, margin: 3.0, letters: [0.0; 26] }, Some(&words));
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "Were ");
+        assert!(typing.choose(Some(&words)));
+        apply(&mut field, typing.take_edits());
+        assert!(field.starts_with("Were · "), "{field}");
+        typing.choose_step(true);
+        apply(&mut field, typing.take_edits());
+        let second = field.split(" · ").next().unwrap().to_owned();
+        assert_ne!(second, "Were");
+        typing.choose_pick(Some(&words), 1.0);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, format!("{second} "));
+        assert!(!typing.choosing());
     }
 
     #[test]

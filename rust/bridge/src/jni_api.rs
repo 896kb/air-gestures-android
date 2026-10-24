@@ -395,6 +395,38 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldDeleteWord<'local>
     jboolean::from(unsafe { connection(handle) }.field_delete_word(now))
 }
 
+/// A swipe up in a text field: show the word's suggestions; false when there are none.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChoose<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jboolean {
+    jboolean::from(unsafe { connection(handle) }.field_choose())
+}
+
+/// While choosing: the next (`forward`) or previous suggestion first.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChooseStep<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    forward: jboolean,
+) {
+    unsafe { connection(handle) }.field_choose_step(forward != 0);
+}
+
+/// While choosing: take the first.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChoosePick<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_choose_pick(now);
+}
+
 /// A double tap in a text field: the pen goes down.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldPenDown<'local>(

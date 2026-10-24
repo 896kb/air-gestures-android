@@ -285,7 +285,7 @@ impl Connection {
             return r#"{"edits":[],"pen":false}"#.to_owned();
         };
         field.tick(now);
-        serde_json::json!({"edits": field.take_edits(), "pen": field.pen()}).to_string()
+        serde_json::json!({"edits": field.take_edits(), "pen": field.pen(), "choosing": field.choosing()}).to_string()
     }
 
     /// A swipe left in a text field: take back the last word. False when none of ours was left
@@ -293,6 +293,28 @@ impl Connection {
     pub fn field_delete_word(&mut self, now: f64) -> bool {
         let words = words::dictionary();
         self.field.as_mut().is_some_and(|field| field.delete_word(words.as_deref(), now))
+    }
+
+    /// A swipe up in a text field: the suggestions for the word show in its place. False when
+    /// there's nothing to choose for.
+    pub fn field_choose(&mut self) -> bool {
+        let words = words::dictionary();
+        self.field.as_mut().is_some_and(|field| field.choose(words.as_deref()))
+    }
+
+    /// While choosing: the next or previous suggestion first.
+    pub fn field_choose_step(&mut self, forward: bool) {
+        if let Some(field) = &mut self.field {
+            field.choose_step(forward);
+        }
+    }
+
+    /// While choosing: take the first.
+    pub fn field_choose_pick(&mut self, now: f64) {
+        let words = words::dictionary();
+        if let Some(field) = &mut self.field {
+            field.choose_pick(words.as_deref(), now);
+        }
     }
 
     /// A double tap in a text field: the pen goes down.

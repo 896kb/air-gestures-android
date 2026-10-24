@@ -67,6 +67,12 @@ object Bridge {
     @JvmStatic external fun setFieldTyping(handle: Long, on: Boolean, before: String, now: Double): ByteArray
     /** The field's edits since the last call, and the pen: `{"edits": [{"delete", "insert"}], "pen"}`. */
     @JvmStatic external fun fieldEdits(handle: Long, now: Double): String
+    /** A swipe up in a text field: the word's suggestions show in its place; false when none. */
+    @JvmStatic external fun fieldChoose(handle: Long): Boolean
+    /** While choosing: the next (or previous) suggestion first. */
+    @JvmStatic external fun fieldChooseStep(handle: Long, forward: Boolean)
+    /** While choosing: take the first. */
+    @JvmStatic external fun fieldChoosePick(handle: Long, now: Double)
     /** A double tap in a text field: the pen goes down. */
     @JvmStatic external fun fieldPenDown(handle: Long, now: Double)
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */

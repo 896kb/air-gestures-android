@@ -210,6 +210,9 @@ class BandService : Service(), BandLink.Listener {
     fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before)
     fun fieldEdits() = link.fieldEdits()
     fun fieldPenDown() = link.fieldPenDown()
+    fun fieldChoose() = link.fieldChoose()
+    fun fieldChooseStep(forward: Boolean) = link.fieldChooseStep(forward)
+    fun fieldChoosePick() = link.fieldChoosePick()
 
     /** Whether the band's firmware reads handwriting (a `hw_` model); null before it said. */
     fun bandWrites(): Boolean? = link.deviceInfo()?.takeIf { it.has("handwriting") }?.optBoolean("handwriting")

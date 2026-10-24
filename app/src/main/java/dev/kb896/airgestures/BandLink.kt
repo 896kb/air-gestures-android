@@ -123,6 +123,11 @@ class BandLink(
         org.json.JSONObject(Bridge.fieldEdits(handle, now()))
     }
 
+    /** Choosing a word's suggestions in a text field (see Bridge.fieldChoose). */
+    fun fieldChoose(): Boolean = synchronized(lock) { handle != 0L && Bridge.fieldChoose(handle) }
+    fun fieldChooseStep(forward: Boolean) = synchronized(lock) { if (handle != 0L) Bridge.fieldChooseStep(handle, forward) }
+    fun fieldChoosePick() = synchronized(lock) { if (handle != 0L) Bridge.fieldChoosePick(handle, now()) }
+
     /** A double tap in a text field: the pen goes down. */
     fun fieldPenDown() = synchronized(lock) { if (handle != 0L) Bridge.fieldPenDown(handle, now()) }
 

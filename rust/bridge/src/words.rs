@@ -240,6 +240,24 @@ impl Writer {
         true
     }
 
+    /// The letters of the word under way, as read.
+    pub fn letters(&self) -> &[LetterOdds] {
+        &self.letters
+    }
+
+    /// Bring back a word that was taken with a space: its letters under way again (the space
+    /// and the word come off the text). False when the text doesn't end with `word` and a space.
+    pub fn reopen(&mut self, word: &str, letters: Vec<LetterOdds>, words: Option<&Dictionary>) -> bool {
+        let taken = format!("{word} ");
+        if !self.letters.is_empty() || !self.text.ends_with(&taken) {
+            return false;
+        }
+        self.text.truncate(self.text.len() - taken.len());
+        self.letters = letters;
+        self.refresh(words);
+        true
+    }
+
     /// Whether nothing has been written (no text, no word under way).
     pub fn is_empty(&self) -> bool {
         self.text.is_empty() && self.letters.is_empty()
