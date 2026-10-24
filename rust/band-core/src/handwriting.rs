@@ -46,11 +46,17 @@ pub fn best(frame: &[f32]) -> (usize, f32) {
 /// The digit 0, which the band often reads an "o" as.
 pub const ZERO: usize = 52;
 
-/// Symbols that are one letter as written: a letter and its capital, and o, O and 0.
+/// The space symbol, and `_`, which is what the band mostly sends for a drawn space.
+pub const SPACE: usize = 96;
+pub const UNDERSCORE: usize = 88;
+
+/// Symbols that are one thing as written: a letter and its capital; o, O and 0; and the
+/// two spaces.
 pub fn group(index: usize) -> usize {
     match index {
         26..=51 => index - 26,
         ZERO => 14,
+        UNDERSCORE => SPACE,
         _ => index,
     }
 }

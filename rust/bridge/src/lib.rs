@@ -352,7 +352,7 @@ impl Connection {
             let words = words::dictionary();
             for symbol in &written {
                 let typed = field.take(symbol, words.as_deref(), now);
-                if symbol.index != band_core::handwriting::PAUSE {
+                {
                     self.log.push(format!(
                         "handwriting: {} ({}, sure {:.1}){}",
                         band_core::handwriting::symbol(symbol.index),

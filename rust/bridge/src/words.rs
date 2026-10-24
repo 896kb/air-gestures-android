@@ -42,6 +42,8 @@ const COMPLETIONS: usize = 2;
 const COMPLETION_COST: f32 = 2.0;
 /// The longest word considered.
 const LONGEST: usize = 24;
+/// How much better two words must fit than one before a pause splits them (log).
+const SPLIT_MARGIN: f32 = 1.0;
 
 pub type LetterOdds = [f32; 26];
 
@@ -105,6 +107,24 @@ impl Dictionary {
             }
         }
         best
+    }
+
+    /// How well the best word fits `letters`: a whole word, or a longer one starting that way.
+    fn fit(&self, letters: &[LetterOdds]) -> f32 {
+        let whole = self.rank(letters, true, 1).first().map_or(f32::NEG_INFINITY, |&(_, score)| score);
+        let longer = self.rank(letters, false, 1).first().map_or(f32::NEG_INFINITY, |&(_, score)| score);
+        whole.max(longer - COMPLETION_COST)
+    }
+
+    /// Whether `letters`, written with a pause after the first `at`, are better read as a whole
+    /// word there and another word (or its start) after: "thereis" with a pause after "there"
+    /// is "there is", but "the" + pause + "re" stays "there".
+    pub fn splits(&self, letters: &[LetterOdds], at: usize) -> bool {
+        if at == 0 || at >= letters.len() {
+            return false;
+        }
+        let first = self.rank(&letters[..at], true, 1).first().map_or(f32::NEG_INFINITY, |&(_, score)| score);
+        first + self.fit(&letters[at..]) > self.fit(letters) + SPLIT_MARGIN
     }
 
     /// What to offer for `letters`: the best whole words first, a couple of completions, and the
@@ -238,6 +258,16 @@ impl Writer {
         }
         self.refresh(words);
         true
+    }
+
+    /// The word under way ends after its first `at` letters: those become a word (the best for
+    /// them) and a space, and the rest start the next word.
+    pub fn split(&mut self, at: usize, words: Option<&Dictionary>) {
+        let rest = self.letters.split_off(at.min(self.letters.len()));
+        self.refresh(words);
+        self.space(words);
+        self.letters = rest;
+        self.refresh(words);
     }
 
     /// The letters of the word under way, as read.

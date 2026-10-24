@@ -49,6 +49,8 @@ pub struct FieldTyping {
     /// and whether the word under way began with one.
     capitals: Vec<usize>,
     capital_now: bool,
+    /// How many letters of the word under way came before a pause: where it might be two words.
+    pause_at: Option<usize>,
     /// Pen down: what the band writes is typed. It lifts after [`PEN_QUIET_S`] without a
     /// confident symbol; two full stops ("..", a double tap) put it down again.
     pen: bool,
@@ -210,6 +212,14 @@ impl FieldTyping {
             }
             return false;
         }
+        if written.index == PAUSE {
+            // A sure pause inside a word: maybe a space that wasn't written (see `write`).
+            let letters = self.writer.letters().len();
+            if written.margin >= LETTER_MARGIN && letters > 0 {
+                self.pause_at = Some(letters);
+            }
+            return false;
+        }
         let needed = match written.index {
             ZERO if !self.writer.letters().is_empty() => LETTER_MARGIN,
             0..=51 | SPACE | UNDERSCORE_SPACE | BACKSPACE => LETTER_MARGIN,
@@ -228,6 +238,10 @@ impl FieldTyping {
     pub fn write(&mut self, written: &Written, words: Option<&Dictionary>) {
         let before = self.writer.state().text.chars().count();
         let starting = self.writer.state().letters.is_empty();
+        let mut split = false;
+        if !matches!(written.index, 0..=51 | ZERO) {
+            self.pause_at = None;
+        }
         match written.index {
             // A 0 inside a word is an "o".
             0..=51 | ZERO if written.index != ZERO || !self.writer.letters().is_empty() => {
@@ -235,7 +249,18 @@ impl FieldTyping {
                     // The band can't tell "O" from "o" (it swaps between them): not a capital.
                     self.capital_now = CAPITALS.contains(&written.index) && written.index != 40;
                 }
-                self.writer.letter(written.letters, words)
+                self.writer.letter(written.letters, words);
+                // Letters after a pause that read better as a new word: the space goes in.
+                if let (Some(at), Some(dictionary)) = (self.pause_at, words)
+                    && dictionary.splits(self.writer.letters(), at)
+                {
+                    let word = self.writer.state().word;
+                    let letters = self.writer.letters()[..at].to_vec();
+                    self.writer.split(at, words);
+                    self.last_word = Some((word, letters));
+                    self.pause_at = None;
+                    split = true;
+                }
             }
             BACKSPACE if self.writer.is_empty() => {
                 self.edits.push(Edit { delete: 1, insert: String::new() });
@@ -264,7 +289,7 @@ impl FieldTyping {
         if text > before && !starting && self.capital_now {
             self.capitals.push(before);
         }
-        if self.writer.state().letters.is_empty() {
+        if self.writer.state().letters.is_empty() || split {
             self.capital_now = false;
         }
         self.capitals.retain(|&at| at < text);
@@ -384,6 +409,36 @@ mod tests {
         typing.write(&Written { index: SPACE, margin: 3.0, letters: [0.0; 26] }, Some(&words));
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "hi where ");
+    }
+
+    #[test]
+    fn a_pause_between_words_can_be_a_space() {
+        let words = Dictionary::parse("the 500000\nthere 100000\nis 300000\nthem 50000\n");
+        let pause = |margin| Written { index: PAUSE, margin, letters: [0.0; 26] };
+        // "there", a pause, "is": two words.
+        let mut typing = FieldTyping::new("", 0.0);
+        let mut field = String::new();
+        for c in "there".chars() {
+            typing.take(&letter(c, 0.9), Some(&words), 1.0);
+        }
+        typing.take(&pause(2.0), Some(&words), 1.0);
+        for c in "is".chars() {
+            typing.take(&letter(c, 0.9), Some(&words), 1.0);
+        }
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "There is");
+        // "the", a pause, "re": still "there".
+        let mut typing = FieldTyping::new("", 0.0);
+        let mut field = String::new();
+        for c in "the".chars() {
+            typing.take(&letter(c, 0.9), Some(&words), 1.0);
+        }
+        typing.take(&pause(2.0), Some(&words), 1.0);
+        for c in "re".chars() {
+            typing.take(&letter(c, 0.9), Some(&words), 1.0);
+        }
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "There");
     }
 
     #[test]
