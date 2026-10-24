@@ -36,7 +36,13 @@ class SetupActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         steps = column(gap = 14f)
-        show(pageColumn().apply { addView(card(null, steps)) }, title = "Setup")
+        val band = column().apply {
+            addView(navRow(R.drawable.ic_zap, "Firmware") { open<FirmwareActivity>() })
+        }
+        show(pageColumn().apply {
+            addView(card(null, steps))
+            addView(card(null, band))
+        }, title = "Setup")
     }
 
     override fun onResume() {

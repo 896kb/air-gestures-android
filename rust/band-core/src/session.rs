@@ -23,7 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
-use crate::ota::{OtaJob, OtaPlan};
+use crate::ota::{OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
@@ -228,6 +228,9 @@ pub struct BandSession {
     ota_request: Option<u64>,
     /// A firmware update in progress ([`BandSession::ota_start`]).
     ota_job: Option<OtaJob>,
+    /// The band's last update status, and the last line of the update in progress (or done).
+    ota_last: Option<OtaStatus>,
+    ota_progress: Option<String>,
 }
 
 impl BandSession {
@@ -299,6 +302,8 @@ impl BandSession {
             hand: None,
             ota_request: None,
             ota_job: None,
+            ota_last: None,
+            ota_progress: None,
         }
     }
 
@@ -827,6 +832,23 @@ impl BandSession {
         Ok(bytes)
     }
 
+    /// The band's last reported update status (see [`ota_status`](Self::ota_status)).
+    pub fn ota_last_status(&self) -> Option<OtaStatus> {
+        self.ota_last
+    }
+
+    /// The latest line of the running (or last) update, and whether one is running.
+    pub fn ota_progress(&self) -> (Option<&str>, bool) {
+        (self.ota_progress.as_deref(), self.ota_job.is_some())
+    }
+
+    fn ota_log(&mut self, lines: Vec<String>) {
+        if let Some(last) = lines.last() {
+            self.ota_progress = Some(last.trim_start_matches("ota: ").to_owned());
+        }
+        self.diagnostics.extend(lines);
+    }
+
     /// Debug: run a firmware update (see [`crate::ota`]): a trial that ends with Abort, or an
     /// install that ends with Commit. Progress goes to the log; returns the first bytes to write.
     pub fn ota_start(&mut self, plan: OtaPlan, time: f64) -> Result<Vec<u8>> {
@@ -840,7 +862,8 @@ impl BandSession {
         let mut ids = self.configuration_id;
         let bodies = job.begin(&mut ids, time);
         let bytes = self.ota_frames(bodies, ids)?;
-        self.diagnostics.extend(job.log());
+        let lines = job.log();
+        self.ota_log(lines);
         self.ota_job = Some(job);
         Ok(bytes)
     }
@@ -853,7 +876,8 @@ impl BandSession {
         }
         let mut ids = self.configuration_id;
         let bodies = job.tick(&mut ids, time);
-        self.diagnostics.extend(job.log());
+        let lines = job.log();
+        self.ota_log(lines);
         let bytes = self.ota_frames(bodies, ids);
         if !job.done() {
             self.ota_job = Some(job);
@@ -1390,7 +1414,8 @@ impl BandSession {
                 if job.owns(seq) {
                     let mut ids = self.configuration_id;
                     let bodies = job.receive(&fields, &mut ids, time);
-                    self.diagnostics.extend(job.log());
+                    let lines = job.log();
+                    self.ota_log(lines);
                     outgoing.extend(self.ota_frames(bodies, ids)?);
                     if !job.done() {
                         self.ota_job = Some(job);
@@ -1401,7 +1426,11 @@ impl BandSession {
             }
             if self.ota_request.is_some() && self.ota_request == fields.integer(1).ok() {
                 self.ota_request = None;
-                self.diagnostics.push(format!("ota: update status: {}", fields.describe_nested(0)));
+                self.ota_last = OtaStatus::from_response(&fields);
+                match self.ota_last {
+                    Some(status) => self.diagnostics.push(format!("ota: update status: {status}")),
+                    None => self.diagnostics.push(format!("ota: update status: {}", fields.describe_nested(0))),
+                }
                 return Ok(Vec::new());
             }
             return self.receive_hand(&fields, time, outgoing);

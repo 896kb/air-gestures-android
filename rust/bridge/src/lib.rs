@@ -65,6 +65,11 @@ struct Snapshot<'a> {
     connected: bool,
     /// The firmware the band runs, as it reports it on connecting (its "software" version).
     firmware: Option<String>,
+    /// The band's last update status ("IDLE stable firmware, active …"), the latest line of
+    /// the running or last firmware update, and whether one is running.
+    ota_status: Option<String>,
+    ota_progress: Option<&'a str>,
+    ota_busy: bool,
     #[serde(flatten)]
     status: &'a Status,
 }
@@ -347,6 +352,9 @@ impl Connection {
         serde_json::to_string(&Snapshot {
             connected: self.live,
             firmware: self.session.device_info().map(|info| info.software.clone()).filter(|v| !v.is_empty()),
+            ota_status: self.session.ota_last_status().map(|status| status.to_string()),
+            ota_progress: self.session.ota_progress().0,
+            ota_busy: self.session.ota_progress().1,
             status: self.controller.status(),
         })
         .expect("status serializes")

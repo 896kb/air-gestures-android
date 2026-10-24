@@ -201,6 +201,9 @@ class BandService : Service(), BandLink.Listener {
     /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
     fun rawEmg(on: Boolean) = link.rawEmg(on)
 
+    /** What the band said about itself (see BandLink.deviceInfo). */
+    fun deviceInfo() = link.deviceInfo()
+
     /** Debug: a handwriting recording (see BandLink.recordStart). */
     val recording get() = link
 
@@ -251,6 +254,9 @@ class BandService : Service(), BandLink.Listener {
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
                 firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
+                otaStatus = status.optString("ota_status").takeUnless { status.isNull("ota_status") },
+                otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
+                otaBusy = status.optBoolean("ota_busy"),
             )
         }
         val now = state.value
@@ -405,6 +411,10 @@ class BandService : Service(), BandLink.Listener {
         val profile: String? = null,
         /** The firmware version the band reported on connecting. */
         val firmware: String? = null,
+        /** The band's last update status, the latest line of the running or last update, and whether one runs. */
+        val otaStatus: String? = null,
+        val otaProgress: String? = null,
+        val otaBusy: Boolean = false,
     )
 
     /** A tiny main-thread observable (no AndroidX in this app). */

@@ -83,6 +83,7 @@
             </intent-filter>
         </receiver>
         <activity android:name=".SetupActivity" android:exported="false" />
+        <activity android:name=".FirmwareActivity" android:exported="false" />
         <activity android:name=".ActivityLogActivity" android:exported="false" />
         <!-- The widget's profile picker: a sheet over the home screen, never in recents. -->
         <activity

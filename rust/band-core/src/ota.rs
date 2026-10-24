@@ -26,6 +26,72 @@ const ML_MODEL: u64 = 2;
 const OTA_STATES: [&str; 4] = ["UNAVAILABLE", "IDLE", "UPDATE_IN_PROGRESS", "UPDATE_READY"];
 const UNAVAILABLE: [&str; 5] = ["none", "no BLE", "disabled on the band", "power (charge the band)", "trial firmware running"];
 
+/// The band's answer to an update-status request (`DeviceInfoResponse`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtaStatus {
+    /// `OtaState`: 0 unavailable, 1 idle, 2 in progress, 3 ready (staged).
+    pub state: u64,
+    /// `DeviceState`: 0 stable, 1 trial, 2 recovery firmware.
+    pub device: u64,
+    pub kek: u64,
+    /// `UnavailableReason` when unavailable.
+    pub reason: u64,
+    /// By item type: active firmware, latest (staged) firmware, ML model.
+    pub versions: [Option<u64>; 3],
+}
+
+impl OtaStatus {
+    pub fn read(info: &ProtoFields) -> Self {
+        let mut versions = [None; 3];
+        for (field, bytes) in info.byte_fields() {
+            if field == 5
+                && let Ok(item) = ProtoFields::parse(bytes)
+                && let (Ok(kind), Ok(version)) = (item.integer(1), item.integer(2))
+                && let Some(slot) = versions.get_mut(kind as usize)
+            {
+                *slot = Some(version);
+            }
+        }
+        Self {
+            state: info.integer(4).unwrap_or(0),
+            device: info.integer(3).unwrap_or(0),
+            kek: info.integer(6).unwrap_or(0),
+            reason: info.integer(7).unwrap_or(0),
+            versions,
+        }
+    }
+
+    /// From a whole `RpcResponse` carrying `OtaResp.deviceInfoResponse`.
+    pub fn from_response(fields: &ProtoFields) -> Option<Self> {
+        let response = ProtoFields::parse(fields.bytes(8).ok()?).ok()?;
+        Some(Self::read(&ProtoFields::parse(response.bytes(2).ok()?).ok()?))
+    }
+
+    pub fn state_name(&self) -> &'static str {
+        OTA_STATES.get(self.state as usize).unwrap_or(&"?")
+    }
+}
+
+impl std::fmt::Display for OtaStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let shown = |v: Option<u64>| v.map_or("-".to_string(), |v| v.to_string());
+        write!(
+            f,
+            "{} {}, active {}, staged {}, ML {}, key {}",
+            self.state_name(),
+            ["stable firmware", "TRIAL firmware", "RECOVERY firmware"].get(self.device as usize).unwrap_or(&"?"),
+            shown(self.versions[ACTIVE_FIRMWARE as usize]),
+            shown(self.versions[LATEST_FIRMWARE as usize]),
+            shown(self.versions[ML_MODEL as usize]),
+            self.kek,
+        )?;
+        if self.state == 0 {
+            write!(f, ", unavailable: {}", UNAVAILABLE.get(self.reason as usize).unwrap_or(&"?"))?;
+        }
+        Ok(())
+    }
+}
+
 /// Which part of an update to run. Each step is its own command so a person decides on the
 /// next: [`Key`](Self::Key), [`Send`](Self::Send), then [`Install`](Self::Install) or
 /// [`Cancel`](Self::Cancel).
@@ -350,30 +416,9 @@ impl OtaJob {
         let Some(info) = response.bytes(2).ok().and_then(|b| ProtoFields::parse(b).ok()) else {
             return self.fail("the status answer had no device info", ids, now);
         };
-        let state = info.integer(4).unwrap_or(0);
-        let device = info.integer(3).unwrap_or(0);
-        let kek = info.integer(6).unwrap_or(0);
-        let reason = info.integer(7).unwrap_or(0);
-        let mut versions = [None; 3];
-        for (field, bytes) in info.byte_fields() {
-            if field == 5
-                && let Ok(item) = ProtoFields::parse(bytes)
-                && let (Ok(kind), Ok(version)) = (item.integer(1), item.integer(2))
-                && let Some(slot) = versions.get_mut(kind as usize)
-            {
-                *slot = Some(version);
-            }
-        }
-        let shown = |v: Option<u64>| v.map_or("-".to_string(), |v| v.to_string());
-        self.say(format!(
-            "status: {} {}, active {}, staged {}, ML {}, key {kek}{}",
-            OTA_STATES.get(state as usize).unwrap_or(&"?"),
-            ["stable firmware", "TRIAL firmware", "RECOVERY firmware"].get(device as usize).unwrap_or(&"?"),
-            shown(versions[ACTIVE_FIRMWARE as usize]),
-            shown(versions[LATEST_FIRMWARE as usize]),
-            shown(versions[ML_MODEL as usize]),
-            if state == 0 { format!(", unavailable: {}", UNAVAILABLE.get(reason as usize).unwrap_or(&"?")) } else { String::new() },
-        ));
+        let status = OtaStatus::read(&info);
+        let (state, kek, versions) = (status.state, status.kek, status.versions);
+        self.say(format!("status: {status}"));
         match ask {
             Ask::Last => {
                 self.done = true;
