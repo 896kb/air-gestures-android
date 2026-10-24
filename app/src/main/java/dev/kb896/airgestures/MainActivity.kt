@@ -519,8 +519,8 @@ class MainActivity : Screen() {
 private val FIELDS_HELP = listOf(
     "Writing" to "Tap into any text field and write with your index finger on a table, your leg or any " +
         "surface. The band reads each letter and the dictionary corrects the word as you go. Draw a " +
-        "short line to the right for a space (a clear pause between words often does too), and the " +
-        "band's backspace stroke to take back a letter.",
+        "short line to the right for a space (a clear pause between words often does too), and a " +
+        "short line to the left to take back a letter.",
     "The pen" to "The pen is down when you enter a field (one buzz): what you write is typed. After 8 " +
         "seconds with nothing written it lifts (two buzzes), so other hand movements don't type. To " +
         "put it down again, double tap your index finger or write two dots (..).",
