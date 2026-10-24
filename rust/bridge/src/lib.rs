@@ -351,7 +351,16 @@ impl Connection {
         if let Some(field) = &mut self.field {
             let words = words::dictionary();
             for symbol in &written {
-                field.take(symbol, words.as_deref(), now);
+                let typed = field.take(symbol, words.as_deref(), now);
+                if symbol.index != band_core::handwriting::PAUSE {
+                    self.log.push(format!(
+                        "handwriting: {} ({}, sure {:.1}){}",
+                        band_core::handwriting::symbol(symbol.index),
+                        symbol.index,
+                        symbol.margin,
+                        if typed { "" } else { " not typed" }
+                    ));
+                }
             }
         }
     }

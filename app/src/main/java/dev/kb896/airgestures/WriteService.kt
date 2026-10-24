@@ -153,7 +153,7 @@ class WriteService : AccessibilityService() {
                     choosing = false
                     popup.hide()
                 }
-                "swipe up" -> {
+                "swipe up", "swipe down" -> {
                     service.fieldChooseCancel()
                     choosing = false
                     popup.hide()
@@ -335,7 +335,7 @@ class WriteService : AccessibilityService() {
     }
 
     companion object {
-        const val CHOOSE_HINT = "Swipe to choose · tap to take · up to cancel"
+        const val CHOOSE_HINT = "Swipe to choose · tap to take · up or down to cancel"
         const val MENU_HINT = "Swipe to choose · tap to do · down to close"
         const val DELETE_WORD = "Delete word"
         const val DELETE_ALL = "Delete all"

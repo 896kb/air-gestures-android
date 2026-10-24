@@ -14,7 +14,7 @@ const BACKSPACE: usize = 94;
 const ENTER: usize = 95;
 const SPACE: usize = 96;
 /// `_` in Meta AI's list, but what the band sends for a drawn space (seen on build 70).
-const UNDERSCORE_SPACE: usize = 89;
+const UNDERSCORE_SPACE: usize = 88;
 /// The full stop: two in a row (a double tap on the surface) put the pen down.
 const PERIOD: usize = 75;
 /// How sure the band must be for a symbol to count while the pen is down: letters, spaces and
@@ -192,11 +192,11 @@ impl FieldTyping {
     }
 
     /// A symbol the band wrote at `now`: typed if the pen is down and the band was sure of it;
-    /// with the pen up, only a double full stop counts (it puts the pen down).
-    pub fn take(&mut self, written: &Written, words: Option<&Dictionary>, now: f64) {
+    /// with the pen up, only a double full stop counts (it puts the pen down). Whether it was typed.
+    pub fn take(&mut self, written: &Written, words: Option<&Dictionary>, now: f64) -> bool {
         self.tick(now);
         if self.choosing.is_some() {
-            return;
+            return false;
         }
         if !self.pen {
             if written.index == PERIOD && written.margin >= WAKE_MARGIN {
@@ -208,18 +208,19 @@ impl FieldTyping {
                     self.last_dot = Some(now);
                 }
             }
-            return;
+            return false;
         }
         let needed = match written.index {
             0..=51 | SPACE | UNDERSCORE_SPACE | BACKSPACE => LETTER_MARGIN,
-            PAUSE => return,
+            PAUSE => return false,
             _ => MARK_MARGIN,
         };
         if written.margin < needed {
-            return;
+            return false;
         }
         self.last_confident = now;
         self.write(written, words);
+        true
     }
 
     /// A symbol the band wrote, typed as it is.
