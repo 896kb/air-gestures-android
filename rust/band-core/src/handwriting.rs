@@ -47,17 +47,34 @@ pub fn best(frame: &[f32]) -> (usize, f32) {
 #[derive(Default)]
 pub struct Decoder {
     last: Option<usize>,
+    /// The symbol whose frames are coming, at its surest frame so far.
+    run: Option<Written>,
+    /// Symbols whose frames have ended, each at its surest frame: what typing takes. A symbol's
+    /// first frame is often unsure (it is only just ahead), so it is judged on all of them.
+    pub finished: Vec<Written>,
     /// The text so far (symbols as [`symbol`] spells them).
     pub text: String,
     pub frames: usize,
 }
 
 impl Decoder {
-    /// One frame of scores; the symbol it adds, if any, with its margin.
+    /// One frame of scores; the symbol it adds, if any, with its margin in this first frame.
     pub fn push(&mut self, frame: &[f32]) -> Option<(usize, f32)> {
         self.frames += 1;
         let (index, margin) = best(frame);
         let new = index != BLANK && self.last != Some(index);
+        if self.last == Some(index) {
+            if let Some(run) = &mut self.run
+                && margin > run.margin
+            {
+                *run = Written { index, margin, letters: letter_odds(frame) };
+            }
+        } else {
+            self.finished.extend(self.run.take());
+            if index != BLANK {
+                self.run = Some(Written { index, margin, letters: letter_odds(frame) });
+            }
+        }
         self.last = Some(index);
         if !new {
             return None;
@@ -122,6 +139,21 @@ mod tests {
             decoder.push(&frame(index));
         }
         assert_eq!(decoder.text, "ab");
+    }
+
+    #[test]
+    fn a_symbol_is_judged_on_its_surest_frame() {
+        let sure = |index, score| {
+            let mut scores = vec![0.0; SYMBOLS];
+            scores[index] = score;
+            scores
+        };
+        let mut decoder = Decoder::default();
+        for frame in [sure(4, 0.3), sure(4, 4.0), sure(4, 1.0), frame(BLANK), sure(7, 2.0), sure(0, 1.0)] {
+            decoder.push(&frame);
+        }
+        let finished: Vec<(usize, f32)> = decoder.finished.iter().map(|w| (w.index, w.margin)).collect();
+        assert_eq!(finished, [(4, 4.0), (7, 2.0)]);
     }
 
     #[test]

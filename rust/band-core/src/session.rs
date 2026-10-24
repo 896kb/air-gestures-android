@@ -23,7 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
-use crate::handwriting::{Decoder, PAUSE, SYMBOLS, Written, letter_odds, scores, symbol};
+use crate::handwriting::{Decoder, PAUSE, SYMBOLS, Written, scores, symbol};
 use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
@@ -1530,9 +1530,9 @@ impl BandSession {
                             if handwriting.tokens.len() > 500 {
                                 handwriting.tokens.drain(..100);
                             }
-                            handwriting.pending.push(Written { index, margin, letters: letter_odds(chunk) });
                         }
                     }
+                    handwriting.pending.append(&mut handwriting.decoder.finished);
                 }
             }
             return Ok(Vec::new());
