@@ -788,8 +788,11 @@ impl BandSession {
     }
 
     /// Put the band in its active state (`ConfigReq.deviceState` = ACTIVE), as Meta AI's gesture
-    /// screens do. Build 70 comes up in standby on its wake ("IA") model and drops what it
-    /// detects; active switches it to the gesture model. The answer isn't needed.
+    /// screens do. The band can come up in standby, notably after a firmware update (seen after
+    /// installing build 70): it then runs its wake model (`ia_od_…`), whose only gesture, "IA",
+    /// it drops before sending (`index_ia_enabled=no`), so the app sees nothing at all. We can't
+    /// watch for IA for that reason; asking for active on every connection covers it instead.
+    /// The answer isn't needed.
     /// Sent right after the hand read (which opens the service), under its own request id
     /// so the hand requests keep theirs.
     fn request_active(&mut self) -> Result<Vec<u8>> {
@@ -1752,6 +1755,9 @@ pub struct DeviceInfo {
     pub hardware: String,
     pub serial: String,
     pub release_branch: String,
+    /// The EMG model the band runs now (`DeviceInfoResp.modelId`): `cc_od_…` for gestures,
+    /// `ia_od_…` for the wake model of a band in standby.
+    pub model: String,
 }
 
 /// Leaves the serial out.
@@ -1777,6 +1783,7 @@ impl DeviceInfo {
                 hardware: fields.text(4).unwrap_or_default(),
                 serial,
                 release_branch: fields.text(13).unwrap_or_default(),
+                model: fields.text(5).unwrap_or_default(),
             });
         }
         if depth >= 3 {

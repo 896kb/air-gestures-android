@@ -379,6 +379,12 @@ impl Connection {
             Event::Connected => {
                 self.live = true;
                 self.log.push("connected".into());
+                // Seen after a firmware update: the session's active request switches it.
+                if let Some(info) = self.session.device_info()
+                    && info.model.starts_with("ia_")
+                {
+                    self.log.push(format!("the band was in standby on its wake model {}; asked for active", info.model));
+                }
             }
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
             Event::RawEmgConfiguration(config) => {
