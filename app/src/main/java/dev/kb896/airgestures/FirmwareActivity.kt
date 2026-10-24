@@ -360,7 +360,9 @@ class FirmwareActivity : Screen() {
         "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and installed " +
             "in the same connection, about 15 minutes; the band restarts at the end. Keep the band on its charger, " +
             "keep your phone and band nearby, and try to stay on this app until it says Installed. " +
-            "This can't be undone: the band refuses older firmware.",
+            "If the install keeps stopping partway, take the band off your wrist and leave it undisturbed " +
+            "during the install: movement and gestures add traffic that some firmware versions may not " +
+            "handle well while updating. This can't be undone: the band refuses older firmware.",
         "Install",
     ) { run(pkg, "update") }
 
