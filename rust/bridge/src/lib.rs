@@ -63,6 +63,8 @@ pub struct Connection {
 #[derive(Serialize)]
 struct Snapshot<'a> {
     connected: bool,
+    /// The firmware the band runs, as it reports it on connecting (its "software" version).
+    firmware: Option<String>,
     #[serde(flatten)]
     status: &'a Status,
 }
@@ -132,6 +134,7 @@ impl Connection {
         for event in self.session.tick(now) {
             outgoing.extend(self.on_event(&event, now)?);
         }
+        outgoing.extend(self.session.ota_tick(now).map_err(|e| e.to_string())?);
         if self.controller.held_tap_due().is_some_and(|due| now >= due) {
             for command in self.controller.fire_held_tap(now) {
                 outgoing.extend(self.apply(command, now)?);
@@ -222,6 +225,32 @@ impl Connection {
     pub fn ota_status(&mut self) -> Result<Vec<u8>, String> {
         self.probing = true;
         self.session.ota_status().map_err(|e| e.to_string())
+    }
+
+    /// Debug: one step of a firmware update (see [`band_core::ota::OtaMode`]): "key", "send",
+    /// "trial", "install" or "update" (all of it in one connection) from the package unzipped into `dir` (see [`firmware::ota_plan`]),
+    /// or "cancel". "install" commits only that package's version, and only once it's staged.
+    /// Returns the first bytes to write; progress goes to the log.
+    pub fn ota_start(&mut self, mode: &str, dir: &str, now: f64) -> Result<Vec<u8>, String> {
+        use band_core::ota::{OtaMode, OtaPlan};
+        let mode = match mode {
+            "key" => OtaMode::Key,
+            "send" => OtaMode::Send,
+            "trial" => OtaMode::Trial,
+            "cancel" => OtaMode::Cancel,
+            "install" => OtaMode::Install,
+            "update" => OtaMode::Update,
+            other => return Err(format!("unknown update step {other}")),
+        };
+        let plan = if mode == OtaMode::Cancel {
+            OtaPlan { version: 0, firmware: Vec::new(), firmware_md5: [0; 16], model: None, kek: None, mode, resume: false }
+        } else {
+            let (plan, summary) = firmware::ota_plan(dir, mode)?;
+            self.log.push(format!("ota: {summary}"));
+            plan
+        };
+        self.probing = true;
+        self.session.ota_start(plan, now).map_err(|e| e.to_string())
     }
 
     /// Debug: turn the band's raw sEMG stream on or off (alongside gestures); returns the
@@ -317,6 +346,7 @@ impl Connection {
     pub fn status_json(&self) -> String {
         serde_json::to_string(&Snapshot {
             connected: self.live,
+            firmware: self.session.device_info().map(|info| info.software.clone()).filter(|v| !v.is_empty()),
             status: self.controller.status(),
         })
         .expect("status serializes")

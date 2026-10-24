@@ -39,6 +39,24 @@ import kotlin.concurrent.thread
  *
  *     ... --ez ota_status true
  *
+ * A firmware update, one step at a time, from a package unzipped (with its kek.json) into the
+ * app's files, e.g. files/ota/1003366292. The package's key, if the band lacks it (persistent);
+ * sending each item for the band to verify, leaving the update staged (not installed); or
+ * cancelling whatever update the band holds. A trial does key, send, then cancel. Install
+ * commits the staged update (only the package's version): the band reboots into it, and on
+ * reconnecting the app checks the firmware it reports.
+ *
+ *     ... --es ota_key ota/1003366292
+ *     ... --es ota_send ota/1003366292
+ *     ... --ez ota_cancel true
+ *     ... --es ota_trial ota/1003366292
+ *     ... --es ota_install ota/1003366292
+ *
+ * The band only accepts Install in the connection that verified the update, so this does all
+ * of it in one go (cancel anything earlier, key, send, verify, install):
+ *
+ *     ... --es ota_update ota/1003366292
+ *
  * (The sign-in, again:)
  *
  *     ... --ez signin true
@@ -68,6 +86,13 @@ class DebugActions : BroadcastReceiver() {
         }
         if (intent.getBooleanExtra("ota_status", false)) {
             BandService.instance?.otaStatus() ?: Log.i("AirGestures", "debug ota: the band service isn't running")
+            return
+        }
+        val step = listOf("key", "send", "trial", "cancel", "install", "update").firstOrNull { intent.hasExtra("ota_$it") }
+        if (step != null) {
+            val dir = intent.getStringExtra("ota_$step") ?: ""
+            val path = java.io.File(context.getExternalFilesDir(null), dir).path
+            BandService.instance?.otaStart(step, path) ?: Log.i("AirGestures", "debug ota: the band service isn't running")
             return
         }
         if (intent.getBooleanExtra("signin", false)) {

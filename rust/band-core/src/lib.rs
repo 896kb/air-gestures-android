@@ -12,6 +12,7 @@ pub mod error;
 pub mod events;
 pub mod gestures;
 pub mod identity;
+pub mod ota;
 pub mod proto;
 pub mod responder;
 pub mod session;

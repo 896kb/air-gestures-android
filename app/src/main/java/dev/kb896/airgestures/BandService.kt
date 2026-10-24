@@ -189,6 +189,14 @@ class BandService : Service(), BandLink.Listener {
 
     /** Debug: ask the band's update status (read only); the answer goes to the log. */
     fun otaStatus() = link.otaStatus()
+    fun otaStart(mode: String, dir: String) {
+        if (mode == "install" || mode == "update") {
+            // Checked when the band reconnects after its reboot (see checkInstall).
+            val manifest = runCatching { JSONObject(java.io.File(dir, "manifest.json").readText()) }.getOrNull()
+            manifest?.optJSONArray("items")?.optJSONObject(0)?.optLong("version")?.let { prefs.otaExpect = it }
+        }
+        link.otaStart(mode, dir)
+    }
 
     /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
     fun rawEmg(on: Boolean) = link.rawEmg(on)
@@ -242,9 +250,11 @@ class BandService : Service(), BandLink.Listener {
                 dial = status.optString("dial", dial),
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
+                firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
             )
         }
         val now = state.value
+        if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
         if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
         if (level != null && (level != before.battery || now.charging != before.charging)) {
@@ -322,6 +332,19 @@ class BandService : Service(), BandLink.Listener {
         if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused)
     }
 
+    /**
+     * After an install the band reboots; when it reconnects, say whether it now runs the firmware
+     * that was committed (as Meta AI checks), and ask its update status for the rest (state, ML).
+     */
+    private fun checkInstall(firmware: String) {
+        val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
+        prefs.otaExpect = 0
+        onLog(if (firmware == expected.toString()) "ota: INSTALLED: the band runs $firmware"
+              else "ota: INSTALL NOT CONFIRMED: the band runs $firmware, not $expected")
+        // The band reports its version before it accepts requests: ask a moment later.
+        main.postDelayed({ otaStatus() }, 3_000)
+    }
+
     override fun onLog(line: String) = main.post {
         android.util.Log.i("AirGestures", line)
         state.update { copy(log = (log + line).takeLast(LOG_LINES)) }
@@ -380,6 +403,8 @@ class BandService : Service(), BandLink.Listener {
         val claiming: Boolean = false,
         /** The profile in force; null while there's only one (nothing to tell apart). */
         val profile: String? = null,
+        /** The firmware version the band reported on connecting. */
+        val firmware: String? = null,
     )
 
     /** A tiny main-thread observable (no AndroidX in this app). */

@@ -23,6 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
+use crate::ota::{OtaJob, OtaPlan};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
@@ -225,6 +226,8 @@ pub struct BandSession {
     hand: Option<Hand>,
     /// The id of an asked update status ([`BandSession::ota_status`]) not yet answered.
     ota_request: Option<u64>,
+    /// A firmware update in progress ([`BandSession::ota_start`]).
+    ota_job: Option<OtaJob>,
 }
 
 impl BandSession {
@@ -295,6 +298,7 @@ impl BandSession {
             hand_request: None,
             hand: None,
             ota_request: None,
+            ota_job: None,
         }
     }
 
@@ -823,6 +827,53 @@ impl BandSession {
         Ok(bytes)
     }
 
+    /// Debug: run a firmware update (see [`crate::ota`]): a trial that ends with Abort, or an
+    /// install that ends with Commit. Progress goes to the log; returns the first bytes to write.
+    pub fn ota_start(&mut self, plan: OtaPlan, time: f64) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.hand_request.is_some() || self.ota_request.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        if self.ota_job.is_some() {
+            return Err(BandError::Busy("An update is already running.".into()));
+        }
+        let mut job = OtaJob::new(plan);
+        let mut ids = self.configuration_id;
+        let bodies = job.begin(&mut ids, time);
+        let bytes = self.ota_frames(bodies, ids)?;
+        self.diagnostics.extend(job.log());
+        self.ota_job = Some(job);
+        Ok(bytes)
+    }
+
+    /// Debug: resend late update chunks and give up on silent requests; bytes to write.
+    pub fn ota_tick(&mut self, time: f64) -> Result<Vec<u8>> {
+        let Some(mut job) = self.ota_job.take() else { return Ok(Vec::new()) };
+        if self.stopping {
+            return Ok(Vec::new());
+        }
+        let mut ids = self.configuration_id;
+        let bodies = job.tick(&mut ids, time);
+        self.diagnostics.extend(job.log());
+        let bytes = self.ota_frames(bodies, ids);
+        if !job.done() {
+            self.ota_job = Some(job);
+        }
+        bytes
+    }
+
+    /// Frame and encrypt update requests on the configuration service; `ids` is the counter after them.
+    fn ota_frames(&mut self, bodies: Vec<Vec<u8>>, ids: u64) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        for body in bodies {
+            let words: &[u32] = if self.configuration_id == 0 { &SERVICE_OPEN } else { &[] };
+            let frame = encode_frame(CONFIGURATION_CHANNEL, words, &body)?;
+            out.extend(self.encrypt(&frame)?);
+            self.configuration_id = self.configuration_id.max(1);
+        }
+        self.configuration_id = self.configuration_id.max(ids);
+        Ok(out)
+    }
+
     fn receive_hand(
         &mut self,
         fields: &ProtoFields,
@@ -1334,6 +1385,20 @@ impl BandSession {
                 return Ok(Vec::new());
             }
             let fields = ProtoFields::parse(&frame.payload)?;
+            if let Some(mut job) = self.ota_job.take() {
+                let seq = fields.integer(1).unwrap_or(0);
+                if job.owns(seq) {
+                    let mut ids = self.configuration_id;
+                    let bodies = job.receive(&fields, &mut ids, time);
+                    self.diagnostics.extend(job.log());
+                    outgoing.extend(self.ota_frames(bodies, ids)?);
+                    if !job.done() {
+                        self.ota_job = Some(job);
+                    }
+                    return Ok(Vec::new());
+                }
+                self.ota_job = Some(job);
+            }
             if self.ota_request.is_some() && self.ota_request == fields.integer(1).ok() {
                 self.ota_request = None;
                 self.diagnostics.push(format!("ota: update status: {}", fields.describe_nested(0)));

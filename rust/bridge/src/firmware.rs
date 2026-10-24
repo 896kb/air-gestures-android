@@ -308,3 +308,80 @@ mod tests {
         assert!(offer(&json!({"data": {"x": []}})).is_none());
     }
 }
+
+/// A package unzipped into `dir` (`manifest.json`, the items it lists, and `kek.json` as
+/// archived) as an update for the band: each item's size and SHA-256 checked against the
+/// manifest. Also returns a summary for the log.
+pub fn ota_plan(dir: &str, mode: band_core::ota::OtaMode) -> Result<(band_core::ota::OtaPlan, String), String> {
+    use base64::Engine;
+    use md5::Md5;
+    let dir = Path::new(dir);
+    let manifest: Value = serde_json::from_slice(&fs::read(dir.join("manifest.json")).map_err(|e| format!("manifest: {e}"))?)
+        .map_err(|e| format!("manifest: {e}"))?;
+    let items = manifest["items"].as_array().ok_or("manifest: no items")?;
+    let mut version = None;
+    let mut firmware = None;
+    let mut model = None;
+    let mut summary = Vec::new();
+    for item in items {
+        let path = item["path"].as_str().ok_or("manifest: item without a path")?;
+        if path.contains("..") || path.starts_with('/') {
+            return Err(format!("manifest: odd path {path}"));
+        }
+        let data = fs::read(dir.join(path)).map_err(|e| format!("{path}: {e}"))?;
+        if item["size"].as_u64() != Some(data.len() as u64) {
+            return Err(format!("{path}: {} bytes, the manifest says {}", data.len(), item["size"]));
+        }
+        if item["digest"].as_str() != Some(hex(&Sha256::digest(&data)).as_str()) {
+            return Err(format!("{path}: SHA-256 doesn't match the manifest"));
+        }
+        let this = item["version"].as_u64().ok_or("manifest: item without a version")?;
+        if version.is_some_and(|v| v != this) {
+            return Err("manifest: the items have different versions".into());
+        }
+        version = Some(this);
+        let md5: [u8; 16] = Md5::digest(&data).into();
+        summary.push(format!("{path} {} bytes", data.len()));
+        match item["item_type"].as_u64() {
+            Some(1) => firmware = Some((data, md5)),
+            Some(2) => model = Some((data, md5)),
+            other => return Err(format!("{path}: unknown item type {other:?}")),
+        }
+    }
+    let (firmware, firmware_md5) = firmware.ok_or("manifest: no firmware item")?;
+    let kek_id = manifest["kek_version"].as_u64().ok_or("manifest: no kek_version")?;
+    let kek = match fs::read(dir.join("kek.json")) {
+        Ok(bytes) => {
+            let json: Value = serde_json::from_slice(&bytes).map_err(|e| format!("kek.json: {e}"))?;
+            let info = &json["data"]["xar_fetch_encrypted_kek_info_by_kek_id"];
+            if info["encryption_algo"].as_str() != Some("AES_128") {
+                return Err(format!("kek.json: unexpected algorithm {}", info["encryption_algo"]));
+            }
+            let key = base64::engine::general_purpose::STANDARD
+                .decode(info["encrypted_kek"].as_str().ok_or("kek.json: no key")?)
+                .map_err(|e| format!("kek.json: {e}"))?;
+            summary.push(format!("key {kek_id} ({} bytes, wrapped)", key.len()));
+            Some((kek_id, key))
+        }
+        Err(_) => {
+            summary.push(format!("no kek.json (the package needs key {kek_id})"));
+            None
+        }
+    };
+    let version = version.ok_or("manifest: no version")?;
+    let plan = band_core::ota::OtaPlan { version, firmware, firmware_md5, model, kek, mode, resume: false };
+    Ok((plan, format!("package {version}: {}", summary.join(", "))))
+}
+
+#[cfg(test)]
+mod package_tests {
+    /// `OTA=<dir>`: an unzipped package (with kek.json) reads as a plan.
+    #[test]
+    #[ignore]
+    fn package_reads_as_a_plan() {
+        let dir = std::env::var("OTA").expect("OTA=<unzipped package>");
+        let (plan, summary) = super::ota_plan(&dir, band_core::ota::OtaMode::Trial).unwrap();
+        println!("{summary}");
+        assert!(plan.kek.is_some() && plan.model.is_some());
+    }
+}

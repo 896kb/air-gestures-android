@@ -10,6 +10,11 @@ class Prefs(context: Context) {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
 
+    /** The firmware an install committed, until the band reconnects and is checked (0: none). */
+    var otaExpect: Long
+        get() = prefs.getLong("ota_expect", 0)
+        set(value) = prefs.edit().putLong("ota_expect", value).apply()
+
     var paused: Boolean
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()

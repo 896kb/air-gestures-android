@@ -212,6 +212,25 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_otaStatus<'local>(
     bytes_out(&mut env, result)
 }
 
+/// Debug: one step of a firmware update (`mode`: key, send, trial, cancel, install) from the package
+/// unzipped in `dir`. Bytes to write; progress goes to the log.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_otaStart<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    mode: JString<'local>,
+    dir: JString<'local>,
+    now: jdouble,
+) -> jbyteArray {
+    let strings = env.get_string(&mode).map(String::from).and_then(|mode| Ok((mode, String::from(env.get_string(&dir)?))));
+    let result = match strings {
+        Ok((mode, dir)) => unsafe { connection(handle) }.ota_start(&mode, &dir, now),
+        Err(error) => Err(error.to_string()),
+    };
+    bytes_out(&mut env, result)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_probeConfig<'local>(
     mut env: JNIEnv<'local>,

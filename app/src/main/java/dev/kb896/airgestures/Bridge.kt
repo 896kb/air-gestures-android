@@ -30,6 +30,7 @@ object Bridge {
     @JvmStatic external fun probeConfig(handle: Long, hex: String, now: Double): ByteArray
     /** Debug: ask the band's update status (read only); returns bytes to write. The answer goes to the log. */
     @JvmStatic external fun otaStatus(handle: Long): ByteArray
+    @JvmStatic external fun otaStart(handle: Long, mode: String, dir: String, now: Double): ByteArray
     /** Debug: the raw sEMG stream on or off; returns bytes to write. Its rate goes to the log. */
     @JvmStatic external fun setRawEmg(handle: Long, on: Boolean, now: Double): ByteArray
     /** Debug: record raw sEMG and marks into `dir` (emg.bin, marks.csv) until [recordStop]. */

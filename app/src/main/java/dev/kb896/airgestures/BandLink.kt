@@ -107,6 +107,13 @@ class BandLink(
     /** Debug: ask the band's update status, read only (see Bridge.otaStatus). */
     fun otaStatus() = debugSend { Bridge.otaStatus(it) }
 
+    /** Debug: one step of a firmware update from the package unzipped in [dir] (see Bridge.otaStart). */
+    fun otaStart(mode: String, dir: String) {
+        // Megabytes over the link: the shortest connection interval, as for raw sEMG.
+        runCatching { gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) }
+        debugSend { Bridge.otaStart(it, mode, dir, now()) }
+    }
+
     /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
     fun rawEmg(on: Boolean) {
         // Raw sEMG needs most of the link: ask for the shortest connection interval while it runs
