@@ -23,12 +23,15 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
+use crate::handwriting::{Decoder, SYMBOLS, scores, symbol};
 use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
 /// The request id of [`BandSession::request_active`], apart from the counted ones.
 const ACTIVE_REQUEST: u64 = 1 << 20;
+/// The request id of [`BandSession::set_band_handwriting`]'s state change.
+const HANDWRITING_REQUEST: u64 = (1 << 20) + 1;
 /// Gyro and orientation: off while a firmware update runs (see [`BandSession::ota_start`]).
 const MOTION_FIELDS: [u32; 2] = [6, 8];
 /// The stream probe shows this many messages of each kind, then one in [`PROBE_EVERY`].
@@ -50,6 +53,8 @@ const SERVICE_OPEN: [u32; 2] = [0x8100ce56, 0x02000314];
 const RPC_RESPONSE: u32 = 0x02000315;
 const SERVICE_REJECTED: u32 = 0x0300c001;
 const RAW_EMG: u32 = 0x0200020a;
+/// The on-band model's output (`RawInferenceSample`): 9 gesture scores, or 100 in handwriting.
+const RAW_INFERENCE: u32 = 0x0200020c;
 const GESTURE: u32 = 0x0200020d;
 const GYRO: u32 = 0x0200020f;
 const ORIENTATION: u32 = 0x02000212;
@@ -240,6 +245,21 @@ pub struct BandSession {
     /// Gyro and orientation are paused for an update: less traffic from the band while it
     /// acknowledges chunks (with them on, build 64 updates kept losing their place).
     ota_quiet: bool,
+    /// Debug: the band's own handwriting ([`BandSession::set_band_handwriting`]), and what it sent.
+    band_handwriting: Option<BandHandwriting>,
+}
+
+/// What the band's handwriting mode has sent so far.
+#[derive(Default)]
+pub struct BandHandwriting {
+    pub on: bool,
+    pub decoder: Decoder,
+    /// Symbols as they came: (index, symbol, margin over the runner-up).
+    pub tokens: Vec<(usize, &'static str, f32)>,
+    pub samples: usize,
+    /// The last sample's `pipeline_type` and score count.
+    pub pipeline: u64,
+    pub floats: usize,
 }
 
 impl BandSession {
@@ -315,6 +335,7 @@ impl BandSession {
             ota_progress: None,
             ota_items: Vec::new(),
             ota_quiet: false,
+            band_handwriting: None,
         }
     }
 
@@ -960,6 +981,43 @@ impl BandSession {
         Ok(bytes)
     }
 
+    /// Debug: the band's own handwriting on or off. On: `deviceState` HANDWRITING_CC (4), with
+    /// standby off (as Meta AI's handwriting check sets it), and the RawInference stream; off:
+    /// back to ACTIVE (2), without it. What it sends is decoded as it comes ([`Self::band_handwriting`]).
+    pub fn set_band_handwriting(&mut self, on: bool) -> Result<Vec<u8>> {
+        if !self.streams_enabled || self.stopping || self.ota_job.is_some() {
+            return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
+        }
+        let state = if on { field_int(6, 4) } else { field_int(6, 2) };
+        let config = if on { [state, field_int(13, 0), field_int(21, 0)].concat() } else { state };
+        let frame = encode_frame(
+            CONFIGURATION_CHANNEL,
+            &[],
+            &[field_int(1, HANDWRITING_REQUEST), field_bytes(5, &config)].concat(),
+        )?;
+        let mut bytes = self.encrypt(&frame)?;
+        let handwriting = self.band_handwriting.get_or_insert_with(BandHandwriting::default);
+        if on && !handwriting.on {
+            *handwriting = BandHandwriting::default();
+        }
+        handwriting.on = on;
+        bytes.extend(self.stream_request(3, Some(true))?);
+        Ok(bytes)
+    }
+
+    /// Debug: what the band's handwriting mode has sent (None before it was turned on).
+    pub fn band_handwriting(&self) -> Option<&BandHandwriting> {
+        self.band_handwriting.as_ref()
+    }
+
+    /// Debug: forget what the band's handwriting sent so far.
+    pub fn clear_band_handwriting(&mut self) {
+        if let Some(handwriting) = &mut self.band_handwriting {
+            let on = handwriting.on;
+            *handwriting = BandHandwriting { on, ..BandHandwriting::default() };
+        }
+    }
+
     /// Pause (or resume) gyro and orientation for an update; the bytes to write.
     fn set_ota_quiet(&mut self, quiet: bool) -> Result<Vec<u8>> {
         if self.ota_quiet == quiet {
@@ -1320,10 +1378,13 @@ impl BandSession {
         }
         selected.extend(&self.probe);
         let quiet = self.ota_quiet;
+        let inference = self.band_handwriting.as_ref().map(|h| h.on);
         let control: Vec<u8> = match enabled {
             Some(on) => selected
                 .iter()
                 .flat_map(|&field| field_int(field, u64::from(on && !(quiet && MOTION_FIELDS.contains(&field)))))
+                // The model's raw output (field 4), only while the band writes.
+                .chain(inference.map_or_else(Vec::new, |write| field_int(4, u64::from(on && write))))
                 .collect(),
             None => Vec::new(),
         };
@@ -1440,6 +1501,25 @@ impl BandSession {
             return Ok(Vec::new());
         }
         // Ignore unrelated services without trying to interpret their protobuf schema.
+        if kind == RAW_INFERENCE
+            && let Some(handwriting) = &mut self.band_handwriting
+            && handwriting.on
+        {
+            if let Ok(sample) = ProtoFields::parse(&frame.payload) {
+                let floats = sample.bytes(3).map(scores).unwrap_or_default();
+                handwriting.samples += 1;
+                handwriting.pipeline = sample.integer(10).unwrap_or(0);
+                handwriting.floats = floats.len();
+                if floats.len().is_multiple_of(SYMBOLS) {
+                    for chunk in floats.chunks(SYMBOLS) {
+                        if let Some((index, margin)) = handwriting.decoder.push(chunk) {
+                            handwriting.tokens.push((index, symbol(index), margin));
+                        }
+                    }
+                }
+            }
+            return Ok(Vec::new());
+        }
         if ![RPC_RESPONSE, RAW_EMG, GESTURE, GYRO, ORIENTATION].contains(&kind) {
             if self.probing() && self.setup_stage == SetupStage::Input {
                 // The firmware's own log lines (`[time] <inf> module: text`): every one, as text.

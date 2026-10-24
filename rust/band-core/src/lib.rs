@@ -11,6 +11,7 @@ pub mod dial;
 pub mod error;
 pub mod events;
 pub mod gestures;
+pub mod handwriting;
 pub mod identity;
 pub mod ota;
 pub mod proto;

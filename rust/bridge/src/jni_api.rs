@@ -367,6 +367,30 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>
     json_out(&mut env, result)
 }
 
+/// Debug: the band's own handwriting on or off; bytes to write.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setBandHandwriting<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.set_band_handwriting(on != 0);
+    bytes_out(&mut env, result)
+}
+
+/// Debug: what the band's handwriting has sent, as JSON; `clear` forgets it afterwards.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_bandHandwriting<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    clear: jboolean,
+) -> jstring {
+    let json = unsafe { connection(handle) }.band_handwriting(clear != 0);
+    json_out(&mut env, Ok(json))
+}
+
 /// The firmware download in progress as `{"version", "done", "total"}` (`{}` when none).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareProgress<'local>(

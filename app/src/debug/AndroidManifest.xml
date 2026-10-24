@@ -26,6 +26,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The band's own handwriting, token by token (debug builds only), its own launcher entry. -->
+        <activity
+            android:name=".BandWriteActivity"
+            android:exported="true"
+            android:label="Band handwriting"
+            android:taskAffinity="dev.kb896.airgestures.bandwrite"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <receiver
             android:name=".DebugActions"
             android:exported="true"

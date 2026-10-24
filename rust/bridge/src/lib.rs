@@ -264,6 +264,39 @@ impl Connection {
         self.session.ota_start(plan, now).map_err(|e| e.to_string())
     }
 
+    /// Debug: the band's own handwriting on or off (see `BandSession::set_band_handwriting`);
+    /// returns the bytes to write.
+    pub fn set_band_handwriting(&mut self, on: bool) -> Result<Vec<u8>, String> {
+        self.session.set_band_handwriting(on).map_err(|e| e.to_string())
+    }
+
+    /// Debug: what the band's handwriting has sent, as JSON: `{"on", "text", "tokens":
+    /// [{"index", "symbol", "margin"}], "frames", "samples", "pipeline", "floats"}` (`{}` before it ran).
+    /// `clear` forgets it afterwards.
+    pub fn band_handwriting(&mut self, clear: bool) -> String {
+        let json = self.session.band_handwriting().map_or_else(
+            || "{}".to_owned(),
+            |hw| {
+                serde_json::json!({
+                    "on": hw.on,
+                    "text": hw.decoder.text,
+                    "tokens": hw.tokens.iter().map(|(index, symbol, margin)| serde_json::json!({
+                        "index": index, "symbol": symbol, "margin": margin,
+                    })).collect::<Vec<_>>(),
+                    "frames": hw.decoder.frames,
+                    "samples": hw.samples,
+                    "pipeline": hw.pipeline,
+                    "floats": hw.floats,
+                })
+                .to_string()
+            },
+        );
+        if clear {
+            self.session.clear_band_handwriting();
+        }
+        json
+    }
+
     /// Debug: turn the band's raw sEMG stream on or off (alongside gestures); returns the
     /// bytes to write. While it runs, the log gets its rate every [`EMG_RATE_EVERY`] s.
     pub fn set_raw_emg(&mut self, on: bool, now: f64) -> Result<Vec<u8>, String> {

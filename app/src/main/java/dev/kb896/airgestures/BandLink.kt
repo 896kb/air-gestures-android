@@ -114,6 +114,15 @@ class BandLink(
         debugSend { Bridge.otaStart(it, mode, dir, now()) }
     }
 
+    /** Debug: the band's own handwriting on or off (see Bridge.setBandHandwriting). */
+    fun setBandHandwriting(on: Boolean) = debugSend { Bridge.setBandHandwriting(it, on) }
+
+    /** Debug: what the band's handwriting has sent (see Bridge.bandHandwriting); null when not connected. */
+    fun bandHandwriting(clear: Boolean): org.json.JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        org.json.JSONObject(Bridge.bandHandwriting(handle, clear))
+    }
+
     /** Debug: the band's raw sEMG stream on or off, alongside gestures (see Bridge.setRawEmg). */
     fun rawEmg(on: Boolean) {
         // Raw sEMG needs most of the link: ask for the shortest connection interval while it runs

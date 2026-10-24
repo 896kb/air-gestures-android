@@ -205,6 +205,10 @@ class BandService : Service(), BandLink.Listener {
     /** Debug: the band's raw sEMG stream on or off; its rate goes to the log. */
     fun rawEmg(on: Boolean) = link.rawEmg(on)
 
+    /** Debug: the band's own handwriting (see BandLink.setBandHandwriting). */
+    fun setBandHandwriting(on: Boolean) = link.setBandHandwriting(on)
+    fun bandHandwriting(clear: Boolean = false) = link.bandHandwriting(clear)
+
     /** What the band said about itself (see BandLink.deviceInfo). */
     fun deviceInfo() = link.deviceInfo()
 

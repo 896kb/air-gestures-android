@@ -59,6 +59,10 @@ object Bridge {
     @JvmStatic external fun firmwareArchive(session: String, serial: String, version: String, dir: String): String
     /** The firmware download in progress: `{"version", "done", "total"}`, or `{}`. */
     @JvmStatic external fun firmwareProgress(): String
+    /** Debug: the band's own handwriting (deviceState HANDWRITING_CC) on or off; bytes to write. */
+    @JvmStatic external fun setBandHandwriting(handle: Long, on: Boolean): ByteArray
+    /** Debug: what it has sent: `{"on", "text", "tokens": [{"index", "symbol", "margin"}], "frames", ...}`. */
+    @JvmStatic external fun bandHandwriting(handle: Long, clear: Boolean): String
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
     @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun recordStop(handle: Long)
