@@ -155,6 +155,17 @@ enum Step {
     Rescue,
 }
 
+/// One file of an update, for a progress meter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtaItemProgress {
+    pub name: &'static str,
+    pub size: usize,
+    /// Bytes the band has acknowledged.
+    pub sent: usize,
+    /// "waiting", "sending", "checking" or "done" (verified by the band).
+    pub stage: &'static str,
+}
+
 struct Item {
     kind: u64,
     name: &'static str,
@@ -212,6 +223,29 @@ impl OtaJob {
 
     pub fn done(&self) -> bool {
         self.done
+    }
+
+    /// Each file of the update and how far it is (empty until the band's status chose them).
+    pub fn items(&self) -> Vec<OtaItemProgress> {
+        self.items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let size = item.data.len();
+                let (sent, stage) = if index < self.item {
+                    (size, "done")
+                } else if index > self.item {
+                    (0, "waiting")
+                } else if let Some(transfer) = &self.transfer {
+                    (transfer.next.saturating_sub(transfer.pending.len() * CHUNK).min(size), "sending")
+                } else if matches!(self.waiting, Some((_, _, Step::Verify))) {
+                    (size, "checking")
+                } else {
+                    (0, "waiting")
+                };
+                OtaItemProgress { name: item.name, size, sent, stage }
+            })
+            .collect()
     }
 
     pub fn log(&mut self) -> Vec<String> {

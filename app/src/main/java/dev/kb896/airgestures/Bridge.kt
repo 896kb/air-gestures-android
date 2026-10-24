@@ -57,6 +57,8 @@ object Bridge {
      * HTTP; off the main thread). [version]: the band's, as reported to Meta ("1": the full current build).
      */
     @JvmStatic external fun firmwareArchive(session: String, serial: String, version: String, dir: String): String
+    /** The firmware download in progress: `{"version", "done", "total"}`, or `{}`. */
+    @JvmStatic external fun firmwareProgress(): String
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
     @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun recordStop(handle: Long)

@@ -258,6 +258,12 @@ class BandService : Service(), BandLink.Listener {
                 otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
                 otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
                 otaBusy = status.optBoolean("ota_busy"),
+                otaItems = status.optJSONArray("ota_items")?.let { items ->
+                    (0 until items.length()).map { i ->
+                        val item = items.getJSONObject(i)
+                        OtaItem(item.getString("name"), item.getLong("size"), item.getLong("sent"), item.getString("stage"))
+                    }
+                }.orEmpty(),
             )
         }
         val now = state.value
@@ -418,7 +424,12 @@ class BandService : Service(), BandLink.Listener {
         val otaKek: Long? = null,
         val otaProgress: String? = null,
         val otaBusy: Boolean = false,
+        /** Each file of that update and how far it is. */
+        val otaItems: List<OtaItem> = emptyList(),
     )
+
+    /** One file of a firmware update: [stage] is "waiting", "sending", "checking" or "done". */
+    data class OtaItem(val name: String, val size: Long, val sent: Long, val stage: String)
 
     /** A tiny main-thread observable (no AndroidX in this app). */
     class Observable<T>(initial: T) {

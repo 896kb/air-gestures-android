@@ -18,6 +18,9 @@ class FirmwareActivity : Screen() {
     private lateinit var running: TextView
     private lateinit var status: TextView
     private lateinit var progress: TextView
+    /** A meter per file of the running (or last) update. */
+    private lateinit var files: LinearLayout
+    private lateinit var downloadBar: android.widget.ProgressBar
     private lateinit var downloads: LinearLayout
     private lateinit var checking: TextView
     /** A check with Meta is running. */
@@ -37,12 +40,15 @@ class FirmwareActivity : Screen() {
         status = Cb.text(this, 13f, color = Cb.INK_500)
         progress = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_900)
         checking = Cb.text(this, 13f, color = Cb.INK_500)
+        files = column(gap = 10f)
+        downloadBar = meter().apply { visibility = android.view.View.GONE }
         downloads = column(gap = 14f)
         val band = column(gap = 10f).apply {
             addView(Cb.label(context, "Running"))
             addView(running)
             addView(status)
             addView(progress)
+            addView(files)
             addView(row(gap = 10f).apply {
                 addView(pill("Ask the band") { ask() }.first)
                 addView(pill("Cancel update") { cancel() }.first)
@@ -57,6 +63,7 @@ class FirmwareActivity : Screen() {
             })
             addView(row(gap = 10f).apply { addView(pill("Check with Meta") { checkMeta() }.first) })
             addView(checking)
+            addView(downloadBar)
             addView(downloads)
         }
         show(pageColumn().apply {
@@ -90,6 +97,38 @@ class FirmwareActivity : Screen() {
         }
         progress.text = state.otaProgress?.let { if (state.otaBusy) "Working: $it" else "Last: $it" } ?: ""
         progress.visibility = if (state.otaProgress == null) android.view.View.GONE else android.view.View.VISIBLE
+        renderFiles(state.otaItems)
+    }
+
+    /** "2 files to send", then a labelled meter for each. */
+    private fun renderFiles(items: List<BandService.OtaItem>) {
+        if (files.childCount != items.size * 2 + 1) {
+            files.removeAllViews()
+            if (items.isEmpty()) return
+            files.addView(Cb.label(this, if (items.size == 1) "1 file to send" else "${items.size} files to send"))
+            for (item in items) {
+                files.addView(Cb.text(this, 13f, R.font.geist_medium, Cb.INK_900))
+                files.addView(meter())
+            }
+        }
+        items.forEachIndexed { i, item ->
+            val percent = if (item.size == 0L) 0 else (item.sent * 100 / item.size).toInt()
+            val stage = when (item.stage) {
+                "sending" -> "sending, $percent %"
+                "checking" -> "the band is checking it"
+                "done" -> "sent and checked"
+                else -> "waiting"
+            }
+            val name = item.name.replaceFirstChar { it.uppercase() }
+            (files.getChildAt(1 + i * 2) as TextView).text = "$name · ${"%.1f".format(item.size / 1e6)} MB · $stage"
+            (files.getChildAt(2 + i * 2) as android.widget.ProgressBar).progress = if (item.size == 0L) 0 else (item.sent * 1000 / item.size).toInt()
+        }
+    }
+
+    private fun meter() = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+        max = 1000
+        progressTintList = android.content.res.ColorStateList.valueOf(Cb.INK_900)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpi(6f))
     }
 
     private fun renderDownloads() {
@@ -195,14 +234,35 @@ class FirmwareActivity : Screen() {
             return
         }
         asking = true
-        checking.text = "Asking Meta and downloading… (a few minutes for a new build)"
+        checking.text = "Asking Meta…"
         thread(name = "firmware-check") {
             val result = runCatching { Firmware.check(this, session, serial) }
             runOnUiThread {
                 asking = false
+                downloadBar.visibility = android.view.View.GONE
                 checking.text = result.getOrElse { "Couldn't check: ${it.message}" }
                 renderDownloads()
             }
+        }
+        checking.post(downloadTick)
+    }
+
+    /** While Meta is asked: the download's meter. */
+    private val downloadTick: Runnable = object : Runnable {
+        override fun run() {
+            if (!asking) return
+            val progress = runCatching { org.json.JSONObject(Bridge.firmwareProgress()) }.getOrNull()
+            if (progress != null && progress.has("done")) {
+                val done = progress.getLong("done")
+                val total = progress.getLong("total")
+                val name = Firmware.name(progress.getString("version"))
+                downloadBar.visibility = android.view.View.VISIBLE
+                downloadBar.isIndeterminate = total <= 0
+                if (total > 0) downloadBar.progress = (done * 1000 / total).toInt()
+                checking.text = "Downloading $name: ${"%.1f".format(done / 1e6)}" +
+                    (if (total > 0) " of ${"%.1f".format(total / 1e6)} MB" else " MB")
+            }
+            checking.postDelayed(this, 250)
         }
     }
 

@@ -23,7 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
-use crate::ota::{OtaJob, OtaPlan, OtaStatus};
+use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
 const STREAM_FIELDS: [u32; 3] = [3, 6, 8];
@@ -231,6 +231,8 @@ pub struct BandSession {
     /// The band's last update status, and the last line of the update in progress (or done).
     ota_last: Option<OtaStatus>,
     ota_progress: Option<String>,
+    /// The files of the running (or last) update and how far each is.
+    ota_items: Vec<OtaItemProgress>,
 }
 
 impl BandSession {
@@ -304,6 +306,7 @@ impl BandSession {
             ota_job: None,
             ota_last: None,
             ota_progress: None,
+            ota_items: Vec::new(),
         }
     }
 
@@ -842,6 +845,11 @@ impl BandSession {
         (self.ota_progress.as_deref(), self.ota_job.is_some())
     }
 
+    /// The files of the running (or last) update and how far each is.
+    pub fn ota_items(&self) -> &[OtaItemProgress] {
+        &self.ota_items
+    }
+
     fn ota_log(&mut self, lines: Vec<String>) {
         if let Some(last) = lines.last() {
             self.ota_progress = Some(last.trim_start_matches("ota: ").to_owned());
@@ -864,6 +872,7 @@ impl BandSession {
         let bytes = self.ota_frames(bodies, ids)?;
         let lines = job.log();
         self.ota_log(lines);
+        self.ota_items = job.items();
         self.ota_job = Some(job);
         Ok(bytes)
     }
@@ -878,6 +887,7 @@ impl BandSession {
         let bodies = job.tick(&mut ids, time);
         let lines = job.log();
         self.ota_log(lines);
+        self.ota_items = job.items();
         let bytes = self.ota_frames(bodies, ids);
         if !job.done() {
             self.ota_job = Some(job);
@@ -1416,6 +1426,7 @@ impl BandSession {
                     let bodies = job.receive(&fields, &mut ids, time);
                     let lines = job.log();
                     self.ota_log(lines);
+                    self.ota_items = job.items();
                     outgoing.extend(self.ota_frames(bodies, ids)?);
                     if !job.done() {
                         self.ota_job = Some(job);

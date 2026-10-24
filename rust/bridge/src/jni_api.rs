@@ -367,6 +367,19 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>
     json_out(&mut env, result)
 }
 
+/// The firmware download in progress as `{"version", "done", "total"}` (`{}` when none).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareProgress<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) -> jstring {
+    let progress = crate::firmware::download_progress().map_or_else(
+        || "{}".to_owned(),
+        |(version, done, total)| serde_json::json!({"version": version, "done": done, "total": total}).to_string(),
+    );
+    json_out(&mut env, Ok(progress))
+}
+
 /// The handwriting dictionary (`word count` lines); how many words it has.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_wordsLoad<'local>(

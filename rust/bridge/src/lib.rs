@@ -72,6 +72,8 @@ struct Snapshot<'a> {
     ota_kek: Option<u64>,
     ota_progress: Option<&'a str>,
     ota_busy: bool,
+    /// Each file of that update: `{"name", "size", "sent", "stage"}`.
+    ota_items: Vec<serde_json::Value>,
     #[serde(flatten)]
     status: &'a Status,
 }
@@ -358,6 +360,12 @@ impl Connection {
             ota_kek: self.session.ota_last_status().map(|status| status.kek),
             ota_progress: self.session.ota_progress().0,
             ota_busy: self.session.ota_progress().1,
+            ota_items: self
+                .session
+                .ota_items()
+                .iter()
+                .map(|item| serde_json::json!({"name": item.name, "size": item.size, "sent": item.sent, "stage": item.stage}))
+                .collect(),
             status: self.controller.status(),
         })
         .expect("status serializes")

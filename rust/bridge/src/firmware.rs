@@ -136,12 +136,34 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// Download `url` to `path`; its size and SHA-256 (hex).
-fn download(url: &str, path: &Path) -> Result<(u64, String), String> {
+/// The download in progress: the build's target version, bytes so far, bytes in all (0 unknown).
+static DOWNLOADING: std::sync::Mutex<Option<(String, u64, u64)>> = std::sync::Mutex::new(None);
+
+/// What's downloading now, for a progress meter: `(target version, done, total)`.
+pub fn download_progress() -> Option<(String, u64, u64)> {
+    DOWNLOADING.lock().ok()?.clone()
+}
+
+fn set_progress(progress: Option<(String, u64, u64)>) {
+    if let Ok(mut slot) = DOWNLOADING.lock() {
+        *slot = progress;
+    }
+}
+
+/// Download `url` to `path`, reporting progress as `target`; its size and SHA-256 (hex).
+fn download(url: &str, path: &Path, target: &str, expected: u64) -> Result<(u64, String), String> {
+    set_progress(Some((target.to_owned(), 0, expected)));
+    let result = fetch(url, path, target, expected);
+    set_progress(None);
+    result
+}
+
+fn fetch(url: &str, path: &Path, target: &str, expected: u64) -> Result<(u64, String), String> {
     let mut response = http(1800)?.get(url).send().map_err(|e| format!("download failed: {e}"))?;
     if !response.status().is_success() {
         return Err(format!("download failed: http {}", response.status().as_u16()));
     }
+    let total = response.content_length().unwrap_or(expected);
     let partial = path.with_extension("part");
     let mut file = fs::File::create(&partial).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
@@ -155,6 +177,7 @@ fn download(url: &str, path: &Path) -> Result<(u64, String), String> {
         hash.update(&buffer[..n]);
         file.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
         size += n as u64;
+        set_progress(Some((target.to_owned(), size, total)));
     }
     file.flush().map_err(|e| e.to_string())?;
     fs::rename(&partial, path).map_err(|e| e.to_string())?;
@@ -211,7 +234,8 @@ fn keep(session: &MetaSession, serial: &str, dir: &str, response: &Value, offer:
         Ok(bytes) if hex(&Sha256::digest(&bytes)).eq_ignore_ascii_case(&checksum) => (bytes.len() as u64, true),
         _ => {
             let url = offer.get("file_uri").and_then(Value::as_str).ok_or("the offer has no link")?;
-            let (size, sha256) = download(url, &zip)?;
+            let expected = offer.get("file_size").and_then(text).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let (size, sha256) = download(url, &zip, target, expected)?;
             (size, checksum.eq_ignore_ascii_case(&sha256))
         }
     };
