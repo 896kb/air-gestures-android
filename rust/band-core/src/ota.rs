@@ -16,6 +16,8 @@ const CHUNK: usize = 950;
 const REPLY_S: f64 = 5.0;
 /// A chunk is sent again this many times before the transfer gives up.
 const CHUNK_RETRIES: u32 = 4;
+/// The rate in the log is over this many seconds, not the whole transfer.
+const RATE_WINDOW_S: f64 = 30.0;
 /// At most this many chunks in flight. Build 64 offers 16 KB (17 chunks), and links dropped
 /// with it; 8 is what the factory firmware offered, and three transfers ran clean with it.
 const MAX_WINDOW: usize = 8;
@@ -190,8 +192,8 @@ struct Transfer {
     /// Unacknowledged chunks by offset.
     pending: BTreeMap<usize, Sent>,
     started: f64,
-    /// Where this transfer began (the band's resume offset): the rate counts from here.
-    from: usize,
+    /// Recent (time, bytes acknowledged): the rate shown is over the last [`RATE_WINDOW_S`].
+    samples: std::collections::VecDeque<(f64, usize)>,
     shown: usize,
 }
 
@@ -648,7 +650,7 @@ impl OtaJob {
             window: 0,
             pending: BTreeMap::new(),
             started: now,
-            from: 0,
+            samples: std::collections::VecDeque::new(),
             shown: 0,
         });
         vec![body]
@@ -707,7 +709,7 @@ impl OtaJob {
                     let transfer = self.transfer.as_mut().expect("present");
                     transfer.window = (memory / CHUNK).min(MAX_WINDOW);
                     transfer.next = offset.min(self.items[self.item].data.len());
-                    transfer.from = transfer.next;
+                    transfer.samples.push_back((now, transfer.next));
                     transfer.shown = transfer.next * 100 / self.items[self.item].data.len().max(1) / 5 * 5;
                     transfer.started = now;
                     return self.fill(ids, now);
@@ -733,9 +735,14 @@ impl OtaJob {
         let size = self.items[self.item].data.len();
         let done = transfer.next.saturating_sub(transfer.pending.len() * CHUNK).min(size);
         let percent = done * 100 / size.max(1);
+        transfer.samples.push_back((now, done));
+        while transfer.samples.len() > 2 && transfer.samples.front().is_some_and(|&(at, _)| now - at > RATE_WINDOW_S) {
+            transfer.samples.pop_front();
+        }
         let progress = (percent >= transfer.shown + 5).then(|| {
             transfer.shown = percent / 5 * 5;
-            done.saturating_sub(transfer.from) as f64 / (now - transfer.started).max(0.001) / 1024.0
+            let &(since, from) = transfer.samples.front().expect("just pushed");
+            done.saturating_sub(from) as f64 / (now - since).max(0.001) / 1024.0
         });
         let finished = transfer.pending.is_empty() && transfer.next >= size;
         let seconds = now - transfer.started;
