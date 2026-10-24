@@ -293,7 +293,16 @@ class FirmwareActivity : Screen() {
         pkg.notes?.let { notes -> addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = notes; setLineSpacing(0f, 1.25f) }) }
         // While this build is being sent or installed, its card shows the progress only.
         val updating = pkg.version == activeVersion() && drawKey(BandService.state.value).last() == true
-        if (!installed && !updating) {
+        val running = BandService.state.value.firmware?.toLongOrNull()
+        val older = running != null && pkg.version.toLong() < running
+        if (!installed && !updating && older) {
+            fun note(text: String) = Cb.text(context, 13f, color = Cb.INK_700).apply { this.text = text; setLineSpacing(0f, 1.3f) }
+            addView(note("Downgrade: you probably cannot install this firmware. It's older than the band's, and the band " +
+                "refuses older versions (it answered REJECTED_OLD_VERSION when build 64 was tried on build 70). " +
+                "Trying is harmless: the band refuses at the start and nothing changes."))
+            addView(row().apply { addView(pill("Install firmware") { update(pkg) }.first) })
+        }
+        if (!installed && !updating && !older) {
             val bandKey = BandService.state.value.otaKek
             val need = pkg.kek
             fun note(text: String) = Cb.text(context, 13f, color = Cb.INK_700).apply { this.text = text; setLineSpacing(0f, 1.3f) }
