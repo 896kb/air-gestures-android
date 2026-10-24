@@ -114,6 +114,15 @@ class BandLink(
         debugSend { Bridge.otaStart(it, mode, dir, now()) }
     }
 
+    /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
+    fun setFieldTyping(on: Boolean) = debugSend { Bridge.setFieldTyping(it, on) }
+
+    /** The field's edits since the last call; empty when not connected. */
+    fun fieldEdits(): org.json.JSONArray = synchronized(lock) {
+        if (handle == 0L) return org.json.JSONArray()
+        org.json.JSONArray(Bridge.fieldEdits(handle))
+    }
+
     /** Debug: the band's own handwriting on or off (see Bridge.setBandHandwriting). */
     fun setBandHandwriting(on: Boolean) = debugSend { Bridge.setBandHandwriting(it, on) }
 

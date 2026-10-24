@@ -10,6 +10,11 @@ class Prefs(context: Context) {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
 
+    /** Handwriting in text fields: when one has the focus, the band writes into it. */
+    var writeInFields: Boolean
+        get() = prefs.getBoolean("write_in_fields", false)
+        set(value) = prefs.edit().putBoolean("write_in_fields", value).apply()
+
     /** The firmware an install committed, until the band reconnects and is checked (0: none). */
     var otaExpect: Long
         get() = prefs.getLong("ota_expect", 0)

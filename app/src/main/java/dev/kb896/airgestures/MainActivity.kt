@@ -2,6 +2,7 @@ package dev.kb896.airgestures
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.provider.Settings
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.view.Surface
@@ -39,6 +40,8 @@ class MainActivity : Screen() {
     private lateinit var profile: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
     private var handwriting: Pair<TextView, NeuDrawable>? = null
+    private lateinit var fields: Pair<TextView, NeuDrawable>
+    private lateinit var fieldsDetail: TextView
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
     private var player: MediaPlayer? = null
@@ -294,6 +297,40 @@ class MainActivity : Screen() {
         setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(KOFI_URL))) }
     }
 
+    /**
+     * Handwriting in text fields on or off. It needs firmware with a handwriting model (build 64
+     * and later) and its own accessibility service, which the system has to turn on.
+     */
+    private fun toggleFields() {
+        val prefs = Prefs(this)
+        if (prefs.writeInFields) {
+            prefs.writeInFields = false
+            render(BandService.state.value)
+            return
+        }
+        if (BandService.instance?.bandWrites() == false) {
+            confirm(
+                "Update the band first",
+                "The band's firmware has no handwriting model. Handwriting came with firmware build 64; " +
+                    "update the band in Setup › Band firmware updates, then turn this on.",
+                "Open firmware",
+            ) { open<FirmwareActivity>() }
+            return
+        }
+        prefs.writeInFields = true
+        Words.load(this)
+        render(BandService.state.value)
+        if (!WriteService.enabled(this)) {
+            confirm(
+                "Turn on the text field service",
+                "To type into text fields, Air Gestures needs its \"handwriting in text fields\" accessibility " +
+                    "service. It notices which field you're in and changes only that field's text; password " +
+                    "fields are left alone, and nothing leaves the phone. In the list, turn it on.",
+                "Open settings",
+            ) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+    }
+
     private fun setHand(hand: String) {
         BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
         render(BandService.state.value)
@@ -305,6 +342,15 @@ class MainActivity : Screen() {
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
         addView(settingRow("Controls", "Or hold the middle finger", controls.first))
+        fields = pill("Off", R.drawable.ic_pencil) { toggleFields() }
+        fieldsDetail = Cb.text(context, 13f, color = Cb.INK_500)
+        addView(row(gap = 12f).apply {
+            addView(column(gap = 4f).apply {
+                addView(Cb.label(context, "Handwriting in text fields"))
+                addView(fieldsDetail)
+            }, weighted())
+            addView(fields.first)
+        })
         if (Handwriting.available(context)) {
             handwriting = pill("Handwriting off", R.drawable.ic_pencil) { Handwriting.toggle(context); render(BandService.state.value) }
                 .also { addView(settingRow("Handwriting", "Write letters on a table with a finger", it.first)) }
@@ -382,6 +428,14 @@ class MainActivity : Screen() {
                 setTint(Cb.INK_900)
             }, null, null, null,
         )
+        val writing = Prefs(this).writeInFields
+        fields.first.text = if (writing) "On" else "Off"
+        if ((fields.second.pressed > .5f) != writing) fields.second.press(writing)
+        fieldsDetail.text = when {
+            BandService.instance?.bandWrites() == false -> "Needs band firmware build 64 or later: Setup › Band firmware updates"
+            writing && !WriteService.enabled(this) -> "Turn on its accessibility service to start"
+            else -> "In a text field, write letters on a table with a finger"
+        }
         handwriting?.let { (view, shape) ->
             view.text = if (Handwriting.on) "Handwriting on" else "Handwriting off"
             if ((shape.pressed > .5f) != Handwriting.on) shape.press(Handwriting.on)

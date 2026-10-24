@@ -69,6 +69,31 @@ impl Decoder {
     }
 }
 
+/// How likely each of a–z is in a frame (capitals folded into their letter), from the
+/// frame's softmax; what the dictionary weighs words by.
+pub fn letter_odds(frame: &[f32]) -> [f32; 26] {
+    let top = frame.iter().take(SYMBOLS).copied().fold(f32::NEG_INFINITY, f32::max);
+    let exp: Vec<f32> = frame.iter().take(SYMBOLS).map(|&s| (s - top).exp()).collect();
+    let mut odds = [0f32; 26];
+    for (letter, odd) in odds.iter_mut().enumerate() {
+        *odd = exp.get(letter).copied().unwrap_or(0.0) + exp.get(letter + 26).copied().unwrap_or(0.0);
+    }
+    let sum: f32 = odds.iter().sum();
+    if sum > 0.0 {
+        odds.iter_mut().for_each(|odd| *odd /= sum);
+    }
+    odds
+}
+
+/// One symbol the band wrote, for whatever types it: its index, how sure (margin), and the
+/// odds of each letter in the frame it came from.
+#[derive(Debug, Clone, Copy)]
+pub struct Written {
+    pub index: usize,
+    pub margin: f32,
+    pub letters: [f32; 26],
+}
+
 /// The little-endian float32 scores in a RawInferenceSample's `channels`.
 pub fn scores(bytes: &[u8]) -> Vec<f32> {
     bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()
@@ -97,6 +122,17 @@ mod tests {
             decoder.push(&frame(index));
         }
         assert_eq!(decoder.text, "ab");
+    }
+
+    #[test]
+    fn letter_odds_fold_capitals_and_add_up() {
+        let mut scores = vec![-10.0; SYMBOLS];
+        scores[7] = 2.0; // h
+        scores[26 + 7] = 2.0; // H
+        scores[4] = 2.0; // e
+        let odds = letter_odds(&scores);
+        assert!((odds.iter().sum::<f32>() - 1.0).abs() < 1e-4);
+        assert!((odds[7] - 2.0 * odds[4]).abs() < 1e-4);
     }
 
     #[test]

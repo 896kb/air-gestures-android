@@ -367,6 +367,29 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>
     json_out(&mut env, result)
 }
 
+/// The band's handwriting into the text field in front, on or off; bytes to write.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) -> jbyteArray {
+    let result = unsafe { connection(handle) }.set_field_typing(on != 0);
+    bytes_out(&mut env, result)
+}
+
+/// The text field's edits since the last call, as JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldEdits<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jstring {
+    let json = unsafe { connection(handle) }.field_edits();
+    json_out(&mut env, Ok(json))
+}
+
 /// Debug: the band's own handwriting on or off; bytes to write.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setBandHandwriting<'local>(

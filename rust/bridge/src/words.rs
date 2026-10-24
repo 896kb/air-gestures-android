@@ -215,6 +215,21 @@ impl Writer {
         self.refresh(words);
     }
 
+    /// A character as written (a digit, a mark), after the highlighted word, with no space.
+    pub fn insert(&mut self, c: char, words: Option<&Dictionary>) {
+        if let Some(word) = self.suggestions.get(self.highlight) {
+            self.text.push_str(word);
+        }
+        self.text.push(c);
+        self.letters.clear();
+        self.refresh(words);
+    }
+
+    /// Whether nothing has been written (no text, no word under way).
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.letters.is_empty()
+    }
+
     /// The next (or previous) suggestion, round and round.
     pub fn step(&mut self, forward: bool) {
         let n = self.suggestions.len();

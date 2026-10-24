@@ -23,7 +23,7 @@ use crate::dial::PinchDial;
 use crate::error::{BandError, Result, perr};
 use crate::events::{BatteryStatus, EmgConfig, Event, GestureMessage, Hand};
 use crate::identity::{EnrollmentIdentity, trust_digest};
-use crate::handwriting::{Decoder, PAUSE, SYMBOLS, scores, symbol};
+use crate::handwriting::{Decoder, PAUSE, SYMBOLS, Written, letter_odds, scores, symbol};
 use crate::ota::{OtaItemProgress, OtaJob, OtaPlan, OtaStatus};
 use crate::proto::{ProtoFields, field_bytes, field_int};
 
@@ -260,6 +260,8 @@ pub struct BandHandwriting {
     /// The last sample's `pipeline_type` and score count.
     pub pipeline: u64,
     pub floats: usize,
+    /// Symbols not yet taken by [`BandSession::take_written`] (for typing into text fields).
+    pending: Vec<Written>,
 }
 
 impl BandSession {
@@ -1010,6 +1012,16 @@ impl BandSession {
         self.band_handwriting.as_ref()
     }
 
+    /// The symbols the band wrote since the last call, oldest first.
+    pub fn take_written(&mut self) -> Vec<Written> {
+        self.band_handwriting.as_mut().map(|h| std::mem::take(&mut h.pending)).unwrap_or_default()
+    }
+
+    /// Whether the band is in its handwriting state (as asked).
+    pub fn band_writing(&self) -> bool {
+        self.band_handwriting.as_ref().is_some_and(|h| h.on)
+    }
+
     /// Debug: forget what the band's handwriting sent so far.
     pub fn clear_band_handwriting(&mut self) {
         if let Some(handwriting) = &mut self.band_handwriting {
@@ -1515,6 +1527,10 @@ impl BandSession {
                         if let Some((index, margin)) = handwriting.decoder.push(chunk) {
                             let shown = if index == PAUSE { "pause" } else { symbol(index) };
                             handwriting.tokens.push((index, shown, margin));
+                            if handwriting.tokens.len() > 500 {
+                                handwriting.tokens.drain(..100);
+                            }
+                            handwriting.pending.push(Written { index, margin, letters: letter_odds(chunk) });
                         }
                     }
                 }
@@ -1839,6 +1855,16 @@ pub struct DeviceInfo {
     /// The EMG model the band runs now (`DeviceInfoResp.modelId`): `cc_od_…` for gestures,
     /// `ia_od_…` for the wake model of a band in standby.
     pub model: String,
+    /// Every model on the band (`allModelIds`); a `hw_…` one means it reads handwriting
+    /// (firmware build 64 and later; the factory firmware has none).
+    pub models: Vec<String>,
+}
+
+impl DeviceInfo {
+    /// Whether the band's firmware has a handwriting model.
+    pub fn handwriting(&self) -> bool {
+        self.models.iter().any(|model| model.starts_with("hw_"))
+    }
 }
 
 /// Leaves the serial out.
@@ -1865,6 +1891,12 @@ impl DeviceInfo {
                 serial,
                 release_branch: fields.text(13).unwrap_or_default(),
                 model: fields.text(5).unwrap_or_default(),
+                models: fields
+                    .byte_fields()
+                    .into_iter()
+                    .filter(|(field, _)| *field == 10)
+                    .filter_map(|(_, bytes)| std::str::from_utf8(bytes).ok().map(str::to_owned))
+                    .collect(),
             });
         }
         if depth >= 3 {

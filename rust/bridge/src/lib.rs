@@ -14,6 +14,7 @@ use serde::Serialize;
 pub mod claim;
 pub mod config;
 pub mod controller;
+pub mod fieldtext;
 pub mod firmware;
 mod jni_api;
 pub mod meta;
@@ -58,6 +59,8 @@ pub struct Connection {
     emg_config: Option<band_core::events::EmgConfig>,
     /// A handwriting recording in progress (debug).
     recorder: Option<recorder::Recorder>,
+    /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
+    field: Option<fieldtext::FieldTyping>,
 }
 
 #[derive(Serialize)]
@@ -120,6 +123,7 @@ impl Connection {
             emg_since: 0.0,
             emg_config: None,
             recorder: None,
+            field: None,
         })
     }
 
@@ -136,6 +140,7 @@ impl Connection {
         for event in &result.events {
             outgoing.extend(self.on_event(event, now)?);
         }
+        self.type_written();
         Ok(outgoing)
     }
 
@@ -264,6 +269,31 @@ impl Connection {
         self.session.ota_start(plan, now).map_err(|e| e.to_string())
     }
 
+    /// The band's handwriting into a text field: on puts the band in its handwriting state and
+    /// starts a fresh word; off puts it back to gestures. Bytes to write.
+    pub fn set_field_typing(&mut self, on: bool) -> Result<Vec<u8>, String> {
+        let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string())?;
+        self.field = on.then(fieldtext::FieldTyping::default);
+        Ok(bytes)
+    }
+
+    /// The edits for the text field since the last call, as JSON: `[{"delete", "insert"}]`.
+    pub fn field_edits(&mut self) -> String {
+        let edits = self.field.as_mut().map(fieldtext::FieldTyping::take_edits).unwrap_or_default();
+        serde_json::to_string(&edits).expect("edits serialize")
+    }
+
+    /// What the band wrote goes to the text field being typed in, if any.
+    fn type_written(&mut self) {
+        let written = self.session.take_written();
+        if let Some(field) = &mut self.field {
+            let words = words::dictionary();
+            for symbol in &written {
+                field.write(symbol, words.as_deref());
+            }
+        }
+    }
+
     /// Debug: the band's own handwriting on or off (see `BandSession::set_band_handwriting`);
     /// returns the bytes to write.
     pub fn set_band_handwriting(&mut self, on: bool) -> Result<Vec<u8>, String> {
@@ -336,6 +366,7 @@ impl Connection {
                 serde_json::json!({
                     "firmware": info.firmware, "software": info.software, "hardware": info.hardware,
                     "serial": info.serial, "release_branch": info.release_branch,
+                    "models": info.models, "handwriting": info.handwriting(),
                 })
                 .to_string()
             },
