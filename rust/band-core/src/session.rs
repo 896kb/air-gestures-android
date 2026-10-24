@@ -597,6 +597,9 @@ impl BandSession {
                     }
                 })?;
             self.pending.clear();
+            if self.receiver.as_ref().is_some_and(|receiver| receiver.cipher.pads_aligned()) {
+                self.datax.set_always_padded();
+            }
             for plaintext in records {
                 self.authenticated_packets += 1;
                 let frames = self.datax.feed(&plaintext)?;

@@ -72,6 +72,12 @@ impl std::fmt::Debug for DataXReceiver {
 }
 
 impl DataXReceiver {
+    /// The sender pads every record (the encryption scheme says so: all but scheme 3), so each
+    /// record's padding is known exactly from the start, not only after a whole 0xd0 block.
+    pub fn set_always_padded(&mut self) {
+        self.always_padded = true;
+    }
+
     /// Bytes held back waiting for the rest of a frame.
     pub fn pending_len(&self) -> usize {
         self.pending.len()

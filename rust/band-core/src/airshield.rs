@@ -169,6 +169,11 @@ pub struct AirShieldCipher {
 }
 
 impl AirShieldCipher {
+    /// Whether this scheme pads every record, a whole block when its frames fill it exactly.
+    pub fn pads_aligned(&self) -> bool {
+        self.keys.pad_aligned
+    }
+
     pub fn new(keys: AirShieldKeys, iv: [u8; 16], counter: u32) -> Self {
         Self { keys, iv, counter }
     }
