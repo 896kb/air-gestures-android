@@ -231,7 +231,8 @@ class FirmwareActivity : Screen() {
                 else -> "waiting"
             }
             val name = item.name.replaceFirstChar { it.uppercase() }
-            (files.getChildAt(1 + i * 2) as TextView).text = "$name · ${"%.1f".format(item.size / 1e6)} MB · $stage"
+            // Bytes the band has acknowledged, so every step shows.
+            (files.getChildAt(1 + i * 2) as TextView).text = "$name · ${"%,d".format(item.sent)} / ${"%,d".format(item.size)} B · $stage"
             (files.getChildAt(2 + i * 2) as android.widget.ProgressBar).progress = if (item.size == 0L) 0 else (item.sent * 1000 / item.size).toInt()
         }
     }
