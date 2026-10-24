@@ -225,6 +225,21 @@ impl Writer {
         self.refresh(words);
     }
 
+    /// Take back the word under way, or else the last word of the text (and the space after
+    /// it). False when there was nothing of ours to take.
+    pub fn delete_word(&mut self, words: Option<&Dictionary>) -> bool {
+        if !self.letters.is_empty() {
+            self.letters.clear();
+        } else if self.text.is_empty() {
+            return false;
+        } else {
+            let kept = self.text.trim_end().trim_end_matches(|c: char| !c.is_whitespace()).len();
+            self.text.truncate(kept);
+        }
+        self.refresh(words);
+        true
+    }
+
     /// Whether nothing has been written (no text, no word under way).
     pub fn is_empty(&self) -> bool {
         self.text.is_empty() && self.letters.is_empty()

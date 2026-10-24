@@ -21,8 +21,10 @@ import android.view.accessibility.AccessibilityNodeInfo
  *
  * The band goes back to gestures when the field loses the focus, another app comes up, the
  * screen goes off, nothing is written for [IDLE_MS], the band disconnects, or the setting or
- * this service is turned off. Password fields are left alone. It reads and changes only the
- * focused field's text.
+ * this service is turned off. Within a field the pen lifts after 8 s without a confident letter
+ * (so other hand movement types nothing); writing ".." or a double tap puts it down again, with
+ * a buzz each way. Gestures edit instead of running their actions: swipe left and right move the
+ * cursor. Password fields are left alone. It reads and changes only the focused field's text.
  */
 class WriteService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
@@ -80,12 +82,21 @@ class WriteService : AccessibilityService() {
         app = from
         lastWritten = SystemClock.uptimeMillis()
         if (same) return
-        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-        val cursor = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
-        service.setFieldTyping(true, text.substring(0, cursor))
+        restart(service, node)
+        // Gestures edit the field meanwhile instead of running their actions.
+        service.startPractice(gestures)
+        pen = true
         log("handwriting: writing into a field in $from")
         main.removeCallbacks(tick)
         main.post(tick)
+    }
+
+    /** A fresh start at the cursor: what's before it says whether a sentence begins. */
+    private fun restart(service: BandService, node: AccessibilityNodeInfo) {
+        node.refresh()
+        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        val cursor = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
+        service.setFieldTyping(true, text.substring(0, cursor))
     }
 
     /** Back to gestures. */
@@ -94,9 +105,47 @@ class WriteService : AccessibilityService() {
         field = null
         app = null
         main.removeCallbacks(tick)
-        BandService.instance?.setFieldTyping(false)
+        BandService.instance?.let {
+            it.setFieldTyping(false)
+            if (it.practice === gestures) it.endPractice()
+        }
         log("handwriting: back to gestures ($why)")
     }
+
+    /** Gestures in a field: swipe left and right move the cursor, a double tap puts the pen down. */
+    private val gestures = object : BandService.Practice {
+        override fun gesture(label: String) = main.post { onGesture(label) }.let {}
+        override fun action(id: String) = Unit
+        override fun held() = Unit
+    }
+
+    private fun onGesture(label: String) {
+        val node = field ?: return
+        val service = BandService.instance ?: return
+        lastWritten = SystemClock.uptimeMillis()
+        when (label) {
+            "swipe left" -> moveCursor(service, node, -1)
+            "swipe right" -> moveCursor(service, node, 1)
+            "index double tap" -> service.fieldPenDown()
+        }
+    }
+
+    /** The cursor a character left or right; writing then carries on from there. */
+    private fun moveCursor(service: BandService, node: AccessibilityNodeInfo, by: Int) {
+        node.refresh()
+        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        val at = (node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length) + by
+        if (at !in 0..text.length) return
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, at)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, at)
+        })
+        // Our word ends here: what's written next starts afresh at the new cursor.
+        restart(service, node)
+    }
+
+    /** Whether the pen was down at the last look (a buzz when it changes). */
+    private var pen = true
 
     private val tick: Runnable = object : Runnable {
         override fun run() {
@@ -108,16 +157,31 @@ class WriteService : AccessibilityService() {
                 !Prefs(this@WriteService).writeInFields -> return leave("the setting was turned off")
                 SystemClock.uptimeMillis() - lastWritten > IDLE_MS -> return leave("nothing written for a while")
             }
-            val edits = service!!.fieldEdits()
-            if (edits.length() > 0) {
+            val answer = service!!.fieldEdits() ?: return leave("the band disconnected")
+            val edits = answer.optJSONArray("edits")
+            if (edits != null && edits.length() > 0) {
                 lastWritten = SystemClock.uptimeMillis()
                 for (i in 0 until edits.length()) {
                     val edit = edits.getJSONObject(i)
                     apply(node, edit.optInt("delete"), edit.optString("insert"))
                 }
             }
+            val down = answer.optBoolean("pen")
+            if (down != pen) {
+                pen = down
+                if (down) lastWritten = SystemClock.uptimeMillis()
+                buzz(down)
+                log(if (down) "handwriting: pen down" else "handwriting: pen up (write .. or double tap to go on)")
+            }
             main.postDelayed(this, POLL_MS)
         }
+    }
+
+    /** The phone's own short buzz: one when the pen goes down, two when it lifts. */
+    private fun buzz(down: Boolean) {
+        val vibrator = getSystemService(android.os.Vibrator::class.java) ?: return
+        val pattern = if (down) longArrayOf(0, 30) else longArrayOf(0, 20, 80, 20)
+        runCatching { vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1)) }
     }
 
     /** Delete [delete] characters before the cursor, then insert [insert] there. */
@@ -145,8 +209,8 @@ class WriteService : AccessibilityService() {
     }
 
     companion object {
-        /** Back to gestures after this long with nothing written. */
-        const val IDLE_MS = 45_000L
+        /** Back to gestures after this long with nothing written (the pen lifts much sooner). */
+        const val IDLE_MS = 5 * 60_000L
         const val POLL_MS = 100L
 
         @Volatile var instance: WriteService? = null

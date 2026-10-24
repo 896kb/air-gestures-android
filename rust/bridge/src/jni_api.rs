@@ -375,12 +375,35 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
     handle: jlong,
     on: jboolean,
     before: JString<'local>,
+    now: jdouble,
 ) -> jbyteArray {
     let result = match env.get_string(&before) {
-        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before)),
+        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before), now),
         Err(error) => Err(error.to_string()),
     };
     bytes_out(&mut env, result)
+}
+
+/// A swipe left in a text field: take back the last word; false when none of ours was left.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldDeleteWord<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jboolean {
+    jboolean::from(unsafe { connection(handle) }.field_delete_word(now))
+}
+
+/// A double tap in a text field: the pen goes down.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldPenDown<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    unsafe { connection(handle) }.field_pen_down(now);
 }
 
 /// The text field's edits since the last call, as JSON.
@@ -389,8 +412,9 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldEdits<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
+    now: jdouble,
 ) -> jstring {
-    let json = unsafe { connection(handle) }.field_edits();
+    let json = unsafe { connection(handle) }.field_edits(now);
     json_out(&mut env, Ok(json))
 }
 

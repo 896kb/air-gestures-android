@@ -115,13 +115,16 @@ class BandLink(
     }
 
     /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
-    fun setFieldTyping(on: Boolean, before: String = "") = debugSend { Bridge.setFieldTyping(it, on, before) }
+    fun setFieldTyping(on: Boolean, before: String = "") = debugSend { Bridge.setFieldTyping(it, on, before, now()) }
 
-    /** The field's edits since the last call; empty when not connected. */
-    fun fieldEdits(): org.json.JSONArray = synchronized(lock) {
-        if (handle == 0L) return org.json.JSONArray()
-        org.json.JSONArray(Bridge.fieldEdits(handle))
+    /** The field's edits since the last call and the pen; null when not connected. */
+    fun fieldEdits(): org.json.JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        org.json.JSONObject(Bridge.fieldEdits(handle, now()))
     }
+
+    /** A double tap in a text field: the pen goes down. */
+    fun fieldPenDown() = synchronized(lock) { if (handle != 0L) Bridge.fieldPenDown(handle, now()) }
 
     /** Debug: the band's own handwriting on or off (see Bridge.setBandHandwriting). */
     fun setBandHandwriting(on: Boolean) = debugSend { Bridge.setBandHandwriting(it, on) }

@@ -15,6 +15,17 @@ const ENTER: usize = 95;
 const SPACE: usize = 96;
 /// `_` in Meta AI's list, but what the band sends for a drawn space (seen on build 70).
 const UNDERSCORE_SPACE: usize = 89;
+/// The full stop: two in a row (a double tap on the surface) put the pen down.
+const PERIOD: usize = 75;
+/// How sure the band must be for a symbol to count while the pen is down: letters, and the
+/// marks idle movement tends to produce (". , i l" when the hand does other things).
+const LETTER_MARGIN: f32 = 1.0;
+const MARK_MARGIN: f32 = 3.0;
+/// The two dots of a wake-up: each this sure, at most this far apart (s).
+const WAKE_MARGIN: f32 = 1.5;
+const WAKE_GAP_S: f64 = 1.5;
+/// The pen lifts after this long with nothing confident written (s).
+const PEN_QUIET_S: f64 = 8.0;
 /// Where the capitals are in the scores (A–Z).
 const CAPITALS: std::ops::RangeInclusive<usize> = 26..=51;
 
@@ -38,19 +49,88 @@ pub struct FieldTyping {
     /// and whether the word under way began with one.
     capitals: Vec<usize>,
     capital_now: bool,
+    /// Pen down: what the band writes is typed. It lifts after [`PEN_QUIET_S`] without a
+    /// confident symbol; two full stops ("..", a double tap) put it down again.
+    pen: bool,
+    last_confident: f64,
+    last_dot: Option<f64>,
 }
 
 impl FieldTyping {
-    /// `before` is the field's text before the cursor: whether ours starts a sentence.
-    pub fn new(before: &str) -> Self {
+    /// `before` is the field's text before the cursor: whether ours starts a sentence. The pen
+    /// starts down (the field was just chosen) at `now` (s).
+    pub fn new(before: &str, now: f64) -> Self {
         let trimmed = before.trim_end();
         Self {
             starts_sentence: trimmed.is_empty() || trimmed.ends_with(['.', '?', '!']),
+            pen: true,
+            last_confident: now,
             ..Self::default()
         }
     }
 
-    /// A symbol the band wrote.
+    /// Take back the last word (a swipe left). False when none of ours was left: the field's
+    /// own text is then the caller's to trim.
+    pub fn delete_word(&mut self, words: Option<&Dictionary>, now: f64) -> bool {
+        if !self.writer.delete_word(words) {
+            return false;
+        }
+        self.capitals.retain(|&at| at < self.writer.state().text.chars().count());
+        self.capital_now = false;
+        self.last_confident = now;
+        self.sync();
+        true
+    }
+
+    /// Put the pen down (a double tap gesture), as "..." written does.
+    pub fn pen_down(&mut self, now: f64) {
+        self.pen = true;
+        self.last_confident = now;
+        self.last_dot = None;
+    }
+
+    /// Whether the pen is down (what's written is typed).
+    pub fn pen(&self) -> bool {
+        self.pen
+    }
+
+    /// The pen lifts once nothing confident has come for a while.
+    pub fn tick(&mut self, now: f64) {
+        if self.pen && now - self.last_confident > PEN_QUIET_S {
+            self.pen = false;
+            self.last_dot = None;
+        }
+    }
+
+    /// A symbol the band wrote at `now`: typed if the pen is down and the band was sure of it;
+    /// with the pen up, only a double full stop counts (it puts the pen down).
+    pub fn take(&mut self, written: &Written, words: Option<&Dictionary>, now: f64) {
+        self.tick(now);
+        if !self.pen {
+            if written.index == PERIOD && written.margin >= WAKE_MARGIN {
+                if self.last_dot.is_some_and(|at| now - at <= WAKE_GAP_S) {
+                    self.pen = true;
+                    self.last_confident = now;
+                    self.last_dot = None;
+                } else {
+                    self.last_dot = Some(now);
+                }
+            }
+            return;
+        }
+        let needed = match written.index {
+            0..=51 => LETTER_MARGIN,
+            PAUSE => return,
+            _ => MARK_MARGIN,
+        };
+        if written.margin < needed {
+            return;
+        }
+        self.last_confident = now;
+        self.write(written, words);
+    }
+
+    /// A symbol the band wrote, typed as it is.
     pub fn write(&mut self, written: &Written, words: Option<&Dictionary>) {
         let before = self.writer.state().text.chars().count();
         let starting = self.writer.state().letters.is_empty();
@@ -186,7 +266,7 @@ mod tests {
 
     #[test]
     fn sentences_capitals_and_i_are_capitalised() {
-        let mut typing = FieldTyping::new("");
+        let mut typing = FieldTyping::new("", 0.0);
         let mut field = String::new();
         let space = Written { index: SPACE, margin: 3.0, letters: [0.0; 26] };
         for c in "hi".chars() {
@@ -208,12 +288,50 @@ mod tests {
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "Hi. I Bob ");
         // Mid-sentence in an existing field: no capital.
-        let mut typing = FieldTyping::new("well, ");
+        let mut typing = FieldTyping::new("well, ", 0.0);
         let mut field = String::from("well, ");
         typing.write(&letter('o', 0.95), None);
         typing.write(&letter('k', 0.95), None);
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "well, ok");
+    }
+
+    #[test]
+    fn the_pen_lifts_when_idle_ignores_unsure_marks_and_two_dots_put_it_down() {
+        let mut typing = FieldTyping::new("", 0.0);
+        let mut field = String::new();
+        let dot = |margin| Written { index: PERIOD, margin, letters: [0.0; 26] };
+        typing.take(&dot(1.0), None, 1.0); // an unsure "." from movement: dropped
+        let mut unsure = letter('l', 0.9);
+        unsure.margin = 0.4;
+        typing.take(&unsure, None, 1.5);
+        typing.take(&letter('a', 0.95), None, 2.0);
+        assert!(typing.pen());
+        typing.tick(11.0);
+        assert!(!typing.pen(), "8 s without a confident symbol");
+        typing.take(&letter('b', 0.95), None, 12.0); // pen up: not typed
+        typing.take(&dot(2.0), None, 13.0);
+        typing.take(&dot(2.0), None, 13.5); // ".." puts it down
+        assert!(typing.pen());
+        typing.take(&letter('c', 0.95), None, 14.0);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "Ac");
+    }
+
+    #[test]
+    fn a_swipe_left_takes_back_the_last_word() {
+        let mut typing = FieldTyping::new("x ", 0.0);
+        let mut field = String::from("x ");
+        for c in "ab".chars() {
+            typing.write(&letter(c, 0.95), None);
+        }
+        typing.write(&Written { index: SPACE, margin: 3.0, letters: [0.0; 26] }, None);
+        typing.write(&letter('c', 0.95), None);
+        assert!(typing.delete_word(None, 1.0)); // the word under way
+        assert!(typing.delete_word(None, 1.0)); // "ab "
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "x ");
+        assert!(!typing.delete_word(None, 1.0), "the field's own text is the caller's");
     }
 
     #[test]

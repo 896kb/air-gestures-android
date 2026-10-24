@@ -64,9 +64,11 @@ object Bridge {
     /** Debug: what it has sent: `{"on", "text", "tokens": [{"index", "symbol", "margin"}], "frames", ...}`. */
     @JvmStatic external fun bandHandwriting(handle: Long, clear: Boolean): String
     /** The band's handwriting into the text field in front, on or off; bytes to write. */
-    @JvmStatic external fun setFieldTyping(handle: Long, on: Boolean, before: String): ByteArray
-    /** The field's edits since the last call: `[{"delete", "insert"}]`. */
-    @JvmStatic external fun fieldEdits(handle: Long): String
+    @JvmStatic external fun setFieldTyping(handle: Long, on: Boolean, before: String, now: Double): ByteArray
+    /** The field's edits since the last call, and the pen: `{"edits": [{"delete", "insert"}], "pen"}`. */
+    @JvmStatic external fun fieldEdits(handle: Long, now: Double): String
+    /** A double tap in a text field: the pen goes down. */
+    @JvmStatic external fun fieldPenDown(handle: Long, now: Double)
     /** The handwriting dictionary (`word count` lines, assets/words.txt); how many words it has. */
     @JvmStatic external fun wordsLoad(text: String): Int
     @JvmStatic external fun recordStop(handle: Long)

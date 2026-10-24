@@ -140,7 +140,7 @@ impl Connection {
         for event in &result.events {
             outgoing.extend(self.on_event(event, now)?);
         }
-        self.type_written();
+        self.type_written(now);
         Ok(outgoing)
     }
 
@@ -272,25 +272,43 @@ impl Connection {
     /// The band's handwriting into a text field: on puts the band in its handwriting state and
     /// starts a fresh word (`before`: the field's text before the cursor, for capitals); off
     /// puts it back to gestures. Bytes to write.
-    pub fn set_field_typing(&mut self, on: bool, before: &str) -> Result<Vec<u8>, String> {
+    pub fn set_field_typing(&mut self, on: bool, before: &str, now: f64) -> Result<Vec<u8>, String> {
         let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string())?;
-        self.field = on.then(|| fieldtext::FieldTyping::new(before));
+        self.field = on.then(|| fieldtext::FieldTyping::new(before, now));
         Ok(bytes)
     }
 
-    /// The edits for the text field since the last call, as JSON: `[{"delete", "insert"}]`.
-    pub fn field_edits(&mut self) -> String {
-        let edits = self.field.as_mut().map(fieldtext::FieldTyping::take_edits).unwrap_or_default();
-        serde_json::to_string(&edits).expect("edits serialize")
+    /// The edits for the text field since the last call, and whether the pen is down, as JSON:
+    /// `{"edits": [{"delete", "insert"}], "pen": bool}`.
+    pub fn field_edits(&mut self, now: f64) -> String {
+        let Some(field) = self.field.as_mut() else {
+            return r#"{"edits":[],"pen":false}"#.to_owned();
+        };
+        field.tick(now);
+        serde_json::json!({"edits": field.take_edits(), "pen": field.pen()}).to_string()
+    }
+
+    /// A swipe left in a text field: take back the last word. False when none of ours was left
+    /// (the app then trims the field's own text).
+    pub fn field_delete_word(&mut self, now: f64) -> bool {
+        let words = words::dictionary();
+        self.field.as_mut().is_some_and(|field| field.delete_word(words.as_deref(), now))
+    }
+
+    /// A double tap in a text field: the pen goes down.
+    pub fn field_pen_down(&mut self, now: f64) {
+        if let Some(field) = &mut self.field {
+            field.pen_down(now);
+        }
     }
 
     /// What the band wrote goes to the text field being typed in, if any.
-    fn type_written(&mut self) {
+    fn type_written(&mut self, now: f64) {
         let written = self.session.take_written();
         if let Some(field) = &mut self.field {
             let words = words::dictionary();
             for symbol in &written {
-                field.write(symbol, words.as_deref());
+                field.take(symbol, words.as_deref(), now);
             }
         }
     }
