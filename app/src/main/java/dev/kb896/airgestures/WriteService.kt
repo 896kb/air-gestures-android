@@ -63,9 +63,9 @@ class WriteService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
-                // The keyboard and system pop-ups come up over the field: they don't end it.
-                if (field != null && from != app && from != "com.android.systemui" && !from.contains("inputmethod") &&
-                    !from.contains("keyboard")) {
+                // The keyboard, system pop-ups and our own popup come up over the field: they don't end it.
+                if (field != null && from != app && from != packageName && from != "com.android.systemui" &&
+                    !from.contains("inputmethod") && !from.contains("keyboard")) {
                     leave("$from came up")
                 }
             }
@@ -276,6 +276,8 @@ class WriteService : AccessibilityService() {
                     apply(node, edit.optInt("delete"), edit.optString("insert"))
                 }
             }
+            // Until the bridge has started this field's typing (it's asked from another thread).
+            if (!answer.optBoolean("active")) return run { main.postDelayed(this, POLL_MS) }
             choosing = answer.optBoolean("choosing")
             val list = answer.optJSONArray("suggestions")
             if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {

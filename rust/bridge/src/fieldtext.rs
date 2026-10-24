@@ -17,8 +17,8 @@ const SPACE: usize = 96;
 const UNDERSCORE_SPACE: usize = 89;
 /// The full stop: two in a row (a double tap on the surface) put the pen down.
 const PERIOD: usize = 75;
-/// How sure the band must be for a symbol to count while the pen is down: letters, and the
-/// marks idle movement tends to produce (". , i l" when the hand does other things).
+/// How sure the band must be for a symbol to count while the pen is down: letters, spaces and
+/// backspaces, and the marks idle movement tends to produce (". ," when the hand does other things).
 const LETTER_MARGIN: f32 = 1.0;
 const MARK_MARGIN: f32 = 3.0;
 /// The two dots of a wake-up: each this sure, at most this far apart (s).
@@ -211,7 +211,7 @@ impl FieldTyping {
             return;
         }
         let needed = match written.index {
-            0..=51 => LETTER_MARGIN,
+            0..=51 | SPACE | UNDERSCORE_SPACE | BACKSPACE => LETTER_MARGIN,
             PAUSE => return,
             _ => MARK_MARGIN,
         };

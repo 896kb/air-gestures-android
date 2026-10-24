@@ -286,11 +286,12 @@ impl Connection {
     /// `{"edits": [{"delete", "insert"}], "pen": bool}`.
     pub fn field_edits(&mut self, now: f64) -> String {
         let Some(field) = self.field.as_mut() else {
-            return r#"{"edits":[],"pen":false}"#.to_owned();
+            return r#"{"active":false,"edits":[],"pen":false}"#.to_owned();
         };
         field.tick(now);
         let choices = field.choices();
         serde_json::json!({
+            "active": true,
             "edits": field.take_edits(),
             "pen": field.pen(),
             "choosing": field.choosing(),
