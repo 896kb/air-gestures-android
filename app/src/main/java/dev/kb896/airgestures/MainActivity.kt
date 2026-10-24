@@ -342,7 +342,7 @@ class MainActivity : Screen() {
     /** What writing in a text field does, and the gestures meanwhile (the ? by its switch). */
     private fun fieldsHelp() {
         val body = column(gap = 14f)
-        for ((heading, text) in FIELDS_HELP) {
+        for ((heading, text) in helpSections(assets.open("fields-help.txt").bufferedReader().use { it.readText() })) {
             body.addView(column(gap = 4f).apply {
                 addView(Cb.text(context, 15f, R.font.geist_semibold, Cb.INK_900).apply { this.text = heading })
                 addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
@@ -356,6 +356,21 @@ class MainActivity : Screen() {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .6f).toInt())
         }
         sheet("Handwriting in text fields", scroll, "Got it", cancel = false) { true }
+    }
+
+    /** Help text: `## heading` lines and their text (lines joined, blank lines between paragraphs, `#` notes skipped). */
+    private fun helpSections(text: String): List<Pair<String, String>> {
+        val sections = mutableListOf<Pair<String, MutableList<String>>>()
+        for (line in text.lines()) {
+            when {
+                line.startsWith("## ") -> sections += line.removePrefix("## ").trim() to mutableListOf()
+                line.startsWith("#") -> Unit
+                else -> sections.lastOrNull()?.second?.add(line.trim())
+            }
+        }
+        return sections.map { (heading, lines) ->
+            heading to lines.joinToString("\n").trim().split(Regex("\n\\s*\n")).joinToString("\n\n") { it.replace('\n', ' ') }
+        }
     }
 
     private fun togglesBlock() = column(gap = 16f).apply {
@@ -515,31 +530,3 @@ class MainActivity : Screen() {
 
 }
 
-/** The help behind the ? by "Handwriting in text fields": headings and their text. */
-private val FIELDS_HELP = listOf(
-    "Writing" to "Tap into any text field and write with your index finger on a table, your leg or any " +
-        "surface. The band reads each letter and the dictionary corrects the word as you go. Draw a " +
-        "short line to the right for a space (a clear pause between words often does too), and a " +
-        "short line to the left to take back a letter.",
-    "The pen" to "The pen is down when you enter a field (one buzz): what you write is typed. After 8 " +
-        "seconds with nothing written it lifts (two buzzes), so other hand movements don't type. To " +
-        "put it down again, double tap your index finger or write two dots (..).",
-    "Word choices: swipe up" to "Swipe up for the other readings of the word you're writing (or the " +
-        "last one). Right after a space, swipe up shows the likely next words instead; swipe up " +
-        "again for the last word's readings. Swipe left and right to move through them, tap to " +
-        "take one, swipe down to cancel.",
-    "Popup or In the field" to "Popup shows the choices in a row just above the text field and " +
-        "leaves the field as it is until you take one. In the field puts the choices into the text " +
-        "itself in place of the word (\"there · three · these\"), the current one first, for apps " +
-        "where a popup is in the way.",
-    "The edit menu: swipe down" to "Swipe down for a menu above the keyboard: Del word, Del all, ↵ " +
-        "(a new line) and 🙂 (emoji). Swipe left and right to choose, tap to do it, swipe up to " +
-        "close.",
-    "The cursor and selecting" to "Swipe left or right to move the cursor a letter. Tap your index " +
-        "finger to start selecting: left and right then grow the selection, and a second tap stops. " +
-        "Writing replaces what's selected.",
-    "Your keyboard and touch" to "You can still type on the keyboard or tap the screen to move the " +
-        "cursor; writing carries on from wherever the cursor is.",
-    "Back to gestures" to "Leaving the field, switching apps or five minutes without writing turns " +
-        "the band back to its usual gestures.",
-)

@@ -1,0 +1,27 @@
+# The help behind the ? by "Handwriting in text fields" on Home.
+# "## " starts a section (its heading); the lines under it are its text. Lines joined
+# into one paragraph; a blank line starts a new paragraph. "#" lines are notes like these.
+
+## Writing
+Tap into any text field and write with your index finger on a table, your leg or any surface. The band reads each letter and the dictionary corrects the word as you go. Draw a short line to the right for a space (a clear pause between words often does too), and a short line to the left to take back a letter.
+
+## The pen
+The pen is down when you enter a field (one buzz): what you write is typed. After 8 seconds with nothing written it lifts (two buzzes), so other hand movements don't type. To put it down again, double tap your index finger or write two dots (..).
+
+## Word choices: swipe up
+Swipe up for the other readings of the word you're writing (or the last one). Right after a space, swipe up shows the likely next words instead; swipe up again for the last word's readings. Swipe left and right to move through them, tap to take one, swipe down to cancel.
+
+## Popup or In the field
+Popup shows the choices in a row just above the text field and leaves the field as it is until you take one. In the field puts the choices into the text itself in place of the word ("there · three · these"), the current one first, for apps where a popup is in the way.
+
+## The edit menu: swipe down
+Swipe down for a menu above the keyboard: Del word, Del all, ↵ (a new line) and 🙂 (emoji). Swipe left and right to choose, tap to do it, swipe up to close.
+
+## The cursor and selecting
+Swipe left or right to move the cursor a letter. Tap your index finger to start selecting: left and right then grow the selection, and a second tap stops. Writing replaces what's selected.
+
+## Your keyboard and touch
+You can still type on the keyboard or tap the screen to move the cursor; writing carries on from wherever the cursor is.
+
+## Back to gestures
+Leaving the field, switching apps or five minutes without writing turns the band back to its usual gestures.
