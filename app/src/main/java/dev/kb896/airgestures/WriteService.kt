@@ -136,7 +136,8 @@ class WriteService : AccessibilityService() {
         menu = null
         choosing = false
         popup.hide()
-        BandService.instance?.let { restart(it, node, now) }
+        if (inline.isNotEmpty()) setInline(node, "")
+        BandService.instance?.let { restart(it, node) }
         return false
     }
 
@@ -151,6 +152,8 @@ class WriteService : AccessibilityService() {
     /** Back to gestures. */
     private fun leave(why: String) {
         menu = null
+        field?.let { if (inline.isNotEmpty()) runCatching { setInline(it, "") } }
+        inline = ""
         expected = null
         main.removeCallbacks(lookAgain)
         popup.hide()
@@ -231,13 +234,48 @@ class WriteService : AccessibilityService() {
         }
     }
 
-    /** The edit menu (swipe down, with popups on): which list, and which entry is picked. */
+    /** The edit menu (swipe down): which list, and which entry is picked. */
     private data class Menu(val items: List<String>, val pick: Int)
     private var menu: Menu? = null
 
+    /** The menu as written into the field (word choices "In the field"); empty when it isn't. */
+    private var inline = ""
+
+    /** The menu in a popup, or in the field (the pick first, the rest in turn after it). */
     private fun showMenu(node: AccessibilityNodeInfo) {
-        val open = menu ?: return popup.hide()
-        popup.show(node, open.items, open.pick, MENU_HINT, aboveKeyboard = true)
+        val open = menu
+        if (open == null) {
+            popup.hide()
+            setInline(node, "")
+        } else if (Prefs(this).choicesPopup) {
+            popup.show(node, open.items, open.pick, MENU_HINT, aboveKeyboard = true)
+        } else {
+            setInline(node, open.items.indices.joinToString(" · ") { open.items[(open.pick + it) % open.items.size] })
+        }
+    }
+
+    /**
+     * Put [text] where the in-field menu is (or at the cursor when none is); empty takes it out.
+     * Found by its text, so it comes out right even if the field changed around it.
+     */
+    private fun setInline(node: AccessibilityNodeInfo, text: String) {
+        if (inline == text) return
+        val now = looks(node)
+        val at = if (inline.isEmpty()) -1 else now.text.indexOf(inline)
+        if (inline.isNotEmpty() && at < 0 && text.isEmpty()) return run { inline = "" }
+        val start = if (at >= 0) at else minOf(now.start, now.end)
+        val end = if (at >= 0) at + inline.length else start
+        val changed = now.text.substring(0, start) + text + now.text.substring(end)
+        val set = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, changed) }
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, set)) return log("handwriting: the field didn't take the menu")
+        val cursor = start + text.length
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+        })
+        expected = Look(changed, cursor, cursor)
+        changedAt = SystemClock.uptimeMillis()
+        inline = text
     }
 
     private fun onMenuGesture(service: BandService, node: AccessibilityNodeInfo, open: Menu, label: String) {
@@ -249,12 +287,17 @@ class WriteService : AccessibilityService() {
             "index tap" -> {
                 val item = open.items[open.pick]
                 menu = null
+                setInline(node, "")
                 when {
                     open.items === MAIN && item == PUNCTUATION_ITEM -> menu = Menu(PUNCTUATION, 0)
                     open.items === MAIN && item == EMOJI_ITEM -> menu = Menu(EMOJI, 0)
                     item == DELETE_WORD -> edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
                     item == DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
                     item == NEW_LINE -> edit(service, node) { before, after -> before + "\n" to after }
+                    // A mark that ends a word or sentence goes straight after it, then a space.
+                    item in CLOSING -> edit(service, node) { before, after ->
+                        before.trimEnd(' ') + item + (if (after.startsWith(" ")) "" else " ") to after
+                    }
                     else -> edit(service, node) { before, after -> before + item to after }
                 }
             }
@@ -330,6 +373,11 @@ class WriteService : AccessibilityService() {
                 log("handwriting: dropped ${edits.length()} edit(s) the change overtook")
             } else if (edits != null && edits.length() > 0) {
                 lastWritten = SystemClock.uptimeMillis()
+                // Writing while the menu is in the field: the menu goes first.
+                if (inline.isNotEmpty()) {
+                    menu = null
+                    setInline(node, "")
+                }
                 for (i in 0 until edits.length()) {
                     val edit = edits.getJSONObject(i)
                     apply(node, edit.optInt("delete"), edit.optString("insert"))
@@ -407,6 +455,8 @@ class WriteService : AccessibilityService() {
         const val EMOJI_ITEM = "🙂"
         /** The edit menu (swipe down), and its punctuation and emoji lists. */
         val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
+        /** Punctuation that closes up to the word before it. */
+        val CLOSING = setOf(".", ",", "?", "!", ":", ";", "…")
         val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
         val EMOJI = listOf("😀", "😂", "😊", "😍", "🥰", "😉", "😎", "🤔", "😮", "😢", "😭", "😡", "👍", "👎", "👏", "🙏",
             "👋", "💪", "❤️", "🔥", "🎉", "✅", "❌", "👀", "💯", "🤷", "🙌", "😴")

@@ -49,6 +49,8 @@ pub struct FieldTyping {
     before_word: Option<String>,
     /// The field's text before ours is empty or ends with a space (a next word can start).
     before_spaced: bool,
+    /// The field's text before ours ends with a space: a closing mark written first takes it.
+    before_space: bool,
     /// Where words the band wrote with a capital first letter begin in our text (characters),
     /// and whether the word under way began with one.
     capitals: Vec<usize>,
@@ -110,6 +112,7 @@ impl FieldTyping {
             starts_sentence: trimmed.is_empty() || trimmed.ends_with(['.', '?', '!']),
             before_word: last_word(before),
             before_spaced: before.is_empty() || before.ends_with(char::is_whitespace),
+            before_space: before.ends_with(' '),
             pen: true,
             last_confident: now,
             ..Self::default()
@@ -351,6 +354,11 @@ impl FieldTyping {
             index @ 52..=93 if index != PAUSE => {
                 let c = symbol(index).chars().next().unwrap_or(' ');
                 if matches!(c, '.' | ',' | '?' | '!') {
+                    // Straight after the word before it, even one that was in the field already.
+                    if self.writer.is_empty() && self.before_space {
+                        self.edits.push(Edit { delete: 1, insert: String::new() });
+                        self.before_space = false;
+                    }
                     self.writer.punctuate(c, words);
                 } else {
                     self.writer.insert(c, words);
@@ -543,6 +551,27 @@ mod tests {
         assert!(!typing.choose(Some(&words)));
         assert_eq!(last_word("Well, see. "), None);
         assert_eq!(last_word("I see, "), Some("see".to_owned()));
+    }
+
+    #[test]
+    fn a_closing_mark_takes_the_space_before_it() {
+        let mark = |c: char| Written { index: 62 + "!\"#$%&'()*+,-./:;<=>?".find(c).unwrap(), margin: 3.0, letters: [0.0; 26] };
+        // After our own word.
+        let mut typing = FieldTyping::new("", 0.0);
+        let mut field = String::new();
+        for c in "hi".chars() {
+            typing.write(&letter(c, 0.95), None);
+        }
+        typing.write(&Written { index: SPACE, margin: 3.0, letters: [0.0; 26] }, None);
+        typing.write(&mark('?'), None);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "Hi? ");
+        // After a word the field already had.
+        let mut typing = FieldTyping::new("well ", 0.0);
+        let mut field = String::from("well ");
+        typing.write(&mark('!'), None);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "well! ");
     }
 
     #[test]
