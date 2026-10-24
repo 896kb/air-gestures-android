@@ -37,12 +37,29 @@ class FirmwareActivity : Screen() {
     /** A check with Meta is running. */
     private var asking = false
 
-    /** What the downloads were last drawn for: the installed marker and the key notes follow these. */
-    private var drawnFor: Pair<String?, Long?>? = null
+    /**
+     * An update's progress, meters, install stage and Cancel: in the card of the build being
+     * installed, else (a key or a cancel alone) under the band's status.
+     */
+    private lateinit var updateBox: LinearLayout
+    private lateinit var bandSlot: LinearLayout
+    /** The build last started from this screen. */
+    private var started: String? = null
+
+    /** What the downloads were last drawn for: the installed marker, the key notes and the progress's place follow these. */
+    private var drawnFor: List<Any?>? = null
+
+    private fun drawKey(state: BandService.State) =
+        listOf(state.firmware, state.otaKek, activeVersion(), state.otaBusy || state.install?.stage.let { it == "restarting" || it == "checking" })
+
+    /** The build an update is (or was last) about. */
+    private fun activeVersion(): String? = started
+        ?: BandService.state.value.install?.version?.toString()
+        ?: Prefs(this).otaExpect.takeIf { it != 0L }?.toString()
 
     private val watch: (BandService.State) -> Unit = { state ->
         renderBand(state)
-        if (drawnFor != state.firmware to state.otaKek) renderDownloads()
+        if (drawnFor != drawKey(state)) renderDownloads()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,15 +85,19 @@ class FirmwareActivity : Screen() {
             addView(installBar)
             visibility = android.view.View.GONE
         }
+        updateBox = column(gap = 10f).apply {
+            addView(progress)
+            addView(files)
+            addView(installStage)
+            addView(cancelRow)
+        }
+        bandSlot = column()
         downloads = column(gap = 14f)
         val band = column(gap = 10f).apply {
             addView(Cb.label(context, "Running"))
             addView(running)
             addView(status)
-            addView(progress)
-            addView(files)
-            addView(installStage)
-            addView(cancelRow)
+            addView(bandSlot)
             addView(row(gap = 10f).apply {
                 addView(pill("Refresh status") { ask() }.first)
             })
@@ -221,7 +242,9 @@ class FirmwareActivity : Screen() {
 
     private fun renderDownloads() {
         downloads.removeAllViews()
-        drawnFor = BandService.state.value.let { it.firmware to it.otaKek }
+        drawnFor = drawKey(BandService.state.value)
+        (updateBox.parent as? LinearLayout)?.removeView(updateBox)
+        bandSlot.addView(updateBox)
         val packages = Firmware.packages(this)
         if (packages.isEmpty()) {
             downloads.addView(Cb.text(this, 13f, color = Cb.INK_500).apply { text = "Nothing downloaded yet." })
@@ -240,7 +263,9 @@ class FirmwareActivity : Screen() {
         })
         addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = "${pkg.version} · ${"%.1f".format(pkg.size / 1e6)} MB" })
         pkg.notes?.let { notes -> addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = notes; setLineSpacing(0f, 1.25f) }) }
-        if (!installed) {
+        // While this build is being sent or installed, its card shows the progress only.
+        val updating = pkg.version == activeVersion() && drawKey(BandService.state.value).last() == true
+        if (!installed && !updating) {
             val bandKey = BandService.state.value.otaKek
             val need = pkg.kek
             fun note(text: String) = Cb.text(context, 13f, color = Cb.INK_700).apply { this.text = text; setLineSpacing(0f, 1.3f) }
@@ -258,6 +283,10 @@ class FirmwareActivity : Screen() {
             }
             addView(note(if (need != null && bandKey != need) "Once the key is installed you can install the firmware." else "You can install the firmware."))
             addView(row().apply { addView(pill("Install firmware") { update(pkg) }.first) })
+        }
+        if (pkg.version == activeVersion()) {
+            (updateBox.parent as? LinearLayout)?.removeView(updateBox)
+            addView(updateBox)
         }
     }
 
@@ -332,7 +361,13 @@ class FirmwareActivity : Screen() {
         thread(name = "firmware-unpack") {
             val dir = runCatching { Firmware.unpack(this, pkg) }
             runOnUiThread {
-                dir.onSuccess { service.otaStart(mode, it.path) }.onFailure { log("firmware: ${it.message}") }
+                dir.onSuccess {
+                    service.otaStart(mode, it.path)
+                    started = pkg.version
+                    renderDownloads()
+                    // The progress is in this build's card: keep it in view.
+                    updateBox.post { updateBox.requestRectangleOnScreen(android.graphics.Rect(0, 0, updateBox.width, updateBox.height)) }
+                }.onFailure { log("firmware: ${it.message}") }
             }
         }
     }
