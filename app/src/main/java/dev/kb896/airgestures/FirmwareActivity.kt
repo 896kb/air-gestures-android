@@ -10,6 +10,8 @@ import kotlin.concurrent.thread
 private const val SIGN_IN = 1
 /** Off its charger, the band must be at least this (%) to start an update: a margin of ours, not Meta's. */
 private const val MIN_BATTERY = 50
+/** Unplugged, the phone must be at least this (%) to start one: it does the sending. */
+private const val MIN_PHONE_BATTERY = 25
 
 /**
  * Setup › Firmware: what the band runs, the builds Meta offers it, and installing one: the key
@@ -306,6 +308,22 @@ class FirmwareActivity : Screen() {
      * the restart. The band refuses updates when low too, but only when one starts.
      */
     private fun powered(): Boolean {
+        val phone = registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val phoneLevel = phone?.let { it.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) * 100 / it.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1) }
+        val phoneCharging = phone?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+        if (!phoneCharging && phoneLevel != null && phoneLevel in 0 until MIN_PHONE_BATTERY) {
+            sheet(
+                "Charge the phone first",
+                Cb.text(this, 14f, color = Cb.INK_500).apply {
+                    text = "The phone is at $phoneLevel %. Plug it in, or charge it to at least $MIN_PHONE_BATTERY %, " +
+                        "before updating: the phone sends the firmware for about 15 minutes, and if it dies or " +
+                        "sleeps partway the update has to start again."
+                    setLineSpacing(0f, 1.3f)
+                },
+                "OK",
+            ) { true }
+            return false
+        }
         val state = BandService.state.value
         val level = state.battery
         if (state.charging || (level != null && level >= MIN_BATTERY)) return true
@@ -340,8 +358,9 @@ class FirmwareActivity : Screen() {
     private fun confirmUpdate(pkg: Firmware.Package) = confirm(
         "Install ${pkg.title}?",
         "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and installed " +
-            "in the same connection. Keep the band on its charger and near the phone for about 15 minutes; it " +
-            "restarts at the end. This can't be undone: the band refuses older firmware.",
+            "in the same connection, about 15 minutes; the band restarts at the end. Keep the band on its charger, " +
+            "keep your phone and band nearby, and try to stay on this app until it says Installed. " +
+            "This can't be undone: the band refuses older firmware.",
         "Install",
     ) { run(pkg, "update") }
 
