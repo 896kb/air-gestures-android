@@ -325,7 +325,8 @@ class MainActivity : Screen() {
                 "Turn on the text field service",
                 "To type into text fields, Air Gestures needs its \"handwriting in text fields\" accessibility " +
                     "service. It notices which field you're in and changes only that field's text; password " +
-                    "fields are left alone, and nothing leaves the phone. In the list, turn it on.",
+                    "fields are left alone, and nothing leaves the phone.\n\nIn Accessibility, tap Installed apps, then " +
+                    "turn on \"${applicationInfo.loadLabel(packageManager)} handwriting in text fields\".",
                 "Open settings",
             ) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
