@@ -43,10 +43,24 @@ pub struct DataXFrame {
     pub payload: Vec<u8>,
 }
 
+/// A record without its trailing `n` bytes of `0xc0 + n` (1..=16), or whole when it has none.
+fn without_padding(record: &[u8]) -> &[u8] {
+    let Some(&marker) = record.last() else { return record };
+    let count = usize::from(marker.wrapping_sub(0xc0));
+    if (1..=16).contains(&count) && count <= record.len() && record[record.len() - count..].iter().all(|&b| b == marker) {
+        &record[..record.len() - count]
+    } else {
+        record
+    }
+}
+
 /// Reassembles frames that span several decrypted 16-byte-aligned records.
 #[derive(Default)]
 pub struct DataXReceiver {
     pending: Vec<u8>,
+    /// The sender pads every record (a whole block of 0xd0 when its frames end on a block
+    /// boundary): each record's padding is then known exactly and comes off before parsing.
+    always_padded: bool,
 }
 
 impl std::fmt::Debug for DataXReceiver {
@@ -86,7 +100,14 @@ impl DataXReceiver {
         if plaintext.is_empty() || !plaintext.len().is_multiple_of(16) {
             return Err(perr("Unaligned DataX plaintext"));
         }
-        self.pending.extend_from_slice(plaintext);
+        // Newer firmware also splits frames across records, so the residual ambiguity below
+        // happens (seen on build 64 mid-update: the next frame read 4 bytes early). A whole
+        // block of 0xd0 shows the sender pads every record; from then on it's unambiguous.
+        if !self.always_padded && plaintext.ends_with(&[0xd0; 16]) {
+            self.always_padded = true;
+        }
+        let record = if self.always_padded { without_padding(plaintext) } else { plaintext };
+        self.pending.extend_from_slice(record);
         let mut frames = Vec::new();
         while self.pending.len() >= 4 {
             let length = be16(&self.pending, 0);
@@ -117,7 +138,9 @@ impl DataXReceiver {
             });
             self.pending.drain(..size);
         }
-        self.strip_padding();
+        if !self.always_padded {
+            self.strip_padding();
+        }
         Ok(frames)
     }
 
