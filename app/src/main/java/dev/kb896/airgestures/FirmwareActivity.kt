@@ -399,6 +399,9 @@ class FirmwareActivity : Screen() {
                     "If the install keeps stopping partway, take the band off your wrist and leave it undisturbed " +
                     "during the install: movement and gestures add traffic that some firmware versions may not " +
                     "handle well while updating.\n\n" +
+                    "Cancelling should be safe. You can only cancel while the firmware is being sent, and the " +
+                    "band can often resume the send where it stopped. The app doesn't let you cancel during " +
+                    "the install itself.\n\n" +
                     "Updating the firmware once completed can't be undone: the band refuses older firmware."
                 setLineSpacing(0f, 1.3f)
             })
