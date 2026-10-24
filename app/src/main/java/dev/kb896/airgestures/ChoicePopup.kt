@@ -5,6 +5,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -31,6 +32,7 @@ class ChoicePopup(private val service: AccessibilityService) {
         if (shown == Triple(items, pick, hint) && panel != null) return
         if (shown?.third != hint) hide()
         shown = Triple(items, pick, hint)
+        val fresh = panel == null
         val panel = panel ?: LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -40,7 +42,7 @@ class ChoicePopup(private val service: AccessibilityService) {
             }
             elevation = dp(8f)
             setPadding(dp(6f).toInt(), dp(6f).toInt(), dp(6f).toInt(), dp(6f).toInt())
-        }.also { add(it, field, aboveKeyboard) }
+        }.also { this.panel = it }
         panel.removeAllViews()
         panel.addView(Cb.label(service, hint).apply {
             setPadding(dp(10f).toInt(), dp(4f).toInt(), dp(10f).toInt(), dp(6f).toInt())
@@ -65,6 +67,7 @@ class ChoicePopup(private val service: AccessibilityService) {
             addView(chips)
         }
         panel.addView(scroll)
+        if (fresh) add(panel, field, aboveKeyboard)
         // Once laid out, scroll so the pick sits in the middle where it can.
         views.getOrNull(pick)?.let { chip ->
             scroll.post { scroll.scrollTo(chip.left + chip.width / 2 - scroll.width / 2, 0) }
@@ -77,32 +80,32 @@ class ChoicePopup(private val service: AccessibilityService) {
         shown = null
     }
 
-    /** Above the keyboard (or the screen's bottom), or else above the field / below it near the top. */
+    /**
+     * Just above the field, so it never covers what's being written (and above the keyboard too,
+     * for the edit menu); below the field when there's no room above it.
+     */
     private fun add(view: LinearLayout, field: AccessibilityNodeInfo, aboveKeyboard: Boolean) {
         val bounds = Rect().also(field::getBoundsInScreen)
         val margin = dp(8f).toInt()
+        val width = service.resources.displayMetrics.widthPixels - 2 * margin
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
         val params = WindowManager.LayoutParams(
-            service.resources.displayMetrics.widthPixels - 2 * margin,
+            width,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         )
-        val screen = service.resources.displayMetrics.heightPixels
-        if (aboveKeyboard) {
-            val keyboard = service.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-                ?.let { Rect().also(it::getBoundsInScreen) }
-            params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = (screen - (keyboard?.top ?: screen)) + margin
-        } else if (bounds.top > dp(140f)) {
-            params.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            params.y = screen - bounds.top + dp(6f).toInt()
-        } else {
-            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            params.y = bounds.bottom + dp(6f).toInt()
-        }
+        val keyboard = service.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            ?.let { Rect().also(it::getBoundsInScreen) }
+        val top = if (aboveKeyboard && keyboard != null) minOf(bounds.top, keyboard.top) else bounds.top
+        val above = top - view.measuredHeight - margin
+        params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        params.y = if (above >= dp(24f)) above else bounds.bottom + margin
         windows.addView(view, params)
-        panel = view
     }
 }

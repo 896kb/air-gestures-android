@@ -43,6 +43,34 @@ pub fn best(frame: &[f32]) -> (usize, f32) {
     (first.0, first.1 - second)
 }
 
+/// The digit 0, which the band often reads an "o" as.
+pub const ZERO: usize = 52;
+
+/// Symbols that are one letter as written: a letter and its capital, and o, O and 0.
+pub fn group(index: usize) -> usize {
+    match index {
+        26..=51 => index - 26,
+        ZERO => 14,
+        _ => index,
+    }
+}
+
+/// How sure a frame is of `index`'s [`group`]: its best score in the group over the best
+/// outside it. An "o" the band can't tell from "O" or "0" is still a sure "o".
+pub fn group_margin(frame: &[f32], index: usize) -> f32 {
+    let mut inside = f32::NEG_INFINITY;
+    let mut outside = f32::NEG_INFINITY;
+    for (i, &score) in frame.iter().enumerate().take(SYMBOLS) {
+        let score = if i == BLANK { score + BLANK_BIAS } else { score };
+        if group(i) == group(index) {
+            inside = inside.max(score);
+        } else {
+            outside = outside.max(score);
+        }
+    }
+    inside - outside
+}
+
 /// Greedy CTC over a stream of frames.
 #[derive(Default)]
 pub struct Decoder {
@@ -50,7 +78,8 @@ pub struct Decoder {
     /// The symbol whose frames are coming, at its surest frame so far.
     run: Option<Written>,
     /// Symbols whose frames have ended, each at its surest frame: what typing takes. A symbol's
-    /// first frame is often unsure (it is only just ahead), so it is judged on all of them.
+    /// first frame is often unsure (it is only just ahead), so it is judged on all of them; and
+    /// frames that swap between one letter's forms ("o", "O", "0") are one symbol.
     pub finished: Vec<Written>,
     /// The text so far (symbols as [`symbol`] spells them).
     pub text: String,
@@ -63,16 +92,18 @@ impl Decoder {
         self.frames += 1;
         let (index, margin) = best(frame);
         let new = index != BLANK && self.last != Some(index);
-        if self.last == Some(index) {
-            if let Some(run) = &mut self.run
-                && margin > run.margin
-            {
-                *run = Written { index, margin, letters: letter_odds(frame) };
+        let sure = if index == BLANK { margin } else { group_margin(frame, index) };
+        if let Some(run) = &mut self.run
+            && index != BLANK
+            && group(run.index) == group(index)
+        {
+            if sure > run.margin {
+                *run = Written { index, margin: sure, letters: letter_odds(frame) };
             }
         } else {
             self.finished.extend(self.run.take());
             if index != BLANK {
-                self.run = Some(Written { index, margin, letters: letter_odds(frame) });
+                self.run = Some(Written { index, margin: sure, letters: letter_odds(frame) });
             }
         }
         self.last = Some(index);
@@ -95,6 +126,7 @@ pub fn letter_odds(frame: &[f32]) -> [f32; 26] {
     for (letter, odd) in odds.iter_mut().enumerate() {
         *odd = exp.get(letter).copied().unwrap_or(0.0) + exp.get(letter + 26).copied().unwrap_or(0.0);
     }
+    odds[14] += exp.get(ZERO).copied().unwrap_or(0.0);
     let sum: f32 = odds.iter().sum();
     if sum > 0.0 {
         odds.iter_mut().for_each(|odd| *odd /= sum);
@@ -154,6 +186,18 @@ mod tests {
         }
         let finished: Vec<(usize, f32)> = decoder.finished.iter().map(|w| (w.index, w.margin)).collect();
         assert_eq!(finished, [(4, 4.0), (7, 2.0)]);
+        // An "o" read as o, O and 0 by turns is one sure o, though each frame is split.
+        let mut o = vec![0.0; SYMBOLS];
+        o[14] = 3.0;
+        o[40] = 2.8;
+        o[ZERO] = 2.9;
+        let mut decoder = Decoder::default();
+        for frame in [o.clone(), sure(40, 3.0), o, frame(BLANK)] {
+            decoder.push(&frame);
+        }
+        assert_eq!(decoder.finished.len(), 1);
+        assert_eq!(group(decoder.finished[0].index), 14);
+        assert!(decoder.finished[0].margin >= 2.9);
     }
 
     #[test]

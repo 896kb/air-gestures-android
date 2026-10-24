@@ -4,7 +4,7 @@
 //! What the field should show is compared with what it shows, and the difference goes out as
 //! edits (characters to delete before the cursor, then text to insert), corrections included.
 
-use band_core::handwriting::{PAUSE, Written, symbol};
+use band_core::handwriting::{PAUSE, Written, ZERO, symbol};
 use serde::Serialize;
 
 use crate::words::{Dictionary, Writer};
@@ -211,6 +211,7 @@ impl FieldTyping {
             return false;
         }
         let needed = match written.index {
+            ZERO if !self.writer.letters().is_empty() => LETTER_MARGIN,
             0..=51 | SPACE | UNDERSCORE_SPACE | BACKSPACE => LETTER_MARGIN,
             PAUSE => return false,
             _ => MARK_MARGIN,
@@ -228,9 +229,11 @@ impl FieldTyping {
         let before = self.writer.state().text.chars().count();
         let starting = self.writer.state().letters.is_empty();
         match written.index {
-            0..=51 => {
+            // A 0 inside a word is an "o".
+            0..=51 | ZERO if written.index != ZERO || !self.writer.letters().is_empty() => {
                 if starting {
-                    self.capital_now = CAPITALS.contains(&written.index);
+                    // The band can't tell "O" from "o" (it swaps between them): not a capital.
+                    self.capital_now = CAPITALS.contains(&written.index) && written.index != 40;
                 }
                 self.writer.letter(written.letters, words)
             }
