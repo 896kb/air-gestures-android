@@ -193,11 +193,12 @@ class BandService : Service(), BandLink.Listener {
         // A new start or a cancel ends whatever the last install showed; a cancel leaves nothing to check.
         state.update { copy(install = null) }
         if (mode == "cancel") prefs.otaExpect = 0
-        if (mode == "install" || mode == "update") {
-            // Checked when the band reconnects after its reboot (see checkInstall).
+        // What an install would put on the band; checked after its reboot only once the band
+        // accepted it (see followInstall), so a dropped or cancelled update leaves nothing to check.
+        installing = if (mode == "install" || mode == "update") {
             val manifest = runCatching { JSONObject(java.io.File(dir, "manifest.json").readText()) }.getOrNull()
-            manifest?.optJSONArray("items")?.optJSONObject(0)?.optLong("version")?.let { prefs.otaExpect = it }
-        }
+            manifest?.optJSONArray("items")?.optJSONObject(0)?.optLong("version")
+        } else null
         link.otaStart(mode, dir)
     }
 
@@ -377,14 +378,16 @@ class BandService : Service(), BandLink.Listener {
      */
     private fun followInstall(line: String?) {
         line ?: return
-        val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
-        when {
-            line.startsWith("COMMITTED") || line.startsWith("no answer to Commit") ->
-                state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
-            line.startsWith("commit answered") || line.startsWith("FAILED") || line.startsWith("abort after the failure") ->
-                prefs.otaExpect = 0
+        val expected = installing ?: return
+        if (line.startsWith("COMMITTED") || line.startsWith("no answer to Commit")) {
+            installing = null
+            prefs.otaExpect = expected
+            state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
         }
     }
+
+    /** The firmware an install or update in progress would put on the band. */
+    private var installing: Long? = null
 
     override fun onLog(line: String) = main.post {
         android.util.Log.i("AirGestures", line)
