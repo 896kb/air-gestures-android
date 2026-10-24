@@ -72,6 +72,8 @@ struct Snapshot<'a> {
     ota_kek: Option<u64>,
     ota_progress: Option<&'a str>,
     ota_busy: bool,
+    /// Whether cancelling is safe now (Commit not sent).
+    ota_cancellable: bool,
     /// Each file of that update: `{"name", "size", "sent", "stage"}`.
     ota_items: Vec<serde_json::Value>,
     #[serde(flatten)]
@@ -360,6 +362,7 @@ impl Connection {
             ota_kek: self.session.ota_last_status().map(|status| status.kek),
             ota_progress: self.session.ota_progress().0,
             ota_busy: self.session.ota_progress().1,
+            ota_cancellable: self.session.ota_cancellable(),
             ota_items: self
                 .session
                 .ota_items()

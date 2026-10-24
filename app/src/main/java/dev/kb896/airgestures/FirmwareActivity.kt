@@ -21,6 +21,11 @@ class FirmwareActivity : Screen() {
     /** A meter per file of the running (or last) update. */
     private lateinit var files: LinearLayout
     private lateinit var downloadBar: android.widget.ProgressBar
+    /** Cancel, under an update in progress (or one the band holds), greyed while not safe. */
+    private lateinit var cancelRow: LinearLayout
+    private lateinit var cancelButton: TextView
+    private lateinit var cancelNote: TextView
+
     /** After the band accepts Install: restarting, checking, then the result. */
     private lateinit var installStage: LinearLayout
     private lateinit var installText: TextView
@@ -48,6 +53,13 @@ class FirmwareActivity : Screen() {
         downloadBar = meter().apply { visibility = android.view.View.GONE }
         installText = Cb.text(this, 13f, R.font.geist_medium, Cb.INK_900)
         installBar = meter()
+        cancelButton = pill("Cancel update") { cancel() }.first
+        cancelNote = Cb.text(this, 12f, color = Cb.INK_500)
+        cancelRow = row(gap = 10f).apply {
+            addView(cancelButton)
+            addView(cancelNote, weighted())
+            visibility = android.view.View.GONE
+        }
         installStage = column(gap = 6f).apply {
             addView(Cb.label(context, "Install"))
             addView(installText)
@@ -62,9 +74,9 @@ class FirmwareActivity : Screen() {
             addView(progress)
             addView(files)
             addView(installStage)
+            addView(cancelRow)
             addView(row(gap = 10f).apply {
                 addView(pill("Refresh status") { ask() }.first)
-                addView(pill("Cancel update") { cancel() }.first)
             })
         }
         val offered = column(gap = 12f).apply {
@@ -128,6 +140,21 @@ class FirmwareActivity : Screen() {
         progress.visibility = if (state.otaProgress == null) android.view.View.GONE else android.view.View.VISIBLE
         renderFiles(state.otaItems)
         renderInstall(state.install)
+        renderCancel(state)
+    }
+
+    /**
+     * Cancel shows while an update runs or the band holds one (in progress or ready), and works
+     * until the band is told to install: then it greys out, and goes once the install is done.
+     */
+    private fun renderCancel(state: BandService.State) {
+        val held = state.otaStatus?.let { it.startsWith("UPDATE_IN_PROGRESS") || it.startsWith("UPDATE_READY") } == true
+        val installing = state.install?.stage.let { it == "restarting" || it == "checking" }
+        cancelRow.visibility = if (state.otaBusy || held || installing) android.view.View.VISIBLE else android.view.View.GONE
+        val safe = state.otaCancellable && !installing
+        cancelButton.isEnabled = safe
+        cancelButton.alpha = if (safe) 1f else .4f
+        cancelNote.text = if (safe) "Stops the update; the band keeps the firmware it runs." else "Not safe to cancel right now: the band is installing."
     }
 
     private fun renderInstall(install: BandService.Install?) {
@@ -247,9 +274,14 @@ class FirmwareActivity : Screen() {
 
     private fun cancel() = confirm(
         "Cancel the update?",
-        "The band drops any update it's receiving or holding ready. What it runs now stays as it is.",
+        "The update stops, and the band drops what it received so far. What it runs now stays as it is.",
         "Cancel update",
-    ) { ready()?.otaStart("cancel", "") }
+    ) {
+        // A running update is stopped by the cancel itself, so don't wait for it to finish.
+        val service = BandService.instance
+        if (service == null || BandService.state.value.phase != Phase.CONNECTED) log("connect the band first")
+        else service.otaStart("cancel", "")
+    }
 
     private fun update(pkg: Firmware.Package) = confirm(
         "Install ${pkg.title}?",

@@ -845,6 +845,11 @@ impl BandSession {
         (self.ota_progress.as_deref(), self.ota_job.is_some())
     }
 
+    /// Whether a Cancel is safe now: no update running, or one that hasn't sent Commit.
+    pub fn ota_cancellable(&self) -> bool {
+        self.ota_job.as_ref().is_none_or(OtaJob::cancellable)
+    }
+
     /// The files of the running (or last) update and how far each is.
     pub fn ota_items(&self) -> &[OtaItemProgress] {
         &self.ota_items
@@ -863,8 +868,16 @@ impl BandSession {
         if !self.streams_enabled || self.stopping || self.hand_request.is_some() || self.ota_request.is_some() {
             return Err(BandError::Busy("Wait for the band to finish connecting.".into()));
         }
-        if self.ota_job.is_some() {
-            return Err(BandError::Busy("An update is already running.".into()));
+        // Cancel stops a running update (before its Commit), then aborts what the band holds.
+        if let Some(job) = &self.ota_job {
+            if plan.mode != crate::ota::OtaMode::Cancel || job.mode() == crate::ota::OtaMode::Cancel {
+                return Err(BandError::Busy("An update is already running.".into()));
+            }
+            if !job.cancellable() {
+                return Err(BandError::Busy("The band is installing: it isn't safe to cancel now.".into()));
+            }
+            self.ota_job = None;
+            self.diagnostics.push("ota: stopping the update".into());
         }
         let mut job = OtaJob::new(plan);
         let mut ids = self.configuration_id;

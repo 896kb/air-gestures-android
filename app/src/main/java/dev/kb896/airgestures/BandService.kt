@@ -261,6 +261,7 @@ class BandService : Service(), BandLink.Listener {
                 otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
                 otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
                 otaBusy = status.optBoolean("ota_busy"),
+                otaCancellable = status.optBoolean("ota_cancellable", true),
                 otaItems = status.optJSONArray("ota_items")?.let { items ->
                     (0 until items.length()).map { i ->
                         val item = items.getJSONObject(i)
@@ -448,6 +449,8 @@ class BandService : Service(), BandLink.Listener {
         val otaKek: Long? = null,
         val otaProgress: String? = null,
         val otaBusy: Boolean = false,
+        /** Cancelling is safe now: the band hasn't been told to install. */
+        val otaCancellable: Boolean = true,
         /** Each file of that update and how far it is. */
         val otaItems: List<OtaItem> = emptyList(),
         /** The install after the band accepted it: restarting, then checked. */

@@ -225,6 +225,17 @@ impl OtaJob {
         self.done
     }
 
+    /// Whether stopping now is safe: Commit not yet sent. Before it the band keeps running
+    /// its firmware whatever happens to the update.
+    pub fn cancellable(&self) -> bool {
+        !self.committed && !matches!(self.waiting, Some((_, _, Step::Commit)))
+    }
+
+    /// The mode this job runs.
+    pub fn mode(&self) -> OtaMode {
+        self.plan.mode
+    }
+
     /// Each file of the update and how far it is (empty until the band's status chose them).
     pub fn items(&self) -> Vec<OtaItemProgress> {
         self.items
