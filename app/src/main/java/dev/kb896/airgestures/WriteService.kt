@@ -174,7 +174,7 @@ class WriteService : AccessibilityService() {
      *   left and right grow the selection from where the tap was, until the next tap (writing
      *   replaces what's selected);
      * - swipe down: the edit menu above the keyboard (a popup whichever way word choices show): delete word, delete all,
-     *   new line, and a list of emoji; left and right choose, a tap does it, swipe up closes
+     *   new line, and lists of punctuation and emoji; left and right choose, a tap does it, swipe up closes
      *   (or goes back from the list);
      * - a double tap puts the pen down.
      */
@@ -250,6 +250,7 @@ class WriteService : AccessibilityService() {
                 val item = open.items[open.pick]
                 menu = null
                 when {
+                    open.items === MAIN && item == PUNCTUATION_ITEM -> menu = Menu(PUNCTUATION, 0)
                     open.items === MAIN && item == EMOJI_ITEM -> menu = Menu(EMOJI, 0)
                     item == DELETE_WORD -> edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
                     item == DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
@@ -402,9 +403,11 @@ class WriteService : AccessibilityService() {
         const val DELETE_WORD = "Del word"
         const val DELETE_ALL = "Del all"
         const val NEW_LINE = "↵"
+        const val PUNCTUATION_ITEM = "!"
         const val EMOJI_ITEM = "🙂"
-        /** The edit menu (swipe down), and its emoji list. */
-        val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, EMOJI_ITEM)
+        /** The edit menu (swipe down), and its punctuation and emoji lists. */
+        val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
+        val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
         val EMOJI = listOf("😀", "😂", "😊", "😍", "🥰", "😉", "😎", "🤔", "😮", "😢", "😭", "😡", "👍", "👎", "👏", "🙏",
             "👋", "💪", "❤️", "🔥", "🎉", "✅", "❌", "👀", "💯", "🤷", "🙌", "😴")
 
