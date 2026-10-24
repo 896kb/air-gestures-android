@@ -68,8 +68,23 @@ class FirmwareActivity : Screen() {
         }
         show(pageColumn().apply {
             addView(card("Band", band))
+            addView(warning())
             addView(card("Firmware", offered))
         }, title = "Firmware")
+    }
+
+    /** Above the install buttons: what an update can do to the band, in plain terms. */
+    private fun warning() = Cb.text(this, 14f, R.font.geist_bold, Cb.Signal.STOP.label).apply {
+        text = "WARNING: updating the firmware can brick your band. This is not Meta's updater and " +
+            "nothing about it is guaranteed to work. It has been tested, on one band, but a failed or " +
+            "interrupted update could leave yours unusable, and Meta may not repair or replace it. An " +
+            "installed update can't be undone: the band refuses older firmware. Go on only if you accept that risk."
+        setLineSpacing(0f, 1.3f)
+        background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = dp(14f)
+            setColor(Cb.Signal.STOP.fill)
+        }
+        setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(14f))
     }
 
     override fun onResume() {
