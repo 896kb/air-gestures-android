@@ -62,10 +62,8 @@ class WriteService : AccessibilityService() {
                 else if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) leave("the focus moved off the field")
             }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                if (field == null || event.source != field) return
-                // Looked at a moment later, once our own changes have landed.
-                main.removeCallbacks(outside)
-                main.postDelayed(outside, 250)
+                val node = field ?: return
+                if (event.source == node) asLeft(node)
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
@@ -98,42 +96,63 @@ class WriteService : AccessibilityService() {
         main.post(tick)
     }
 
-    /** The field's text and cursor as we last left them, to tell others' changes from ours. */
-    private var expected: Pair<String, Int>? = null
+    /** A field's text and selection ([start] = [end] for a cursor; [end] is the end that moves). */
+    private data class Look(val text: String, val start: Int, val end: Int) {
+        /** The same text and selection, whichever way round the selection's ends are given. */
+        fun same(other: Look?) = other != null && text == other.text &&
+            minOf(start, end) == minOf(other.start, other.end) && maxOf(start, end) == maxOf(other.start, other.end)
+    }
+
+    /** The field as we last left it, and when we last changed it: to tell others' changes from ours. */
+    private var expected: Look? = null
+    private var changedAt = 0L
+
+    /** The field's text and selection now. */
+    private fun looks(node: AccessibilityNodeInfo): Look {
+        node.refresh()
+        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        val end = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
+        val start = node.textSelectionStart.takeIf { it in 0..text.length } ?: end
+        return Look(text, start, end)
+    }
 
     /**
-     * The field isn't as we left it: the keyboard typed, or a touch moved the cursor. The word
-     * under way ends; what's written next starts afresh at the cursor.
+     * Whether the field is as we left it, looked at on each change to it and before each edit
+     * the band makes. If not, the keyboard typed, or a touch moved the cursor or selected: the
+     * word under way ends and writing starts afresh at the cursor. A field that doesn't show
+     * our own change yet, just after it, is looked at again once it has had [SETTLE_MS] to.
      */
-    private val outside = Runnable {
-        val node = field ?: return@Runnable
-        if (looks(node) == expected) return@Runnable
+    private fun asLeft(node: AccessibilityNodeInfo): Boolean {
+        val now = looks(node)
+        if (now.same(expected)) return true
+        val since = SystemClock.uptimeMillis() - changedAt
+        if (since < SETTLE_MS) {
+            main.removeCallbacks(lookAgain)
+            main.postDelayed(lookAgain, SETTLE_MS - since)
+            return true
+        }
         log("handwriting: the field changed outside the band, starting afresh at the cursor")
         anchor = null
         menu = null
         choosing = false
         popup.hide()
-        BandService.instance?.let { restart(it, node) }
+        BandService.instance?.let { restart(it, node, now) }
+        return false
     }
 
-    /** The field's text and cursor now. */
-    private fun looks(node: AccessibilityNodeInfo): Pair<String, Int> {
-        node.refresh()
-        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-        return text to (node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length)
-    }
+    private val lookAgain = Runnable { field?.let(::asLeft) }
 
     /** A fresh start at the cursor: what's before it says whether a sentence begins. */
-    private fun restart(service: BandService, node: AccessibilityNodeInfo, now: Pair<String, Int>? = null) {
-        val (text, cursor) = (now ?: looks(node)).also { expected = it }
-        service.setFieldTyping(true, text.substring(0, cursor))
+    private fun restart(service: BandService, node: AccessibilityNodeInfo, now: Look? = null) {
+        val look = (now ?: looks(node)).also { expected = it }
+        service.setFieldTyping(true, look.text.substring(0, look.end))
     }
 
     /** Back to gestures. */
     private fun leave(why: String) {
         menu = null
         expected = null
-        main.removeCallbacks(outside)
+        main.removeCallbacks(lookAgain)
         popup.hide()
         if (field == null) return
         field = null
@@ -257,7 +276,8 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, before.length)
         })
         anchor = null
-        restart(service, node, before + after to before.length)
+        changedAt = SystemClock.uptimeMillis()
+        restart(service, node, Look(before + after, before.length, before.length))
     }
 
     /** Where the cursor (the selection's moving end) is in [node]. */
@@ -279,7 +299,8 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, at)
         })
         // Our word ends here: what's written next starts afresh at the new place.
-        restart(service, node, text to at)
+        changedAt = SystemClock.uptimeMillis()
+        restart(service, node, Look(text, from, at))
     }
 
     /** A word's suggestions over the field (swipe up, when the setting says popup). */
@@ -300,7 +321,11 @@ class WriteService : AccessibilityService() {
             }
             val answer = service!!.fieldEdits() ?: return leave("the band disconnected")
             val edits = answer.optJSONArray("edits")
-            if (edits != null && edits.length() > 0) {
+            // Edits made for a field someone else has since changed would land in the wrong
+            // place: dropped, and writing starts afresh where the cursor now is.
+            if (edits != null && edits.length() > 0 && !asLeft(node)) {
+                log("handwriting: dropped ${edits.length()} edit(s) the change overtook")
+            } else if (edits != null && edits.length() > 0) {
                 lastWritten = SystemClock.uptimeMillis()
                 for (i in 0 until edits.length()) {
                     val edit = edits.getJSONObject(i)
@@ -358,7 +383,8 @@ class WriteService : AccessibilityService() {
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
             putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
         })
-        expected = text to cursor
+        expected = Look(text, cursor, cursor)
+        changedAt = SystemClock.uptimeMillis()
     }
 
     private fun log(line: String) {
@@ -383,6 +409,8 @@ class WriteService : AccessibilityService() {
         /** Back to gestures after this long with nothing written (the pen lifts much sooner). */
         const val IDLE_MS = 5 * 60_000L
         const val POLL_MS = 100L
+        /** How long a field may take to show a change of ours before a difference is someone else's. */
+        const val SETTLE_MS = 300L
 
         @Volatile var instance: WriteService? = null
             private set
