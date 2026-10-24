@@ -632,7 +632,23 @@ impl BandSession {
                             frame.payload.len()
                         ));
                     }
-                    let produced = self.input(&frame, time, &mut outgoing)?;
+                    let produced = match self.input(&frame, time, &mut outgoing) {
+                        // A frame whose protobuf doesn't parse (seen mid-update on build 64) is
+                        // dropped, not the connection: the record carrying it was authenticated.
+                        Err(BandError::Protocol(message))
+                            if self.setup_stage == SetupStage::Input && message.contains("protobuf") =>
+                        {
+                            let head: String = frame.payload.iter().take(24).map(|b| format!("{b:02x}")).collect();
+                            self.diagnostics.push(format!(
+                                "skipped a frame ({message}): ch {:#x} words {:08x?} {}B {head}",
+                                frame.channel,
+                                frame.words,
+                                frame.payload.len()
+                            ));
+                            Vec::new()
+                        }
+                        other => other?,
+                    };
                     events.extend(produced);
                 }
                 if self.streaming && !self.stopping && time - self.last_heartbeat >= 0.2 {

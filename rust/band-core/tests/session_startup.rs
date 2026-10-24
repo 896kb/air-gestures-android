@@ -283,10 +283,9 @@ fn unknown_repeated_fields_do_not_break_known_gesture_messages() {
     };
     assert!(gesture.finger == "thumb" && gesture.action == "left");
     assert!(gesture.sequence == 42 && gesture.timestamp_us == 1000);
-    assert!(
-        peer.send(GESTURE, &[payload, fi(1, 43)].concat(), 1.0)
-            .is_err()
-    );
+    // A repeated known field doesn't parse: that frame is skipped, the connection kept.
+    let events = peer.send(GESTURE, &[payload, fi(1, 43)].concat(), 1.0).unwrap();
+    assert!(!events.iter().any(|event| matches!(event, band_core::events::Event::Gesture(_))));
 }
 
 #[test]

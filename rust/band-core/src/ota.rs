@@ -16,6 +16,9 @@ const CHUNK: usize = 950;
 const REPLY_S: f64 = 5.0;
 /// A chunk is sent again this many times before the transfer gives up.
 const CHUNK_RETRIES: u32 = 4;
+/// At most this many chunks in flight. Build 64 offers 16 KB (17 chunks), and links dropped
+/// with it; 8 is what the factory firmware offered, and three transfers ran clean with it.
+const MAX_WINDOW: usize = 8;
 /// Meta AI only sends an ML bundle bigger than this.
 const ML_MIN: usize = 10 * 1024;
 
@@ -702,7 +705,7 @@ impl OtaJob {
                 }
                 1 | 2 if memory >= CHUNK => {
                     let transfer = self.transfer.as_mut().expect("present");
-                    transfer.window = memory / CHUNK;
+                    transfer.window = (memory / CHUNK).min(MAX_WINDOW);
                     transfer.next = offset.min(self.items[self.item].data.len());
                     transfer.from = transfer.next;
                     transfer.shown = transfer.next * 100 / self.items[self.item].data.len().max(1) / 5 * 5;
