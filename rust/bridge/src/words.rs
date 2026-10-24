@@ -11,6 +11,7 @@
 //! them: space takes the highlighted suggestion, backspace takes back a letter, up and down
 //! move through the suggestions.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use serde::Serialize;
@@ -48,6 +49,8 @@ const SPLIT_MARGIN: f32 = 1.0;
 pub type LetterOdds = [f32; 26];
 
 pub struct Dictionary {
+    /// The words most often written after each word, best first (`<s>`: a sentence's start).
+    next: HashMap<String, Vec<String>>,
     words: Vec<String>,
     /// Each word's letters as 0–25.
     spelled: Vec<Vec<u8>>,
@@ -55,8 +58,19 @@ pub struct Dictionary {
 }
 
 impl Dictionary {
-    /// `word count` lines (`#` lines are comments); words of letters a–z only.
+    /// `word count` lines (`#` lines are comments); words of letters a–z only. Lines of
+    /// `word next count next count …` (`pairs.txt`) say what's written after a word.
     pub fn parse(text: &str) -> Self {
+        let next = text
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                (parts.len() >= 3).then(|| {
+                    (parts[0].to_owned(), parts[1..].iter().step_by(2).map(|word| (*word).to_owned()).collect())
+                })
+            })
+            .collect();
         let mut entries: Vec<(String, f64)> = text
             .lines()
             .filter(|line| !line.starts_with('#'))
@@ -64,6 +78,9 @@ impl Dictionary {
                 let mut parts = line.split_whitespace();
                 let word = parts.next()?;
                 let count: f64 = parts.next()?.parse().ok()?;
+                if parts.next().is_some() {
+                    return None;
+                }
                 (word.len() <= LONGEST && word.bytes().all(|b| b.is_ascii_lowercase()) && count > 0.0)
                     .then(|| (word.to_owned(), count))
             })
@@ -71,6 +88,7 @@ impl Dictionary {
         entries.dedup_by(|a, b| a.0 == b.0);
         let total: f64 = entries.iter().map(|(_, count)| count).sum();
         Self {
+            next,
             spelled: entries.iter().map(|(word, _)| word.bytes().map(|b| b - b'a').collect()).collect(),
             prior: entries.iter().map(|(_, count)| (count / total).ln() as f32).collect(),
             words: entries.into_iter().map(|(word, _)| word).collect(),
@@ -107,6 +125,11 @@ impl Dictionary {
             }
         }
         best
+    }
+
+    /// The words likeliest to come after `previous` (none: a sentence starts), best first.
+    pub fn next_words(&self, previous: Option<&str>) -> Vec<String> {
+        self.next.get(previous.unwrap_or("<s>")).map(|words| words.iter().take(SUGGESTIONS).cloned().collect()).unwrap_or_default()
     }
 
     /// How well the best word fits `letters`: a whole word, or a longer one starting that way.
@@ -268,6 +291,22 @@ impl Writer {
         self.space(words);
         self.letters = rest;
         self.refresh(words);
+    }
+
+    /// Offer whole words with no letters written (the next word): the first is the word under
+    /// way until a letter comes, a space takes it, and [`Writer::withdraw`] takes them back.
+    pub fn offer(&mut self, words: Vec<String>) {
+        self.letters.clear();
+        self.suggestions = words;
+        self.highlight = 0;
+    }
+
+    /// Take back words [`Writer::offer`]ed.
+    pub fn withdraw(&mut self) {
+        if self.letters.is_empty() {
+            self.suggestions.clear();
+            self.highlight = 0;
+        }
     }
 
     /// The letters of the word under way, as read.

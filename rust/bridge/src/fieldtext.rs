@@ -45,6 +45,10 @@ pub struct FieldTyping {
     edits: Vec<Edit>,
     /// The field's text before ours ends a sentence (or is empty): ours starts with a capital.
     starts_sentence: bool,
+    /// The field's last word before ours (none at a sentence's start): what next words follow.
+    before_word: Option<String>,
+    /// The field's text before ours is empty or ends with a space (a next word can start).
+    before_spaced: bool,
     /// Where words the band wrote with a capital first letter begin in our text (characters),
     /// and whether the word under way began with one.
     capitals: Vec<usize>,
@@ -71,6 +75,30 @@ struct Choosing {
     spaced: bool,
     /// The pick when choosing began (a cancel goes back to it).
     from: usize,
+    /// Choosing the next word (offered with nothing written), not among a word's readings.
+    next: bool,
+}
+
+/// A word's letters as if each were read for sure.
+fn spelled(word: &str) -> Vec<crate::words::LetterOdds> {
+    word.bytes()
+        .filter(u8::is_ascii_lowercase)
+        .map(|b| {
+            let mut odds = [0.0; 26];
+            odds[(b - b'a') as usize] = 1.0;
+            odds
+        })
+        .collect()
+}
+
+/// The last word of `text`, lowercase; none when a sentence starts there (or nothing's there).
+fn last_word(text: &str) -> Option<String> {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() || trimmed.ends_with(['.', '?', '!']) {
+        return None;
+    }
+    let word: String = trimmed.trim_end_matches(|c: char| !c.is_alphabetic()).chars().rev().take_while(|c| c.is_alphabetic()).collect();
+    (!word.is_empty()).then(|| word.chars().rev().collect::<String>().to_lowercase())
 }
 
 impl FieldTyping {
@@ -80,6 +108,8 @@ impl FieldTyping {
         let trimmed = before.trim_end();
         Self {
             starts_sentence: trimmed.is_empty() || trimmed.ends_with(['.', '?', '!']),
+            before_word: last_word(before),
+            before_spaced: before.is_empty() || before.ends_with(char::is_whitespace),
             pen: true,
             last_confident: now,
             ..Self::default()
@@ -102,10 +132,42 @@ impl FieldTyping {
     /// Start choosing among the suggestions for the word under way, or else the last word taken
     /// with a space (a swipe up): they're shown in its place, the current pick first. False when
     /// there's nothing to choose for.
+    /// With nothing written since a space, the next words are offered first; a swipe up then
+    /// turns to the last word's readings.
     pub fn choose(&mut self, words: Option<&Dictionary>) -> bool {
-        if self.choosing.is_some() {
-            return true;
+        match &self.choosing {
+            Some(choosing) if choosing.next => {
+                self.choosing = None;
+                self.writer.withdraw();
+                if !self.choose_last(words) {
+                    self.sync();
+                    return false;
+                }
+                return true;
+            }
+            Some(_) => return true,
+            None => {}
         }
+        if self.writer.letters().is_empty()
+            && let Some(dictionary) = words
+        {
+            let text = self.writer.state().text;
+            let previous = if text.is_empty() { self.before_word.clone() } else { last_word(&text) };
+            // A word straight after the field's own text (no space yet) isn't over.
+            let after_space = if text.is_empty() { self.before_spaced } else { text.ends_with(' ') };
+            let offered = dictionary.next_words(previous.as_deref());
+            if after_space && !offered.is_empty() {
+                self.writer.offer(offered);
+                self.choosing = Some(Choosing { spaced: true, from: 0, next: true });
+                self.sync();
+                return true;
+            }
+        }
+        self.choose_last(words)
+    }
+
+    /// Choose among the readings of the word under way, or else of the last word taken with a space.
+    fn choose_last(&mut self, words: Option<&Dictionary>) -> bool {
         let spaced = if !self.writer.letters().is_empty() {
             false
         } else if let Some((word, letters)) = self.last_word.take()
@@ -121,7 +183,7 @@ impl FieldTyping {
             }
             return false;
         }
-        self.choosing = Some(Choosing { spaced, from: self.writer.state().highlight });
+        self.choosing = Some(Choosing { spaced, from: self.writer.state().highlight, next: false });
         self.sync();
         true
     }
@@ -141,6 +203,13 @@ impl FieldTyping {
     /// While choosing: leave it, with the word as it was (a swipe up again).
     pub fn choose_cancel(&mut self, words: Option<&Dictionary>, now: f64) {
         let Some(from) = self.choosing.as_ref().map(|c| c.from) else { return };
+        if self.choosing.as_ref().is_some_and(|c| c.next) {
+            self.choosing = None;
+            self.writer.withdraw();
+            self.last_confident = now;
+            self.sync();
+            return;
+        }
         while self.writer.state().highlight != from {
             self.writer.step(true);
         }
@@ -160,12 +229,18 @@ impl FieldTyping {
         let Some(choosing) = self.choosing.take() else { return };
         if choosing.spaced {
             let word = self.writer.state().word;
-            let letters = self.writer.letters().to_vec();
+            // A next word was never written: its letters are its spelling (to choose again).
+            let letters = if choosing.next { spelled(&word) } else { self.writer.letters().to_vec() };
             self.writer.space(words);
             self.last_word = Some((word, letters));
         }
         self.last_confident = now;
         self.sync();
+    }
+
+    /// Whether what's being chosen is the next word.
+    pub fn choosing_next(&self) -> bool {
+        self.choosing.as_ref().is_some_and(|c| c.next)
     }
 
     /// Whether the suggestions are showing.
@@ -439,6 +514,35 @@ mod tests {
         }
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "There");
+    }
+
+    #[test]
+    fn next_words_are_offered_after_a_space() {
+        let words = Dictionary::parse("see 1000\nyou 5000\nthe 9000\nsoon 300\nsee you 20 the 10\n<s> i 50\n");
+        let mut typing = FieldTyping::new("", 0.0);
+        typing.set_popup(true);
+        let mut field = String::new();
+        for c in "see".chars() {
+            typing.write(&letter(c, 0.95), Some(&words));
+        }
+        typing.write(&Written { index: SPACE, margin: 3.0, letters: [0.0; 26] }, Some(&words));
+        assert!(typing.choose(Some(&words)));
+        assert!(typing.choosing_next());
+        assert_eq!(typing.choices().unwrap().0, ["you", "the"]);
+        typing.choose_step(true);
+        typing.choose_pick(Some(&words), 1.0);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "See the ");
+        // Up again on the offer turns to the last word's readings; down takes the offer back.
+        assert!(typing.choose(Some(&words)));
+        typing.choose_cancel(Some(&words), 2.0);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "See the ");
+        // In the middle of the field's own word, nothing is offered next.
+        let mut typing = FieldTyping::new("hello wor", 0.0);
+        assert!(!typing.choose(Some(&words)));
+        assert_eq!(last_word("Well, see. "), None);
+        assert_eq!(last_word("I see, "), Some("see".to_owned()));
     }
 
     #[test]

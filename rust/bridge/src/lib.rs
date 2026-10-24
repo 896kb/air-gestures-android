@@ -295,6 +295,7 @@ impl Connection {
             "edits": field.take_edits(),
             "pen": field.pen(),
             "choosing": field.choosing(),
+            "next": field.choosing_next(),
             "suggestions": choices.as_ref().map(|(list, _)| list.clone()),
             "highlight": choices.as_ref().map(|(_, pick)| *pick),
         })

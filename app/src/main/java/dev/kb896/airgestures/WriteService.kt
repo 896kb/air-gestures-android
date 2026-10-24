@@ -167,14 +167,15 @@ class WriteService : AccessibilityService() {
 
     /**
      * Gestures in a field, instead of their actions:
-     * - swipe up: the word's suggestions show in its place; then swipe left and right turn
-     *   through them and a tap takes the first;
+     * - swipe up: the word's suggestions, or after a space the likely next words (up again
+     *   turns to the last word's); swipe left and right turn through them, a tap takes one,
+     *   swipe down cancels;
      * - otherwise swipe left and right move the cursor, and a tap starts selecting: then
      *   left and right grow the selection from where the tap was, until the next tap (writing
      *   replaces what's selected);
      * - swipe down (with popups on): the edit menu above the keyboard: delete word, delete all,
-     *   new line, and lists of punctuation and emoji; left and right choose, a tap does it,
-     *   swipe down closes (or goes back from a list);
+     *   new line, and a list of emoji; left and right choose, a tap does it, swipe up closes
+     *   (or goes back from the list);
      * - a double tap puts the pen down.
      */
     private val gestures = object : BandService.Practice {
@@ -203,6 +204,8 @@ class WriteService : AccessibilityService() {
                     choosing = false
                     popup.hide()
                 }
+                // Up again on the next words turns to the last word's readings.
+                "swipe up" -> choosing = service.fieldChoose()
                 "swipe down" -> {
                     service.fieldChooseCancel()
                     choosing = false
@@ -247,7 +250,6 @@ class WriteService : AccessibilityService() {
                 val item = open.items[open.pick]
                 menu = null
                 when {
-                    open.items === MAIN && item == PUNCTUATION_ITEM -> menu = Menu(PUNCTUATION, 0)
                     open.items === MAIN && item == EMOJI_ITEM -> menu = Menu(EMOJI, 0)
                     item == DELETE_WORD -> edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
                     item == DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
@@ -337,7 +339,8 @@ class WriteService : AccessibilityService() {
             choosing = answer.optBoolean("choosing")
             val list = answer.optJSONArray("suggestions")
             if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {
-                popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"), CHOOSE_HINT)
+                val hint = if (answer.optBoolean("next")) NEXT_HINT else CHOOSE_HINT
+                popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"), hint)
             } else if (menu == null) {
                 popup.hide()
             }
@@ -395,14 +398,13 @@ class WriteService : AccessibilityService() {
     companion object {
         const val CHOOSE_HINT = "Swipe to choose · tap to take · down to cancel"
         const val MENU_HINT = "Swipe to choose · tap to do · up to close"
-        const val DELETE_WORD = "Delete word"
-        const val DELETE_ALL = "Delete all"
-        const val NEW_LINE = "New line"
-        const val PUNCTUATION_ITEM = "Punctuation…"
-        const val EMOJI_ITEM = "Emoji…"
-        /** The edit menu (swipe down), and its punctuation and emoji lists. */
-        val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
-        val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
+        const val NEXT_HINT = "Next word · swipe to choose · tap to take · up: change the last word · down to cancel"
+        const val DELETE_WORD = "Del word"
+        const val DELETE_ALL = "Del all"
+        const val NEW_LINE = "↵"
+        const val EMOJI_ITEM = "🙂"
+        /** The edit menu (swipe down), and its emoji list. */
+        val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, EMOJI_ITEM)
         val EMOJI = listOf("😀", "😂", "😊", "😍", "🥰", "😉", "😎", "🤔", "😮", "😢", "😭", "😡", "👍", "👎", "👏", "🙏",
             "👋", "💪", "❤️", "🔥", "🎉", "✅", "❌", "👀", "💯", "🤷", "🙌", "😴")
 

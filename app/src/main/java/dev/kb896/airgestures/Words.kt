@@ -36,12 +36,14 @@ object Words {
         val app = context.applicationContext
         thread(name = "words") {
             val bundled = app.assets.open("words.txt").bufferedReader().use { it.readText() }
+            // What's written after each word, for next-word suggestions (lines of three or more fields).
+            val pairs = app.assets.open("pairs.txt").bufferedReader().use { it.readText() }
             val extra = (personal(app) + systemWords(app))
                 .map { it.lowercase() }
                 .filter { word -> word.isNotEmpty() && word.all { it in 'a'..'z' } }
                 .distinct()
                 .joinToString("") { "$it $PERSONAL_COUNT\n" }
-            loaded = Bridge.wordsLoad(bundled + extra)
+            loaded = Bridge.wordsLoad(bundled + pairs + extra)
         }
     }
 
