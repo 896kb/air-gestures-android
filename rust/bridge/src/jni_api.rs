@@ -374,8 +374,12 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
     _class: JClass<'local>,
     handle: jlong,
     on: jboolean,
+    before: JString<'local>,
 ) -> jbyteArray {
-    let result = unsafe { connection(handle) }.set_field_typing(on != 0);
+    let result = match env.get_string(&before) {
+        Ok(before) => unsafe { connection(handle) }.set_field_typing(on != 0, &String::from(before)),
+        Err(error) => Err(error.to_string()),
+    };
     bytes_out(&mut env, result)
 }
 

@@ -206,7 +206,8 @@ class BandService : Service(), BandLink.Listener {
     fun rawEmg(on: Boolean) = link.rawEmg(on)
 
     /** The band's handwriting into the text field in front (see WriteService). */
-    fun setFieldTyping(on: Boolean) = link.setFieldTyping(on)
+    /** [before]: the field's text before the cursor, so a sentence's first word gets its capital. */
+    fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before)
     fun fieldEdits() = link.fieldEdits()
 
     /** Whether the band's firmware reads handwriting (a `hw_` model); null before it said. */

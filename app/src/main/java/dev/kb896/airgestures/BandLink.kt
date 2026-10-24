@@ -115,7 +115,7 @@ class BandLink(
     }
 
     /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
-    fun setFieldTyping(on: Boolean) = debugSend { Bridge.setFieldTyping(it, on) }
+    fun setFieldTyping(on: Boolean, before: String = "") = debugSend { Bridge.setFieldTyping(it, on, before) }
 
     /** The field's edits since the last call; empty when not connected. */
     fun fieldEdits(): org.json.JSONArray = synchronized(lock) {

@@ -270,10 +270,11 @@ impl Connection {
     }
 
     /// The band's handwriting into a text field: on puts the band in its handwriting state and
-    /// starts a fresh word; off puts it back to gestures. Bytes to write.
-    pub fn set_field_typing(&mut self, on: bool) -> Result<Vec<u8>, String> {
+    /// starts a fresh word (`before`: the field's text before the cursor, for capitals); off
+    /// puts it back to gestures. Bytes to write.
+    pub fn set_field_typing(&mut self, on: bool, before: &str) -> Result<Vec<u8>, String> {
         let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string())?;
-        self.field = on.then(fieldtext::FieldTyping::default);
+        self.field = on.then(|| fieldtext::FieldTyping::new(before));
         Ok(bytes)
     }
 

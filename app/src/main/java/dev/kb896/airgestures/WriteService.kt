@@ -80,7 +80,9 @@ class WriteService : AccessibilityService() {
         app = from
         lastWritten = SystemClock.uptimeMillis()
         if (same) return
-        service.setFieldTyping(true)
+        val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+        val cursor = node.textSelectionEnd.takeIf { it in 0..text.length } ?: text.length
+        service.setFieldTyping(true, text.substring(0, cursor))
         log("handwriting: writing into a field in $from")
         main.removeCallbacks(tick)
         main.post(tick)
