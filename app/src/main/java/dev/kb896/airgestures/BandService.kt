@@ -255,6 +255,7 @@ class BandService : Service(), BandLink.Listener {
                 gestures = status.optLong("gestures"),
                 firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
                 otaStatus = status.optString("ota_status").takeUnless { status.isNull("ota_status") },
+                otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
                 otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
                 otaBusy = status.optBoolean("ota_busy"),
             )
@@ -413,6 +414,8 @@ class BandService : Service(), BandLink.Listener {
         val firmware: String? = null,
         /** The band's last update status, the latest line of the running or last update, and whether one runs. */
         val otaStatus: String? = null,
+        /** The key version the band reported with its update status. */
+        val otaKek: Long? = null,
         val otaProgress: String? = null,
         val otaBusy: Boolean = false,
     )

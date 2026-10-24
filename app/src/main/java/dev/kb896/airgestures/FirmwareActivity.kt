@@ -10,9 +10,9 @@ import kotlin.concurrent.thread
 private const val SIGN_IN = 1
 
 /**
- * Setup › Firmware: what the band runs, the builds Meta offers it, and installing one, as a
- * whole or step by step (key, send, install, cancel). The band accepts Install only in the
- * connection that sent and verified the update, so Update does it all in one go.
+ * Setup › Firmware: what the band runs, the builds Meta offers it, and installing one: the key
+ * first if the band lacks it, then the firmware. The band accepts Install only in the
+ * connection that sent and verified the update, so installing sends, checks and installs in one go.
  */
 class FirmwareActivity : Screen() {
     private lateinit var running: TextView
@@ -23,7 +23,13 @@ class FirmwareActivity : Screen() {
     /** A check with Meta is running. */
     private var asking = false
 
-    private val watch: (BandService.State) -> Unit = { renderBand(it) }
+    /** What the downloads were last drawn for: the installed marker and the key notes follow these. */
+    private var drawnFor: Pair<String?, Long?>? = null
+
+    private val watch: (BandService.State) -> Unit = { state ->
+        renderBand(state)
+        if (drawnFor != state.firmware to state.otaKek) renderDownloads()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,7 +50,7 @@ class FirmwareActivity : Screen() {
         }
         val offered = column(gap = 12f).apply {
             addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
-                text = "Builds Meta offers this band, downloaded to the phone. Update sends one to the band, " +
+                text = "Builds Meta offers this band, downloaded to the phone. Install firmware sends one to the band, " +
                     "has the band check it, and installs it: the band then restarts (keep it on its charger, " +
                     "about 15 minutes). An install can't be undone: the band refuses older firmware."
                 setLineSpacing(0f, 1.3f)
@@ -62,8 +68,11 @@ class FirmwareActivity : Screen() {
     override fun onResume() {
         super.onResume()
         BandService.state.observe(watch)
-        renderBand(BandService.state.value)
+        val state = BandService.state.value
+        renderBand(state)
         renderDownloads()
+        // The key notes need the band's update status: ask once on opening.
+        if (state.otaKek == null && state.phase == Phase.CONNECTED && !state.otaBusy) BandService.instance?.otaStatus()
     }
 
     override fun onPause() {
@@ -85,6 +94,7 @@ class FirmwareActivity : Screen() {
 
     private fun renderDownloads() {
         downloads.removeAllViews()
+        drawnFor = BandService.state.value.let { it.firmware to it.otaKek }
         val packages = Firmware.packages(this)
         if (packages.isEmpty()) {
             downloads.addView(Cb.text(this, 13f, color = Cb.INK_500).apply { text = "Nothing downloaded yet." })
@@ -104,13 +114,23 @@ class FirmwareActivity : Screen() {
         addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = "${pkg.version} · ${"%.1f".format(pkg.size / 1e6)} MB" })
         pkg.notes?.let { notes -> addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = notes; setLineSpacing(0f, 1.25f) }) }
         if (!installed) {
-            addView(row(gap = 8f).apply { addView(pill("Update") { update(pkg) }.first) })
-            addView(Cb.label(context, "Or step by step"))
-            addView(row(gap = 8f).apply {
-                addView(pill("1 Key") { step(pkg, "key") }.first)
-                addView(pill("2 Send") { step(pkg, "send") }.first)
-                addView(pill("3 Install") { step(pkg, "install") }.first)
-            })
+            val bandKey = BandService.state.value.otaKek
+            val need = pkg.kek
+            fun note(text: String) = Cb.text(context, 13f, color = Cb.INK_700).apply { this.text = text; setLineSpacing(0f, 1.3f) }
+            when {
+                need == null -> {}
+                bandKey == null -> {
+                    addView(note("This firmware needs key $need on the band. Ask the band which key it has."))
+                    addView(row().apply { addView(pill("Ask the band") { ask() }.first) })
+                }
+                bandKey != need -> {
+                    addView(note("Your band has key $bandKey, but this firmware needs key $need installed on the band."))
+                    addView(row().apply { addView(pill("Install key $need") { installKey(pkg, need) }.first) })
+                }
+                else -> addView(note("Your band has key $need, which this firmware needs."))
+            }
+            addView(note(if (need != null && bandKey != need) "Once the key is installed you can install the firmware." else "You can install the firmware."))
+            addView(row().apply { addView(pill("Install firmware") { update(pkg) }.first) })
         }
     }
 
@@ -141,29 +161,12 @@ class FirmwareActivity : Screen() {
         "Install",
     ) { run(pkg, "update") }
 
-    private fun step(pkg: Firmware.Package, mode: String) {
-        val (title, body, action) = when (mode) {
-            "key" -> Triple(
-                "Give the band ${pkg.title}'s key?",
-                "The band needs this key to read the firmware. It stays on the band.",
-                "Give key",
-            )
-            "send" -> Triple(
-                "Send ${pkg.title}?",
-                "The firmware goes to the band and the band checks it; nothing is installed. Install right after, " +
-                    "before the band disconnects: the band accepts Install only in the connection that sent it. " +
-                    "About 15 minutes; keep the band on its charger.",
-                "Send",
-            )
-            else -> Triple(
-                "Install ${pkg.title}?",
-                "The band installs what it was sent and restarts. This works only if it hasn't disconnected since " +
-                    "the send. It can't be undone: the band refuses older firmware.",
-                "Install",
-            )
-        }
-        confirm(title, body, action) { run(pkg, mode) }
-    }
+    private fun installKey(pkg: Firmware.Package, key: Long) = confirm(
+        "Install key $key?",
+        "The band needs this key to read ${pkg.title}. It stays on the band, replacing the key it has; " +
+            "it doesn't change the firmware the band runs.",
+        "Install key",
+    ) { run(pkg, "key") }
 
     private fun run(pkg: Firmware.Package, mode: String) {
         val service = ready() ?: return

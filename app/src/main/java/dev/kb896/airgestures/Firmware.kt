@@ -20,6 +20,8 @@ object Firmware {
         /** Meta's build number ("64"), from its offer. */
         val build: String? = response?.let { find(it, "build_number_display_name") }?.toString()
         val size: Long get() = File(dir, "ota.zip").length()
+        /** The key (KEK) version the band needs to read this build. */
+        val kek: Long? = response?.let { find(it, "kek_id") }?.toString()?.toLongOrNull()
         val complete: Boolean get() = File(dir, "ota.zip").isFile && File(dir, "kek.json").isFile
         /** Meta's release notes as plain text. */
         val notes: String? = response?.let { find(it, "release_notes_cms") as? String }

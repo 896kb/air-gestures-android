@@ -68,6 +68,8 @@ struct Snapshot<'a> {
     /// The band's last update status ("IDLE stable firmware, active …"), the latest line of
     /// the running or last firmware update, and whether one is running.
     ota_status: Option<String>,
+    /// The key (KEK) version the band has, from that status.
+    ota_kek: Option<u64>,
     ota_progress: Option<&'a str>,
     ota_busy: bool,
     #[serde(flatten)]
@@ -353,6 +355,7 @@ impl Connection {
             connected: self.live,
             firmware: self.session.device_info().map(|info| info.software.clone()).filter(|v| !v.is_empty()),
             ota_status: self.session.ota_last_status().map(|status| status.to_string()),
+            ota_kek: self.session.ota_last_status().map(|status| status.kek),
             ota_progress: self.session.ota_progress().0,
             ota_busy: self.session.ota_progress().1,
             status: self.controller.status(),
