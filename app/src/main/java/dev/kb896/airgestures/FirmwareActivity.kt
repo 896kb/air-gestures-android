@@ -212,20 +212,25 @@ class FirmwareActivity : Screen() {
     private val installTick = Runnable { renderInstall(BandService.state.value.install) }
 
     /** "2 files to send", then a labelled meter for each. */
+    /** Recent (uptime ms, bytes acknowledged in all) while sending: the rate for the time left. */
+    private val samples = ArrayDeque<Pair<Long, Long>>()
+
     private fun renderFiles(items: List<BandService.OtaItem>) {
         if (files.childCount != items.size * 2 + 1) {
             files.removeAllViews()
             if (items.isEmpty()) return
-            files.addView(Cb.label(this, if (items.size == 1) "1 file to send" else "${items.size} files to send"))
+            files.addView(Cb.label(this, ""))
             for (item in items) {
                 files.addView(Cb.text(this, 13f, R.font.geist_medium, Cb.INK_900))
                 files.addView(meter())
             }
         }
+        val count = if (items.size == 1) "1 file to send" else "${items.size} files to send"
+        (files.getChildAt(0) as TextView).text = (timeLeft(items)?.let { "$count · about $it left" } ?: count).uppercase()
         items.forEachIndexed { i, item ->
             val percent = if (item.size == 0L) 0 else (item.sent * 100 / item.size).toInt()
             val stage = when (item.stage) {
-                "sending" -> "sending, $percent %"
+                "sending" -> "sent $percent %"
                 "checking" -> "the band is checking it"
                 "done" -> "sent and checked"
                 else -> "waiting"
@@ -235,6 +240,26 @@ class FirmwareActivity : Screen() {
             (files.getChildAt(1 + i * 2) as TextView).text = "$name · ${"%,d".format(item.sent / 1024)} / ${"%,d".format(item.size / 1024)} KB · $stage"
             (files.getChildAt(2 + i * 2) as android.widget.ProgressBar).progress = if (item.size == 0L) 0 else (item.sent * 1000 / item.size).toInt()
         }
+    }
+
+    /**
+     * What's left to send at the rate of the last half minute ("6 min", "40 s"); null when
+     * nothing is being sent or there's too little to go on yet.
+     */
+    private fun timeLeft(items: List<BandService.OtaItem>): String? {
+        if (items.none { it.stage == "sending" }) {
+            samples.clear()
+            return null
+        }
+        val now = android.os.SystemClock.uptimeMillis()
+        val sent = items.sumOf { it.sent }
+        if (samples.lastOrNull()?.second != sent) samples.addLast(now to sent)
+        while (samples.size > 2 && now - samples.first().first > 30_000) samples.removeFirst()
+        val (since, from) = samples.first()
+        val seconds = (now - since) / 1000.0
+        if (seconds < 5 || sent <= from) return null
+        val left = (items.sumOf { it.size } - sent) / ((sent - from) / seconds)
+        return if (left >= 90) "${(left / 60).toInt() + 1} min" else "${left.toInt()} s"
     }
 
     private fun meter() = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
