@@ -355,18 +355,46 @@ class FirmwareActivity : Screen() {
 
     private fun update(pkg: Firmware.Package) = if (powered()) confirmUpdate(pkg) else Unit
 
-    private fun confirmUpdate(pkg: Firmware.Package) = confirm(
-        "Install ${pkg.title}?",
-        "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and " +
-            "installed in the same connection, about 15 minutes; the band restarts at the end.\n\n" +
-            "Keep the band on its charger, keep your phone and band nearby, and try to stay on this app " +
-            "until it says Installed.\n\n" +
-            "If the install keeps stopping partway, take the band off your wrist and leave it undisturbed " +
-            "during the install: movement and gestures add traffic that some firmware versions may not " +
-            "handle well while updating.\n\n" +
-            "Updating the firmware once completed can't be undone: the band refuses older firmware.",
-        "I agree. Install",
-    ) { run(pkg, "update") }
+    /** The install question: Install stays greyed until the box under the text is ticked. */
+    private fun confirmUpdate(pkg: Firmware.Package) {
+        val agree = android.widget.CheckBox(this).apply {
+            text = "I agree with this information"
+            textSize = 14f
+            typeface = Cb.font(context, R.font.geist_medium)
+            setTextColor(Cb.INK_900)
+            buttonTintList = android.content.res.ColorStateList.valueOf(Cb.INK_900)
+        }
+        val body = column(gap = 14f).apply {
+            addView(Cb.text(context, 14f, color = Cb.INK_500).apply {
+                text = "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and " +
+                    "installed in the same connection, about 15 minutes; the band restarts at the end.\n\n" +
+                    "Keep the band on its charger, keep your phone and band nearby, and try to stay on this app " +
+                    "until it says Installed.\n\n" +
+                    "If the install keeps stopping partway, take the band off your wrist and leave it undisturbed " +
+                    "during the install: movement and gestures add traffic that some firmware versions may not " +
+                    "handle well while updating.\n\n" +
+                    "Updating the firmware once completed can't be undone: the band refuses older firmware."
+                setLineSpacing(0f, 1.3f)
+            })
+            addView(agree)
+        }
+        sheet(
+            "Install ${pkg.title}?",
+            body,
+            "Install",
+            withAction = { install ->
+                fun hold(on: Boolean) {
+                    install.isEnabled = on
+                    install.alpha = if (on) 1f else .4f
+                }
+                hold(false)
+                agree.setOnCheckedChangeListener { _, checked -> hold(checked) }
+            },
+        ) {
+            if (agree.isChecked) run(pkg, "update")
+            agree.isChecked
+        }
+    }
 
     private fun installKey(pkg: Firmware.Package, key: Long) = if (powered()) confirmKey(pkg, key) else Unit
 
