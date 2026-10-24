@@ -57,6 +57,10 @@ import kotlin.concurrent.thread
  *
  *     ... --es ota_update ota/1003366292
  *
+ * Handwriting in text fields on or off (as Home's switch):
+ *
+ *     ... --ez write_in_fields true
+ *
  * (The sign-in, again:)
  *
  *     ... --ez signin true
@@ -93,6 +97,11 @@ class DebugActions : BroadcastReceiver() {
             val dir = intent.getStringExtra("ota_$step") ?: ""
             val path = java.io.File(context.getExternalFilesDir(null), dir).path
             BandService.instance?.otaStart(step, path) ?: Log.i("AirGestures", "debug ota: the band service isn't running")
+            return
+        }
+        if (intent.hasExtra("write_in_fields")) {
+            Prefs(context).writeInFields = intent.getBooleanExtra("write_in_fields", false)
+            Log.i("AirGestures", "debug write_in_fields ${Prefs(context).writeInFields}")
             return
         }
         if (intent.getBooleanExtra("signin", false)) {
