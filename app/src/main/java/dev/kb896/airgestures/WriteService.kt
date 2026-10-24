@@ -250,7 +250,12 @@ class WriteService : AccessibilityService() {
         } else if (Prefs(this).choicesPopup) {
             popup.show(node, open.items, open.pick, MENU_HINT, aboveKeyboard = true)
         } else {
-            setInline(node, open.items.indices.joinToString(" · ") { open.items[(open.pick + it) % open.items.size] })
+            // Set apart from the word before it by a space (one already there will do), which goes with it.
+            val spaced = if (inline.isNotEmpty()) inline.startsWith(" ") else looks(node).let { now ->
+                minOf(now.start, now.end).let { at -> at > 0 && !now.text[at - 1].isWhitespace() }
+            }
+            val list = open.items.indices.joinToString(" · ") { open.items[(open.pick + it) % open.items.size] }
+            setInline(node, if (spaced) " $list" else list)
         }
     }
 
