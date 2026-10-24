@@ -108,7 +108,7 @@ class FirmwareActivity : Screen() {
             addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
                 text = "Builds Meta offers this band, downloaded to the phone. Install firmware sends one to the band, " +
                     "has the band check it, and installs it: the band then restarts (keep it on its charger, " +
-                    "about 15 minutes). An install can't be undone: the band refuses older firmware."
+                    "about 15-25 minutes). An install can't be undone: the band refuses older firmware."
                 setLineSpacing(0f, 1.3f)
             })
             addView(row(gap = 10f).apply { addView(pill("Check with Meta") { checkMeta() }.first) })
@@ -342,7 +342,7 @@ class FirmwareActivity : Screen() {
                 "Charge the phone first",
                 Cb.text(this, 14f, color = Cb.INK_500).apply {
                     text = "The phone is at $phoneLevel %. Plug it in, or charge it to at least $MIN_PHONE_BATTERY %, " +
-                        "before updating: the phone sends the firmware for about 15 minutes, and if it dies or " +
+                        "before updating: the phone sends the firmware for about 15-25 minutes, and if it dies or " +
                         "sleeps partway the update has to start again."
                     setLineSpacing(0f, 1.3f)
                 },
@@ -358,7 +358,7 @@ class FirmwareActivity : Screen() {
             Cb.text(this, 14f, color = Cb.INK_500).apply {
                 text = (if (level == null) "The band hasn't said how charged it is yet. " else "The band is at $level %. ") +
                     "Put it on its charger, or charge it to at least $MIN_BATTERY %, before updating: a send takes about " +
-                    "15 minutes, and running out partway through the install could leave it unusable."
+                    "15-25 minutes, and running out partway through the install could leave it unusable."
                 setLineSpacing(0f, 1.3f)
             },
             "OK",
@@ -393,7 +393,7 @@ class FirmwareActivity : Screen() {
         val body = column(gap = 14f).apply {
             addView(Cb.text(context, 14f, color = Cb.INK_500).apply {
                 text = "The band gets this firmware's key if it lacks it, then the firmware is sent and checked, and " +
-                    "installed in the same connection, about 15 minutes; the band restarts at the end.\n\n" +
+                    "installed in the same connection, about 15-25 minutes; the band restarts at the end.\n\n" +
                     "Keep the band on its charger, keep your phone and band nearby, and try to stay on this app " +
                     "until it says Installed.\n\n" +
                     "If the install keeps stopping partway, take the band off your wrist and leave it undisturbed " +
