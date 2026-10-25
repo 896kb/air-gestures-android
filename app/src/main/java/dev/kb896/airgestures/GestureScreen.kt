@@ -102,7 +102,7 @@ abstract class GestureScreen : Screen() {
         }
 
     /** A status chip sized for a row's right side (9 sp, tighter padding). */
-    private fun compactChip(chip: android.widget.TextView) = chip.apply {
+    fun compactChip(chip: android.widget.TextView) = chip.apply {
         textSize = 9f
         letterSpacing = .06f
         setPadding(dpi(7f), dpi(3f), dpi(7f), dpi(3f))
@@ -146,8 +146,7 @@ abstract class GestureScreen : Screen() {
         val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
         return gestureRow(action.icon, gesture.short, label(id, calls = false), action == Action.NONE,
             paused = paused != null, tags = tags, hint = hint, info = guide) {
-            // Task 12 opens the gesture editor here instead.
-            pick(gesture, profile.id)
+            GestureActivity.open(this, profile.id, gesture)
         }
     }
 
