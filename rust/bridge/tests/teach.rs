@@ -49,6 +49,8 @@ fn tries_are_checked_and_lookalikes_named() {
     assert_eq!(check_tries("{"), "bad-json");
     let lib = format!(r#"[{{"name":"Circle","tries":[{}]}}]"#, circle(10.0));
     assert!(library(&lib).is_ok() && library("[").is_err());
-    assert_eq!(looks_like(&lib, &format!("[{}]", circle(20.0))), "Circle");
-    assert_eq!(looks_like(&lib, &format!("[{ZIGZAG}]")), "");
+    assert_eq!(looks_like(&lib, &format!("[{}]", circle(20.0))), r#"{"like":"Circle"}"#);
+    assert_eq!(looks_like(&lib, &format!("[{ZIGZAG}]")), r#"{"like":null}"#);
+    assert_eq!(looks_like("[", "[]"), r#"{"error":"bad-library"}"#);
+    assert_eq!(looks_like(&lib, "["), r#"{"error":"bad-tries"}"#);
 }

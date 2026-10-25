@@ -1,10 +1,12 @@
 //! The Android app's view of a band connection: bytes in, bytes out, plus
 //! action names to run and a status snapshot. Kotlin owns the Bluetooth socket
 //! and the clock; this owns the band-core session, the keepalive timing (as the
-//! desktop daemon's link loop does) and band-core's shared controls (taps, the
-//! hold, the dial, profiles, the lock), fed the app's profiles as JSON (`profiles`).
-//! Also the Meta sign-in and the ownership claim (`metaauth`, `meta`, `claim`),
-//! ported from the Linux app.
+//! desktop daemon's link loop does) and band-core's shared controls: taps, the holds,
+//! the band controls above the profiles, the pinch (dials, drags and sliders), the palm
+//! position and its calibration, and draw sessions matched against taught drawings, fed
+//! the app's profiles as JSON (`profiles`). The screens ask band-core's rules without a
+//! connection (`report`, `teach`). Also the Meta sign-in and the ownership claim
+//! (`metaauth`, `meta`, `claim`), ported from the Linux app.
 
 use band_core::controls::{Controls, Finger, Output};
 use band_core::events::{Event, Hand};
@@ -86,6 +88,7 @@ impl Connection {
         };
         let identity = EnrollmentIdentity::from_bytes(private, band).map_err(|e| e.to_string())?;
         let (setup, profiles) = profiles::parse(profiles)?;
+        let log = setup.notes.clone();
         let mut controls = Controls::new(setup.options(None), profiles);
         if paused {
             controls.pause();
@@ -100,7 +103,7 @@ impl Connection {
             last_query: 0.0,
             next_battery: 0.0,
             actions: Vec::new(),
-            log: Vec::new(),
+            log,
             probing: false,
             field: None,
             roll: palmlive::LiveRoll::default(),
@@ -188,15 +191,20 @@ impl Connection {
         std::mem::take(&mut self.log)
     }
 
+    /// The controls off or on from the app. It knows, so `@controls` isn't reported back; what
+    /// else that brings (turning off closes an open drawing: `@draw-cancelled`) is.
     pub fn set_paused(&mut self, paused: bool, now: f64) {
-        // The app asked: it knows; nothing to report back.
-        let _ = if paused { self.controls.pause() } else { self.controls.resume(now) };
+        let mut outputs = if paused { self.controls.pause() } else { self.controls.resume(now) };
+        outputs.retain(|output| !matches!(output, Output::Controls { .. }));
+        // Without a clock nothing is written to the band here (a hand waits for `tick`), so it can't fail.
+        let _ = self.take(outputs, None);
     }
 
     /// New profiles, hand or call layer from the app (see `profiles::parse`). The app knows
     /// which profile it picked: a switch this causes isn't reported back.
     pub fn set_profiles(&mut self, json: &str) -> Result<(), String> {
         let (setup, profiles) = profiles::parse(json)?;
+        self.log.extend(setup.notes.iter().cloned());
         let options = setup.options(self.controls.status().hand);
         self.setup = setup;
         let mut outputs = Vec::new();
@@ -578,14 +586,18 @@ pub fn line(output: &Output<String>, roll: f64) -> Option<String> {
         Output::NotDrawn => "@not-drawn".into(),
         Output::DrawCancelled => "@draw-cancelled".into(),
         Output::DragSample { finger, direction: [x, y, z] } => {
-            let finger = match finger {
-                Finger::Index => "index",
-                Finger::Middle => "middle",
-            };
-            format!("@drag-sample {finger} {x:.4} {y:.4} {z:.4} {roll:.2}")
+            format!("@drag-sample {} {x:.4} {y:.4} {z:.4} {roll:.2}", finger_key(*finger))
         }
         Output::Run(_) | Output::SetHand(_) => return None,
     })
+}
+
+/// A finger's name in the `@` lines and the report.
+pub(crate) fn finger_key(finger: Finger) -> &'static str {
+    match finger {
+        Finger::Index => "index",
+        Finger::Middle => "middle",
+    }
 }
 
 /// The log line for symbols the band wrote: how many, and how many didn't go in.

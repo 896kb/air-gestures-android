@@ -283,3 +283,61 @@ fn the_palm_readout_follows_the_bands_orientation() {
     assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-11.3}"#);
     assert_eq!(connection.palm_now(4.0), r#"{"palm":null,"roll":null}"#, "stale");
 }
+
+/// [json_full] with a `calibration` (per wrist, as the app stores it).
+fn with_calibration(json: String, calibration: serde_json::Value) -> String {
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value["calibration"] = calibration;
+    value.to_string()
+}
+
+/// The band at a roll of `roll` degrees (turned about its y; see palmlive's tests).
+fn roll_to(connection: &mut Connection, band: &mut Responder, roll: f64, now: f64) {
+    let half = (-roll).to_radians() / 2.0;
+    let bytes = band.orientation([half.cos() as f32, 0.0, half.sin() as f32, 0.0]).unwrap();
+    let reply = connection.feed(&bytes, now).unwrap();
+    pump(connection, band, reply, now);
+}
+
+#[test]
+fn the_palm_follows_the_calibration_of_the_wrist_in_use() {
+    // A right wrist calibrated the other way round: −11.3° is palm down there.
+    let right = serde_json::json!({"right": {"palm": {"down": -10.0, "up": -150.0}}});
+    let (mut connection, mut band) = connected_with(false, &with_calibration(json(&[], 0), right));
+    roll_to(&mut connection, &mut band, -11.3, 3.0);
+    assert_eq!(connection.palm_now(3.1), r#"{"palm":"down","roll":-11.3}"#);
+    // Calibrated away: band-core's own right hand, where −11.3° is palm up.
+    connection.set_profiles(&json(&[], 0)).unwrap();
+    roll_to(&mut connection, &mut band, -11.3, 3.2);
+    assert_eq!(connection.palm_now(3.3), r#"{"palm":"up","roll":-11.3}"#);
+}
+
+#[test]
+fn the_band_moving_to_the_other_wrist_brings_that_wrists_calibration() {
+    let both = serde_json::json!({
+        "right": {"palm": {"down": -10.0, "up": -150.0}},
+        "left": {"palm": {"down": -150.0, "up": -10.0}},
+    });
+    let (mut connection, mut band) = connected_with(false, &with_calibration(json(&[], 0), both.clone()));
+    roll_to(&mut connection, &mut band, -11.3, 2.0);
+    assert_eq!(connection.palm_now(2.1), r#"{"palm":"down","roll":-11.3}"#);
+    // Set to the left wrist: once the band says so, the left calibration reads the same roll.
+    connection.set_profiles(&with_calibration(json_full("left", STANDARD, &[], 0), both)).unwrap();
+    for step in 0..20 {
+        let now = 2.2 + f64::from(step) * 0.05;
+        let out = connection.tick(now).unwrap();
+        pump(&mut connection, &mut band, out, now);
+    }
+    assert_eq!(band.hand, 1, "the band stores left");
+    roll_to(&mut connection, &mut band, -11.3, 3.5);
+    assert_eq!(connection.palm_now(3.6), r#"{"palm":"up","roll":-11.3}"#);
+}
+
+#[test]
+fn turning_the_controls_off_from_the_app_closes_an_open_drawing() {
+    let (mut connection, _band) = connected(false);
+    connection.start_drawing(3.0).unwrap();
+    taken(&mut connection);
+    connection.set_paused(true, 3.5);
+    assert_eq!(taken(&mut connection).1, vec!["@draw-cancelled".to_owned()], "and no @controls: the app knows");
+}

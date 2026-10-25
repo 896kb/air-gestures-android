@@ -36,9 +36,12 @@ object Bridge {
     @JvmStatic external fun setInCall(handle: Long, inCall: Boolean)
     /** Practice: gestures and what they'd run come as `@gesture` / `@practiced`; nothing runs. */
     @JvmStatic external fun setPractice(handle: Long, practice: Boolean)
-    /** What the screens show about a profiles JSON (Report): warnings, invalid, paused, paused_sliders, uses, hold_waits. */
+    /** What the screens show about a profiles JSON (Report): warnings, invalid, paused, paused_sliders, uses, hold_waits; bad JSON: `{"error"}`. */
     @JvmStatic external fun profileReport(json: String): String
-    /** Where band control [control] (controls, next, previous, draw) could go with [palm] ("" any, else "up,down"), and what it would pause. */
+    /**
+     * Where band control [control] (controls, next, previous, draw) could go with [palm] ("" or no known
+     * position: any; else "up,down"), and what it would pause; `{"error": "bad-json" | "unknown-control"}`.
+     */
     @JvmStatic external fun bandChoices(json: String, control: String, palm: String): String
     /** `{"down", "up"}` rolls, or `{"error"}` (empty / not-still / too-close). */
     @JvmStatic external fun palmCalibration(down: DoubleArray, up: DoubleArray): String
@@ -46,7 +49,7 @@ object Bridge {
     @JvmStatic external fun dragPrototypes(samples: String): String
     /** "" when the tries can teach a drawing, else `too-small <i>`, `not-alike <i> <j>`, `no-tries`. */
     @JvmStatic external fun checkTries(tries: String): String
-    /** The drawing in [library] these tries look like, or "". */
+    /** The drawing in [library] these tries look like: `{"like": name | null}`, or `{"error": "bad-library" | "bad-tries"}`. */
     @JvmStatic external fun looksLike(library: String, tries: String): String
     /** The drawings draw sessions match against (DrawingLibrary JSON); throws on bad JSON. */
     @JvmStatic external fun setLibrary(handle: Long, library: String)

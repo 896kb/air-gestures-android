@@ -92,3 +92,40 @@ fn unknown_keys_are_skipped_and_bad_json_is_an_error() {
     assert!(parse("{").is_err());
     assert!(parse("{}").unwrap().1.list.is_empty());
 }
+
+#[test]
+fn a_stored_palm_calibration_is_checked_again() {
+    let (setup, _) = parse(r#"{"hand":"right","calibration":{"right":{"palm":{"down":-40.0,"up":-10.0}}}}"#).unwrap();
+    assert_eq!(setup.options(None).palm, None, "too close: band-core's defaults instead");
+    assert!(setup.notes.iter().any(|n| n.contains("right") && n.contains("palm")), "{:?}", setup.notes);
+}
+
+#[test]
+fn a_null_or_wrong_shape_field_is_its_default_not_an_error() {
+    let (setup, profiles) = parse(
+        r#"{"hand":null,"picked":"x","apps":null,"band":{"controls":{"gesture":null},"next":{"gesture":"index_triple","palm":"up"}},
+            "calls":{"index_double":null,"middle_double":"-"},"drawings":{"Bulb":null,"Z":""},"calibration":{"left":7},
+            "profiles":[
+              {"name":"A","map":{"swipe_up":null,"index_tap":"media.next"},"palm":{"index_tap":null,"middle_tap":{"up":null,"down":"x"}},
+               "index":null,"middle":{"dial":{"up":"volume.up"},"drags":null}},
+              3,
+              {"name":"B","index":{"drags":{"sliders":[{"up":"brightness.up"},{"up":"volume.up","down":"volume.down"}]}}}]}"#,
+    )
+    .unwrap();
+    assert_eq!(setup.hand, HandSetting::Band);
+    assert_eq!(profiles.picked, 0);
+    assert_eq!(profiles.band.controls, None);
+    assert_eq!(profiles.band.next, Some(BandControl::on(Gesture::IndexTriple)), "a palm that isn't a list: every position");
+    assert_eq!(profiles.calls.get(&Gesture::MiddleDouble), Some(&CallBinding::Nothing));
+    assert!(!profiles.calls.contains_key(&Gesture::IndexDouble));
+    assert!(profiles.drawings.is_empty(), "nothing, and \"\" is nothing too");
+    assert_eq!(profiles.list.len(), 2, "the profile that isn't one is skipped");
+    let a = &profiles.list[0];
+    assert_eq!(a.gestures.get(&Gesture::SwipeUp), None);
+    assert_eq!(a.gestures[&Gesture::IndexTap].normal.as_deref(), Some("media.next"));
+    assert_eq!(a.gestures[&Gesture::MiddleTap].action(Palm::Down).map(String::as_str), Some("x"));
+    assert!(a.index.dial.is_none() && a.middle.dial.is_none(), "a dial without its down is none");
+    assert_eq!(a.middle.drags, DragMode::Gestures);
+    // Sliders: the one without its down is none, a missing third is none.
+    assert_eq!(profiles.list[1].index.drags, DragMode::Sliders([None, Some(dial("volume.up", "volume.down")), None]));
+}

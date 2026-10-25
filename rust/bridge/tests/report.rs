@@ -56,7 +56,7 @@ fn the_report_flags_invalid_settings_and_warns() {
     );
     let r = parsed(&report(r#"{"band":{"controls":{"gesture":"middle_hold"},"draw":{"gesture":"index_hold"}}}"#));
     assert_eq!(r["invalid"], json!([{"kind":"draw-cant-cancel"}]));
-    assert_eq!(report("{"), "{}");
+    assert_eq!(report("{"), r#"{"error":"bad-json"}"#);
 }
 
 #[test]
@@ -78,6 +78,8 @@ fn moving_a_band_control_lists_what_it_would_pause_and_skips_gestures_the_others
         triple["pauses"],
         json!([{"control":"previous","gesture":"index_triple","place":0,"palm":null,"positions":["down"]}])
     );
-    assert_eq!(band_choices("{", "next", ""), "[]");
-    assert_eq!(band_choices(JSON, "lock", ""), "[]");
+    assert_eq!(band_choices("{", "next", ""), r#"{"error":"bad-json"}"#);
+    assert_eq!(band_choices(JSON, "lock", ""), r#"{"error":"unknown-control"}"#);
+    // No position it knows: any position, as "".
+    assert_eq!(band_choices(JSON, "previous", "left"), band_choices(JSON, "previous", ""));
 }

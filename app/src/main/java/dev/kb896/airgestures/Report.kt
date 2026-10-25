@@ -16,7 +16,9 @@ class Report(json: String) {
         val count get() = pauses.size + sliders.size
     }
 
-    private val root = runCatching { JSONObject(json) }.getOrDefault(JSONObject())
+    private val root = runCatching { JSONObject(json) }.getOrDefault(JSONObject().put("error", "bad-json"))
+    /** Why there's no report (`bad-json`: the bridge couldn't read the settings), else null. */
+    val error: String? = root.optString("error").ifEmpty { null }
     val warnings: List<String> = strings(root.optJSONArray("warnings"))
     /** `binding <place> <gesture>`, `band <control>`, `draw-cant-cancel`. */
     val invalid: List<String> = objects(root.optJSONArray("invalid")).map { o ->

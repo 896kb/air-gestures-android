@@ -33,6 +33,8 @@ class ReportTest {
         assertEquals(listOf("no-way-out"), report.warnings)
         assertEquals(listOf("band next"), report.invalid)
         assertEquals(0, Report("not json").count(Builtin.CONTROLS))
+        assertEquals("bad-json", Report("""{"error":"bad-json"}""").error)
+        assertNull(report.error)
     }
 
     @Test fun `band choices read with what they'd pause`() {

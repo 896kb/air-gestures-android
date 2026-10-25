@@ -12,7 +12,8 @@ use serde_json::json;
 use crate::profiles::PrototypesJson;
 
 /// `{"down": roll, "up": roll}` from rolls held still in each position, or
-/// `{"error": "empty <palm>" | "not-still <palm>" | "too-close"}`.
+/// `{"error": "empty <palm>" | "not-still <palm>" | "too-close"}` (`empty`: no rolls, or one
+/// that isn't a number, NaN or infinite).
 pub fn palm_calibration(down: &[f64], up: &[f64]) -> String {
     let result = match PalmCalibration::from_rolls(down, up) {
         Ok(c) => json!({"down": c.down_roll, "up": c.up_roll}),
@@ -37,7 +38,8 @@ fn drag_key(drag: Drag) -> &'static str {
 /// From `{"roll", "turn": [x,y,z], "drags": [six, in left, right, toward, away, up, down order]}`
 /// (the `@drag-sample` directions and roll): the prototypes as the profiles JSON's
 /// `calibration.<wrist>.drags` keeps them, or `{"error": "no-turn" | "no-drag <drag>" |
-/// "too-alike <drag> <drag>" | "like-the-turn <drag>" | "no-roll" | "bad-json"}`.
+/// "too-alike <drag> <drag>" | "like-the-turn <drag>" | "bad-json"}`. (band-core's `no-roll`,
+/// a roll that isn't finite, can't come from JSON; it's mapped all the same.)
 pub fn drag_prototypes(samples: &str) -> String {
     let Ok(s) = serde_json::from_str::<PrototypesJson>(samples) else { return json!({"error": "bad-json"}).to_string() };
     let result = match Prototypes::taught(s.turn, s.drags, s.roll) {
@@ -80,10 +82,10 @@ pub fn check_tries(json: &str) -> String {
     }
 }
 
-/// The drawing in the library these tries look like ("looks like Circle"), or `""`.
+/// The drawing in the library these tries look like ("looks like Circle"): `{"like": name}`,
+/// `{"like": null}` for none, or `{"error": "bad-library" | "bad-tries"}`.
 pub fn looks_like(library_json: &str, tries_json: &str) -> String {
-    match (library(library_json), tries(tries_json)) {
-        (Ok(library), Some(tries)) => library.looks_like(&tries).unwrap_or_default(),
-        _ => String::new(),
-    }
+    let Ok(library) = library(library_json) else { return json!({"error": "bad-library"}).to_string() };
+    let Some(tries) = tries(tries_json) else { return json!({"error": "bad-tries"}).to_string() };
+    json!({"like": library.looks_like(&tries)}).to_string()
 }

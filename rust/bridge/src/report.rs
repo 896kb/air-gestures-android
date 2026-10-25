@@ -10,6 +10,7 @@ use band_core::controls::{
 };
 use serde_json::{Map, Value, json};
 
+use crate::finger_key;
 use crate::profiles::parse;
 
 /// The band control's name in the profiles JSON.
@@ -24,13 +25,6 @@ pub fn builtin_key(builtin: Builtin) -> &'static str {
 
 fn builtin_of(key: &str) -> Option<Builtin> {
     Builtin::ALL.into_iter().find(|&builtin| builtin_key(builtin) == key)
-}
-
-fn finger_key(finger: Finger) -> &'static str {
-    match finger {
-        Finger::Index => "index",
-        Finger::Middle => "middle",
-    }
 }
 
 fn place(place: Place) -> Value {
@@ -102,21 +96,25 @@ fn report_of(profiles: &Profiles<String>) -> Value {
     })
 }
 
+/// What the screens show when the JSON isn't JSON (as `teach::check_tries`' `bad-json`).
+fn error(kind: &str) -> String {
+    json!({"error": kind}).to_string()
+}
+
 /// `{"warnings", "invalid", "paused", "paused_sliders", "uses", "hold_waits"}` for this profiles
-/// JSON (see the tests); invalid JSON: `{}`.
+/// JSON (see the tests); invalid JSON: `{"error": "bad-json"}`.
 pub fn report(json: &str) -> String {
     match parse(json) {
         Ok((_, profiles)) => report_of(&profiles).to_string(),
-        Err(_) => "{}".into(),
+        Err(_) => error("bad-json"),
     }
 }
 
+/// `""`, or keys with no position the bridge knows (`"left"`): every position, as the app
+/// sends "any position"; else the positions named.
 fn palm_set(keys: &str) -> PalmSet {
-    if keys.is_empty() {
-        PalmSet::All
-    } else {
-        PalmSet::Only(keys.split(',').filter_map(|key| Palm::from_key(key.trim())).collect())
-    }
+    let palms: Palms = keys.split(',').filter_map(|key| Palm::from_key(key.trim())).collect();
+    if palms.is_empty() { PalmSet::All } else { PalmSet::Only(palms) }
 }
 
 fn slot(band: &mut BandControls, builtin: Builtin) -> &mut Option<BandControl> {
@@ -141,9 +139,10 @@ fn held_by_other(profiles: &Profiles<String>, builtin: Builtin, gesture: Gesture
 /// `palm` (`""`: any position, else keys joined by `,`): for each gesture no other band control
 /// holds in those positions, in `Gesture::ALL` order, `{"gesture", "pauses", "sliders"}` — what
 /// it would pause there, as `paused` / `paused_sliders` in the report. Its current gesture is
-/// listed too. Invalid JSON or an unknown control: `[]`.
+/// listed too. Invalid JSON: `{"error": "bad-json"}`; an unknown control: `{"error": "unknown-control"}`.
 pub fn band_choices(json: &str, control: &str, palm: &str) -> String {
-    let (Ok((_, profiles)), Some(builtin)) = (parse(json), builtin_of(control)) else { return "[]".into() };
+    let Ok((_, profiles)) = parse(json) else { return error("bad-json") };
+    let Some(builtin) = builtin_of(control) else { return error("unknown-control") };
     let set = palm_set(palm);
     let choices: Vec<Value> = Gesture::ALL
         .into_iter()

@@ -9,8 +9,13 @@
 //!   key is no gesture. An unknown gesture is no gesture, an unknown position is skipped.
 //! - `calls`: only gestures whose call action isn't "as usual"; `"-"` is nothing.
 //! - `drags`: `"gestures"`, or `{"sliders": [left/right, toward/away, up/down]}`.
-//! - `calibration`: this band's, per wrist (see [`Setup::options`]).
+//! - `calibration`: this band's, per wrist (see [`Setup::options`]); checked again here, and
+//!   one band-core refuses is dropped (a note in [`Setup::notes`]).
 //! - `hand`: `band`, `left` or `right`.
+//!
+//! Only JSON that isn't JSON is an error: a field that is `null` or the wrong shape reads as
+//! its default (a map entry that isn't a string is skipped, a profile that isn't an object is
+//! left out, a dial or slider without both actions is none, `{"gesture": null}` is no gesture).
 
 use std::collections::BTreeMap;
 
@@ -20,56 +25,118 @@ use band_core::controls::{
     PalmCalibration, PalmSet, Profile, Profiles,
 };
 use band_core::events::Hand;
+use serde::de::{DeserializeOwned, Deserializer, IgnoredAny};
 use serde::Deserialize;
+use serde_json::Value;
+
+/// Any field: what it holds, or its default when that's `null` or the wrong shape.
+fn lenient<'de, D: Deserializer<'de>, T: DeserializeOwned + Default>(d: D) -> Result<T, D::Error> {
+    let value = Value::deserialize(d)?;
+    Ok(T::deserialize(value).unwrap_or_default())
+}
+
+/// A map of strings: its entries that are strings (`null`, numbers… are skipped).
+fn strings<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, String>, D::Error> {
+    Ok(string_map(Value::deserialize(d)?))
+}
+
+fn string_map(value: Value) -> BTreeMap<String, String> {
+    match value {
+        Value::Object(map) => map.into_iter().filter_map(|(key, v)| Some((key, v.as_str()?.to_owned()))).collect(),
+        _ => BTreeMap::new(),
+    }
+}
+
+/// Palm overrides: per gesture, its map of strings (a gesture whose value isn't a map: none).
+fn overrides<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, BTreeMap<String, String>>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Object(map) => map.into_iter().filter(|(_, v)| v.is_object()).map(|(key, v)| (key, string_map(v))).collect(),
+        _ => BTreeMap::new(),
+    })
+}
+
+/// The profiles: the ones that read as a profile (one that doesn't is left out).
+fn profile_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<ProfileJson>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Array(list) => list.into_iter().filter_map(|v| ProfileJson::deserialize(v).ok()).collect(),
+        _ => Vec::new(),
+    })
+}
+
+/// Three sliders: each a dial or none (one without both actions, or past the end: none).
+fn sliders<'de, D: Deserializer<'de>>(d: D) -> Result<[Option<DialJson>; 3], D::Error> {
+    let list = match Value::deserialize(d)? {
+        Value::Array(list) => list,
+        _ => Vec::new(),
+    };
+    let mut sliders = list.into_iter().map(|v| DialJson::deserialize(v).ok());
+    Ok([(); 3].map(|_| sliders.next().flatten()))
+}
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct Json {
+    #[serde(deserialize_with = "lenient")]
     hand: String,
+    #[serde(deserialize_with = "lenient")]
     picked: usize,
+    #[serde(deserialize_with = "lenient")]
     apps: BTreeMap<String, usize>,
+    #[serde(deserialize_with = "lenient")]
     band: BandJson,
+    #[serde(deserialize_with = "strings")]
     calls: BTreeMap<String, String>,
+    #[serde(deserialize_with = "strings")]
     drawings: BTreeMap<String, String>,
+    #[serde(deserialize_with = "lenient")]
     calibration: HandsJson,
+    #[serde(deserialize_with = "profile_list")]
     profiles: Vec<ProfileJson>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct BandJson {
+    #[serde(deserialize_with = "lenient")]
     controls: Option<ControlJson>,
+    #[serde(deserialize_with = "lenient")]
     next: Option<ControlJson>,
+    #[serde(deserialize_with = "lenient")]
     previous: Option<ControlJson>,
+    #[serde(deserialize_with = "lenient")]
     draw: Option<ControlJson>,
 }
 
 #[derive(Deserialize)]
 struct ControlJson {
     gesture: String,
-    #[serde(default)]
+    /// Not a list of strings: every position.
+    #[serde(default, deserialize_with = "lenient")]
     palm: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 struct ProfileJson {
+    #[serde(deserialize_with = "lenient")]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "strings")]
     map: BTreeMap<String, String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "overrides")]
     palm: BTreeMap<String, BTreeMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     index: FingerJson,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     middle: FingerJson,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "strings")]
     drawings: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct FingerJson {
+    #[serde(deserialize_with = "lenient")]
     dial: Option<DialJson>,
+    #[serde(deserialize_with = "lenient")]
     drags: DragsJson,
 }
 
@@ -79,31 +146,39 @@ struct DialJson {
     down: String,
 }
 
+/// `{"sliders": [...]}`, or anything else (`"gestures"`): gestures. Never an error: whatever
+/// isn't sliders reads as gestures.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum DragsJson {
-    Sliders { sliders: [Option<DialJson>; 3] },
-    /// `"gestures"` (any other word reads as gestures too).
-    Mode(#[allow(dead_code)] String),
+    Sliders {
+        #[serde(deserialize_with = "sliders")]
+        sliders: [Option<DialJson>; 3],
+    },
+    Mode(IgnoredAny),
 }
 
 impl Default for DragsJson {
     fn default() -> Self {
-        DragsJson::Mode("gestures".into())
+        DragsJson::Mode(IgnoredAny)
     }
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct HandsJson {
+    #[serde(deserialize_with = "lenient")]
     left: Option<CalibrationJson>,
+    #[serde(deserialize_with = "lenient")]
     right: Option<CalibrationJson>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct CalibrationJson {
+    #[serde(deserialize_with = "lenient")]
     palm: Option<PalmJson>,
+    #[serde(deserialize_with = "lenient")]
     drags: Option<PrototypesJson>,
 }
 
@@ -134,6 +209,8 @@ pub struct Setup {
     pub hand: HandSetting,
     pub left: Calibration,
     pub right: Calibration,
+    /// What parsing dropped and why (a stored calibration band-core refuses), for the log.
+    pub notes: Vec<String>,
 }
 
 impl Setup {
@@ -161,14 +238,16 @@ impl Setup {
 
 pub fn parse(json: &str) -> Result<(Setup, Profiles<String>), String> {
     let json: Json = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let mut notes = Vec::new();
     let setup = Setup {
         hand: match json.hand.as_str() {
             "left" => HandSetting::Left,
             "right" => HandSetting::Right,
             _ => HandSetting::Band,
         },
-        left: calibration(json.calibration.left),
-        right: calibration(json.calibration.right),
+        left: calibration("left", json.calibration.left, &mut notes),
+        right: calibration("right", json.calibration.right, &mut notes),
+        notes,
     };
     let band = BandControls {
         controls: control(json.band.controls),
@@ -190,16 +269,30 @@ pub fn parse(json: &str) -> Result<(Setup, Profiles<String>), String> {
             Some((gesture, binding))
         })
         .collect();
-    Ok((setup, Profiles { band, list, picked: json.picked, apps: json.apps, calls, drawings: json.drawings }))
+    // As in a profile's own: "" is nothing.
+    let drawings = json.drawings.into_iter().filter(|(_, id)| !id.is_empty()).collect();
+    Ok((setup, Profiles { band, list, picked: json.picked, apps: json.apps, calls, drawings }))
 }
 
-fn calibration(json: Option<CalibrationJson>) -> Calibration {
+/// A wrist's stored calibration, checked again: a damaged one gives band-core's defaults
+/// rather than nonsense (and a note saying so).
+fn calibration(wrist: &str, json: Option<CalibrationJson>, notes: &mut Vec<String>) -> Calibration {
     let json = json.unwrap_or_default();
-    Calibration {
-        palm: json.palm.map(|p| PalmCalibration { down_roll: p.down, up_roll: p.up }),
-        // Checked again: a damaged set gives band-core's defaults rather than nonsense.
-        drags: json.drags.and_then(|d| Prototypes::taught(d.turn, d.drags, d.roll).ok()),
-    }
+    let palm = json.palm.and_then(|p| match PalmCalibration::from_rolls(&[p.down], &[p.up]) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            notes.push(format!("calibration: the {wrist} wrist's palm calibration is dropped ({e:?})"));
+            None
+        }
+    });
+    let drags = json.drags.and_then(|d| match Prototypes::taught(d.turn, d.drags, d.roll) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            notes.push(format!("calibration: the {wrist} wrist's taught drags are dropped ({e:?})"));
+            None
+        }
+    });
+    Calibration { palm, drags }
 }
 
 fn control(json: Option<ControlJson>) -> Option<BandControl> {
