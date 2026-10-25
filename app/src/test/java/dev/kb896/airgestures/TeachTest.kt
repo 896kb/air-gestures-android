@@ -1,0 +1,59 @@
+package dev.kb896.airgestures
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TeachTest {
+    @Test fun `a still palm is kept for two seconds once it settled`() {
+        val s = PalmSampler()
+        for (t in 0..3000L step 50) s.add(-142.0 + (t % 100) / 200.0, t)
+        assertTrue(s.done)
+        assertTrue(s.rolls.size >= 40)
+    }
+
+    @Test fun `a move or a missing reading starts again`() {
+        val s = PalmSampler()
+        for (t in 0..1500L step 50) s.add(-142.0, t)
+        assertTrue(s.progress > 0f)
+        s.add(-100.0, 1550)
+        assertEquals(0f, s.progress)
+        for (t in 1600..2500L step 50) s.add(-100.0, t)
+        s.add(null, 2550)
+        assertEquals(0f, s.progress)
+        assertEquals(2.0, PalmSampler.angle(179.0 - -179.0), 1e-9)
+    }
+
+    @Test fun `teach your drags, one sample per step, the bridge's JSON, and what to redo`() {
+        val t = DragTeach()
+        assertEquals(DragTeach.Step.TURN, t.current)
+        repeat(7) { t.sample(doubleArrayOf(0.0, 1.0, it.toDouble()), -142.3) }
+        assertNull(t.current)
+        val json = org.json.JSONObject(t.json()!!)
+        assertEquals(-142.3, json.getDouble("roll"), 0.0)
+        assertEquals(6, json.getJSONArray("drags").length())
+        val (redo, message) = t.refused("too-alike left right")
+        assertEquals(listOf(DragTeach.Step.LEFT, DragTeach.Step.RIGHT), redo)
+        assertTrue("Drag left" in message)
+        assertEquals(DragTeach.Step.LEFT, t.current)
+        assertNull(t.json())
+    }
+
+    @Test fun `teach a drawing, three tries, the bridge's refusals`() {
+        val t = DrawTeach()
+        val stroke = listOf(listOf(0.0 to 0.0, 9.0 to 9.0))
+        repeat(3) { t.add(stroke) }
+        assertTrue(t.full)
+        assertNull(t.refused(""))
+        assertEquals("Try 2 was too small: draw it bigger.", t.refused("too-small 1"))
+        assertEquals(2, t.tries.size)
+        assertTrue(t.refused("not-alike 0 1")!!.startsWith("These don't look alike"))
+        assertTrue(t.tries.isEmpty())
+        assertTrue(DrawTeach.nameFree("Bulb", listOf("Zed"), own = null))
+        assertFalse(DrawTeach.nameFree("zed", listOf("Zed"), own = null))
+        assertTrue(DrawTeach.nameFree("Zed", listOf("Zed"), own = "Zed"))
+        assertFalse(DrawTeach.nameFree("  ", emptyList(), own = null))
+    }
+}

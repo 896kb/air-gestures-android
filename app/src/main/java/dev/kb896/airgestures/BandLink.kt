@@ -107,6 +107,45 @@ class BandLink(
     /** What [setPractice] last said. */
     private var practice = false
 
+    /** Teaching drawings: draw sessions report their strokes and match nothing. Kept for the next connection. */
+    fun setTeaching(on: Boolean) = synchronized(lock) {
+        teaching = on
+        if (handle != 0L) Bridge.setTeaching(handle, on)
+    }
+
+    /** What [setTeaching] last said. */
+    private var teaching = false
+
+    /** Teaching drags: pinches report `@drag-sample`, nothing acts. Kept for the next connection. */
+    fun setDragTeaching(on: Boolean) = synchronized(lock) {
+        dragTeaching = on
+        if (handle != 0L) Bridge.setDragTeaching(handle, on)
+    }
+
+    /** What [setDragTeaching] last said. */
+    private var dragTeaching = false
+
+    /** The drawings draw sessions match against (DrawingLibrary JSON); the next connection reads them anyway. */
+    fun setLibrary(json: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setLibrary(handle, json)
+    }
+
+    /** Open a draw session from the app (a teach screen's try). */
+    fun startDrawing() = synchronized(lock) {
+        if (handle != 0L) Bridge.startDrawing(handle, now())
+    }
+
+    /** Close the open draw session, if any (`@draw-cancelled`). */
+    fun cancelDrawing() = synchronized(lock) {
+        if (handle != 0L) Bridge.cancelDrawing(handle)
+    }
+
+    /** `{"palm", "roll"}` right now (nulls: no fresh reading); null when not connected. */
+    fun palmNow(): JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        JSONObject(Bridge.palmNow(handle, now()))
+    }
+
     /**
      * The band is probably near (the system saw it, the phone was unlocked): while waiting for
      * it in the background, connect directly now instead. Does nothing once the link is up.
@@ -316,6 +355,9 @@ class BandLink(
                 Bridge.setForeground(handle, Profiles.foreground ?: "")
                 Bridge.setInCall(handle, CallWatch.inCall)
                 Bridge.setPractice(handle, practice)
+                Bridge.setLibrary(handle, Drawings.load(context).toJson())
+                Bridge.setTeaching(handle, teaching)
+                Bridge.setDragTeaching(handle, dragTeaching)
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")

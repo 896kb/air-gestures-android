@@ -254,7 +254,7 @@ abstract class GestureScreen : Screen() {
                     android.widget.Toast.makeText(this@GestureScreen, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                 }.first)
             })
-            addView(text(14f, "With gesture = which one (swipe_left, middle_tap, … or dial for pinch and turn), and for the dial steps = how far it turned (+3, −2).", Cb.INK_500))
+            addView(text(14f, "With gesture = which one (swipe_left, middle_tap, … or dial for pinch and turn), and for the dial steps = how far it turned (+3, −2). An override also carries palm (down, sideways, up); the middle dial is middle_dial, a slider index_left_right and so on, and a drawing is drawing with its name.", Cb.INK_500))
             addView(Cb.label(context, "Tasker"))
             addView(text(14f, "New profile, Event, System, Intent Received. Action: paste the line above. In the task, %gesture and %steps hold the values."))
             addView(Cb.label(context, "MacroDroid"))

@@ -162,6 +162,8 @@ class BandService : Service(), BandLink.Listener {
     private fun bandToggled(on: Boolean) {
         prefs.paused = !on
         pausedChanged(!on)
+        // Off ends an open draw session; band-core doesn't report it.
+        if (!on) pad.cancelled()
     }
 
     /** Another profile is in force: tell the user which. */
@@ -242,6 +244,8 @@ class BandService : Service(), BandLink.Listener {
     // BandLink.Listener: called from Bluetooth and link threads.
 
     override fun onPhase(phase: Phase, band: String?) = main.post {
+        // A disconnect ends an open draw session without a word from band-core: close the pad.
+        if (phase != Phase.CONNECTED) pad.cancelled()
         state.update {
             val back = phase == Phase.CONNECTED && install?.stage == "restarting"
             copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
@@ -337,6 +341,21 @@ class BandService : Service(), BandLink.Listener {
                     Toast.makeText(this, "This app has its own profile", Toast.LENGTH_SHORT).show()
                     onLog("profile: this app has its own profile")
                 }
+                "draw-started" -> pad.started()
+                "pen" -> pad.pen(rest == "down")
+                "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
+                    pad.point(s.toInt(), x.toFloat(), y.toFloat())
+                }
+                "draw-finished" -> pad.finished(rest)
+                "drawn" -> pad.drawn(rest)
+                "not-drawn" -> {
+                    pad.notDrawn()
+                    buzz(times = 2)
+                }
+                "draw-cancelled" -> pad.cancelled()
+                "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->
+                    dragTeaching?.sample(w[0], doubleArrayOf(w[1].toDouble(), w[2].toDouble(), w[3].toDouble()), w[4].toDouble())
+                }
             }
         }
     }.let {}
@@ -367,6 +386,65 @@ class BandService : Service(), BandLink.Listener {
         practice = null
         link.setPractice(false)
     }
+
+    /** A draw session's listener: a teach screen while one is open, else the pad over the app in front (or toasts). */
+    interface Drawing {
+        fun started() {}
+        /** The pen went down (the next point starts its stroke; a dropped stroke's number comes again: draw it afresh) or up. */
+        fun pen(down: Boolean) {}
+        fun point(stroke: Int, x: Float, y: Float) {}
+        /** The session's strokes (DrawingLibrary.strokes reads them). */
+        fun finished(strokes: String) {}
+        fun drawn(name: String) {}
+        fun notDrawn() {}
+        fun cancelled() {}
+    }
+
+    /** Teach your drags' listener. */
+    fun interface DragTeaching {
+        fun sample(finger: String, direction: DoubleArray, roll: Double)
+    }
+
+    var drawing: Drawing? = null
+        private set
+    private var dragTeaching: DragTeaching? = null
+
+    /** Results without a pad: toasts (Task 16 words them with `DrawPad.result`). */
+    private val toasts = object : Drawing {
+        override fun drawn(name: String) = toast(name)
+        override fun notDrawn() = toast("Not one of your drawings")
+    }
+    /** Task 16 puts the overlay pad between the two: `drawing ?: TouchService.instance?.pad ?: toasts`. */
+    private val pad: Drawing get() = drawing ?: toasts
+
+    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+
+    /** Teach a drawing: practice (nothing runs) and teaching (sessions report their strokes). */
+    fun startTeachingDrawing(listener: Drawing) {
+        drawing = listener
+        startPractice(object : Practice { override fun gesture(label: String) = Unit; override fun action(id: String) = Unit })
+        link.setTeaching(true)
+    }
+    /** One try: a draw session the screen opened. */
+    fun drawTry() = link.startDrawing()
+    fun endTeachingDrawing() {
+        link.cancelDrawing()
+        link.setTeaching(false)
+        endPractice()
+        drawing = null
+    }
+    fun startDragTeaching(listener: DragTeaching) {
+        dragTeaching = listener
+        link.setDragTeaching(true)
+    }
+    fun endDragTeaching() {
+        link.setDragTeaching(false)
+        dragTeaching = null
+    }
+    fun cancelDrawing() = link.cancelDrawing()
+    fun palmNow() = link.palmNow()
+    /** The drawings changed: the band matches against the new ones. */
+    fun drawingsChanged() = link.setLibrary(Drawings.load(this).toJson())
 
     /**
      * After an install the band reboots; when it reconnects, say whether it now runs the firmware

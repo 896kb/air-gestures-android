@@ -17,12 +17,15 @@ object Bridge {
     /**
      * Action names to run since the last call, '\n'-joined ("media.next", …), and the controls'
      * events, starting with `@`: `@gesture <label>`, `@controls on|off`, `@profile <index> <step>`,
-     * `@held <app>`, `@practiced <action>`.
+     * `@held <app>`, `@practiced <action>`; a draw session's `@draw-started`, `@pen down|up`,
+     * `@draw-point <stroke> <x> <y>` (degrees; the first after `@pen down` starts its stroke, a
+     * dropped stroke's number comes again), `@draw-finished <strokes JSON>`, `@drawn <name>`,
+     * `@not-drawn`, `@draw-cancelled`; and while teaching drags `@drag-sample <index|middle> <x> <y> <z> <roll>`.
      */
     @JvmStatic external fun actions(handle: Long): String
     /** Log lines since the last call, '\n'-joined. */
     @JvmStatic external fun log(handle: Long): String
-    /** Status snapshot JSON: connected, paused, battery, charging, hand, last_gesture, last_action, gestures, the update's. */
+    /** Status snapshot JSON: connected, paused, battery, charging, hand, last_gesture, last_action, gestures, drawing (a draw session is open), the update's. */
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
     /** New profiles, hand and call layer (Prefs.profilesJson); throws on bad JSON. A switch it causes isn't reported. */
@@ -33,8 +36,28 @@ object Bridge {
     @JvmStatic external fun setInCall(handle: Long, inCall: Boolean)
     /** Practice: gestures and what they'd run come as `@gesture` / `@practiced`; nothing runs. */
     @JvmStatic external fun setPractice(handle: Long, practice: Boolean)
-    /** What's worth a warning in a profiles JSON, '\n'-joined: `no-controls <index>`, `no-way-out <index>`. */
-    @JvmStatic external fun profileWarnings(json: String): String
+    /** What the screens show about a profiles JSON (Report): warnings, invalid, paused, paused_sliders, uses, hold_waits. */
+    @JvmStatic external fun profileReport(json: String): String
+    /** Where band control [control] (controls, next, previous, draw) could go with [palm] ("" any, else "up,down"), and what it would pause. */
+    @JvmStatic external fun bandChoices(json: String, control: String, palm: String): String
+    /** `{"down", "up"}` rolls, or `{"error"}` (empty / not-still / too-close). */
+    @JvmStatic external fun palmCalibration(down: DoubleArray, up: DoubleArray): String
+    /** Taught drags (`{"roll", "turn", "drags"}`) as stored prototypes, or `{"error"}`. */
+    @JvmStatic external fun dragPrototypes(samples: String): String
+    /** "" when the tries can teach a drawing, else `too-small <i>`, `not-alike <i> <j>`, `no-tries`. */
+    @JvmStatic external fun checkTries(tries: String): String
+    /** The drawing in [library] these tries look like, or "". */
+    @JvmStatic external fun looksLike(library: String, tries: String): String
+    /** The drawings draw sessions match against (DrawingLibrary JSON); throws on bad JSON. */
+    @JvmStatic external fun setLibrary(handle: Long, library: String)
+    @JvmStatic external fun startDrawing(handle: Long, now: Double)
+    @JvmStatic external fun cancelDrawing(handle: Long)
+    /** Teaching drawings: sessions report `@draw-finished` only. */
+    @JvmStatic external fun setTeaching(handle: Long, on: Boolean)
+    /** Teaching drags: pinches report `@drag-sample`, nothing acts. */
+    @JvmStatic external fun setDragTeaching(handle: Long, on: Boolean)
+    /** `{"palm", "roll"}` right now (nulls: no fresh reading). */
+    @JvmStatic external fun palmNow(handle: Long, now: Double): String
     /** Before [request]: also ask for these stream flags (`1,4,7`) and log what comes back (see Prefs.probe). */
     @JvmStatic external fun setProbe(handle: Long, fields: String)
     /** Debug: a ConfigReq as hex to write to the band; returns bytes to write. The answer goes to the log. */

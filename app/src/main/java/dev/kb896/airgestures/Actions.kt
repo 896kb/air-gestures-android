@@ -338,40 +338,48 @@ class Actions(
         return null
     }
 
-    /** For Tasker, MacroDroid, Home Assistant…: the gesture's name, nothing else. */
-    private fun automation(gesture: String): String? {
-        when (gesture) {
-            "dial_up" -> dialStep(+1)
-            "dial_down" -> dialStep(-1)
-            else -> context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", gesture))
+    /**
+     * For Tasker, MacroDroid, Home Assistant…: what made it (`automation:<rest>`, see
+     * [Mappings.automation]), nothing else: `gesture=<key>` (plus `palm` for an override), a dial
+     * or slider's steps, or `gesture=drawing` with its `name`.
+     */
+    private fun automation(rest: String): String? {
+        when (val made = Mappings.automation(rest)) {
+            is Mappings.Automation.Step -> dialStep(made.name, made.step)
+            is Mappings.Automation.Gesture -> context.sendBroadcast(
+                Intent(AUTOMATION_ACTION).putExtra("gesture", made.name).apply { made.palm?.let { putExtra("palm", it) } },
+            )
+            is Mappings.Automation.Drawing ->
+                context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", "drawing").putExtra("name", made.name))
         }
         return null
     }
 
-    private val dialBatch = StepBatch(DIAL_BATCH_MS)
-    private var dialFlush = false
+    /** One batch per dial or slider (`dial`, `middle_dial`, `index_left_right`, …), and whether its flush is posted. */
+    private val dialBatches = mutableMapOf<String, StepBatch>()
+    private val dialFlushes = mutableSetOf<String>()
     private val main = Handler(Looper.getMainLooper())
 
     /**
-     * A dial step for automation: sent as `gesture=dial` with the net `steps` (+ up, − down),
-     * at most once per [DIAL_BATCH_MS], so a smart light follows a quick turn smoothly.
+     * A dial or slider step for automation: sent as `gesture=<name>` with the net `steps` (+ up,
+     * − down), at most once per [DIAL_BATCH_MS] per name, so a smart light follows a quick turn smoothly.
      */
-    private fun dialStep(step: Int) {
+    private fun dialStep(name: String, step: Int) {
+        val batch = dialBatches.getOrPut(name) { StepBatch(DIAL_BATCH_MS) }
         val now = SystemClock.uptimeMillis()
-        val sent = dialBatch.add(step, now)
+        val sent = batch.add(step, now)
         if (sent != null) {
-            sendDial(sent)
-        } else if (!dialFlush) {
-            dialFlush = true
+            sendDial(name, sent)
+        } else if (dialFlushes.add(name)) {
             main.postAtTime({
-                dialFlush = false
-                sendDial(dialBatch.take(SystemClock.uptimeMillis()))
-            }, dialBatch.due())
+                dialFlushes.remove(name)
+                sendDial(name, batch.take(SystemClock.uptimeMillis()))
+            }, batch.due())
         }
     }
 
-    private fun sendDial(steps: Int) {
-        if (steps != 0) context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", "dial").putExtra("steps", steps))
+    private fun sendDial(name: String, steps: Int) {
+        if (steps != 0) context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", name).putExtra("steps", steps))
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */
