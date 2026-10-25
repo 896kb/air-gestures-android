@@ -12,48 +12,100 @@ object Mappings {
     const val NOTHING = "-"
     const val AUTOMATION = "automation"
 
+    const val DIAL = "dial:"
+    const val DRAWING = "drawing:"
+    private val PAIRS = listOf("left_right", "toward_away", "up_down")
+
     /**
-     * What the bridge gets (see rust/bridge/src/profiles.rs): every profile with every gesture
-     * key resolved (defaults for keys a profile never stored), the dial's two actions ([dials]:
-     * a dial key → up and down, null for nothing), the picked profile and the apps' own (as
-     * indexes), and the call layer ([calls]: gesture key → action id, [AS_USUAL] or [NOTHING]).
-     * A stored [AUTOMATION] becomes `automation:<gesture>`, since the bridge reports only action names.
+     * Everything the bridge needs (rust/bridge/src/profiles.rs): every profile with every
+     * gesture key resolved (defaults for keys a profile never stored), its palm overrides, both
+     * fingers' dials and drags and its own drawings, the picked profile and the apps' own (as
+     * indexes), the band controls, the call layer, the shared drawings and this band's calibrations.
      */
-    fun profilesJson(
-        list: ProfileList,
-        calls: Map<String, String>,
-        dials: (String) -> Pair<String, String>?,
-        hand: String,
-    ): String {
+    class Input(
+        val list: ProfileList,
+        val band: BandControls,
+        /** Gesture key → action id, [AS_USUAL] or [NOTHING]. */
+        val calls: Map<String, String>,
+        /** Drawing name → its action in every profile without its own. */
+        val drawings: Map<String, String>,
+        /** "left" / "right" → this band's calibration of that wrist. */
+        val calibrations: Map<String, Calibration>,
+        val hand: String,
+    )
+
+    /** A stored [AUTOMATION] becomes `automation:<name>`: the bridge reports only action names. */
+    private fun named(id: String, name: String) = if (id == AUTOMATION) "$AUTOMATION:$name" else id
+
+    /** A dial's two actions (null: nothing); automation steps carry the dial's name (`dial` for the index dial, as 0.7.7). */
+    fun dial(key: String, name: String): Pair<String, String>? = when (val choice = DialChoice.of(key)) {
+        DialChoice.NONE -> null
+        DialChoice.AUTOMATION -> "$AUTOMATION:$DIAL$name:up" to "$AUTOMATION:$DIAL$name:down"
+        else -> choice.up to choice.down
+    }
+
+    private fun dialJson(key: String, name: String): Any =
+        dial(key, name)?.let { (up, down) -> JSONObject().put("up", up).put("down", down) } ?: JSONObject.NULL
+
+    private fun finger(profile: Profile, part: Part): JSONObject {
+        val f = part.name.lowercase()
+        val drags = profile.drags(part)
+        return JSONObject().apply {
+            put("dial", dialJson(profile.dialOf(part), if (part == Part.INDEX) "dial" else "${f}_dial"))
+            put("drags", if (!drags.sliders) "gestures" else JSONObject().put("sliders",
+                JSONArray(drags.targets.mapIndexed { i, key -> dialJson(key, "${f}_${PAIRS[i]}") })))
+        }
+    }
+
+    private fun drawingsJson(map: Map<String, String>) =
+        JSONObject(map.filterValues { it.isNotEmpty() }.mapValues { (name, id) -> named(id, "$DRAWING$name") })
+
+    fun profilesJson(input: Input): String {
+        val list = input.list
         val profiles = JSONArray()
         for (profile in list.profiles) {
             val map = JSONObject()
-            for (gesture in Gesture.entries) {
-                val id = profile.map[gesture.key] ?: gesture.default.id
-                map.put(gesture.key, if (id == AUTOMATION) "$AUTOMATION:${gesture.key}" else id)
-            }
+            for (gesture in Gesture.entries) map.put(gesture.key, named(profile.map[gesture.key] ?: gesture.default.id, gesture.key))
+            val palm = JSONObject()
+            for ((key, own) in profile.palm) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at") }))
             profiles.put(JSONObject().apply {
                 put("name", profile.name)
                 put("map", map)
-                put("dial", dials(profile.dial)?.let { (up, down) -> JSONObject().put("up", up).put("down", down) } ?: JSONObject.NULL)
+                put("palm", palm)
+                put("index", finger(profile, Part.INDEX))
+                put("middle", finger(profile, Part.MIDDLE))
+                put("drawings", drawingsJson(profile.drawings))
             })
         }
         val index = { id: String -> list.profiles.indexOfFirst { it.id == id } }
         return JSONObject().apply {
-            put("hand", hand)
-            // An unknown pick is the first profile, as in ProfileList.active.
+            put("hand", input.hand)
             put("picked", index(list.picked).coerceAtLeast(0))
-            // An app whose profile is gone has none of its own.
             put("apps", JSONObject(list.apps.mapValues { index(it.value) }.filterValues { it >= 0 }))
-            put("calls", JSONObject(calls.filterValues { it != AS_USUAL }.mapValues { (key, id) ->
-                when (id) {
-                    NOTHING -> "-"
-                    AUTOMATION -> "$AUTOMATION:$key"
-                    else -> id
-                }
-            }))
+            put("band", input.band.toJson())
+            put("calls", JSONObject(input.calls.filterValues { it != AS_USUAL }.mapValues { (key, id) -> if (id == NOTHING) "-" else named(id, key) }))
+            put("drawings", drawingsJson(input.drawings))
+            put("calibration", JSONObject().apply {
+                for (hand in listOf("left", "right")) put(hand, input.calibrations[hand]?.toJson() ?: JSONObject.NULL)
+            })
             put("profiles", profiles)
         }.toString()
+    }
+
+    /** What `automation:<rest>` sends (Actions.automation). */
+    sealed class Automation {
+        /** A gesture; [palm]: the position its override is for. */
+        data class Gesture(val name: String, val palm: String?) : Automation()
+        /** A dial or slider step, gathered per [name]. */
+        data class Step(val name: String, val step: Int) : Automation()
+        data class Drawing(val name: String) : Automation()
+    }
+
+    fun automation(rest: String): Automation = when {
+        rest.startsWith(DIAL) -> rest.removePrefix(DIAL).let { Automation.Step(it.substringBeforeLast(':'), if (it.endsWith(":down")) -1 else +1) }
+        rest.startsWith(DRAWING) -> Automation.Drawing(rest.removePrefix(DRAWING))
+        ':' in rest -> Automation.Gesture(rest.substringBefore(':'), rest.substringAfter(':'))
+        else -> Automation.Gesture(rest, null)
     }
 }
 

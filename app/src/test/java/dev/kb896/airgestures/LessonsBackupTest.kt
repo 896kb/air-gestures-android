@@ -61,6 +61,9 @@ class LessonsBackupTest {
         speak = true,
         vibrate = false,
         sequences = Sequences.Library(listOf(Sequences.Sequence("q1", "Morning", listOf("app:com.spotify.music", "wait:2000")))),
+        band = BandControls.standard().with(Builtin.DRAW, BandControl(Gesture.SWIPE_RIGHT)),
+        sharedDrawings = mapOf("Bulb" to "torch.toggle"),
+        drawings = DrawingLibrary(listOf(Drawing("Bulb", listOf(listOf(listOf(0.0 to 0.0, 9.0 to 9.0)))))),
     )
 
     @Test fun `settings round-trip, tap spots and apps included`() =
@@ -74,6 +77,16 @@ class LessonsBackupTest {
     @Test fun `a broken, empty or newer backup is refused`() {
         assertNull(Backup.read("not json"))
         assertNull(Backup.read("""{"version":1,"profiles":[],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""))
-        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*1"), "\"version\": 2")))
+        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*2"), "\"version\": 3")))
+    }
+
+    @Test fun `a version 1 backup restores with today's band controls and no built-in actions`() {
+        val v1 = """{"version":1,"profiles":[{"id":"p1","name":"A","map":{"middle_hold":"controls.toggle","swipe_up":"media.next"},"dial":"volume"}],
+            "picked":"p1","apps":{},"calls":{"index_double":"profile.next"},"hand":"band"}"""
+        val restored = Backup.read(v1)!!
+        assertEquals(BandControls.standard(), restored.band)
+        assertEquals(mapOf("swipe_up" to "media.next"), restored.profiles.profile("p1")!!.map)
+        assertFalse("index_double" in restored.calls)
+        assertNull(restored.drawings)
     }
 }

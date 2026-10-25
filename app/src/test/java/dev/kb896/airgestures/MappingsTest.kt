@@ -9,35 +9,72 @@ import org.junit.Test
 class MappingsTest {
     private val list = ProfileList(
         listOf(
-            Profile("p1", "Music", mapOf("swipe_up" to "media.previous", "index_double" to "", "middle_tap" to "automation"), "volume"),
-            Profile("p2", "Reading", mapOf("swipe_up" to "nav.next", "middle_hold" to "media.next"), "none"),
+            Profile("p1", "Music", mapOf("swipe_up" to "media.previous", "index_double" to "", "middle_tap" to "automation"), "volume",
+                palm = mapOf("index_tap" to mapOf("up" to "automation", "sideways" to "")),
+                middleDrags = Drags(sliders = true, targets = listOf("automation", "none", "brightness")),
+                drawings = mapOf("Bulb" to "automation")),
+            Profile("p2", "Reading", mapOf("swipe_up" to "nav.next"), "none", middleDial = "seek"),
             Profile("p3", "Lights", emptyMap(), "automation"),
         ),
         picked = "p2",
         apps = mapOf("org.videolan.vlc" to "p1", "gone.app" to "p9"),
     )
     private val calls = mapOf("index_double" to "call.answer", "middle_double" to "-", "swipe_up" to "", "middle_tap" to "automation")
-    private val dials = { key: String -> DialChoice.of(key).let { if (it.up.isEmpty() && it.down.isEmpty()) null else it.up to it.down } }
+    private val band = BandControls.standard().with(Builtin.NEXT, BandControl(Gesture.INDEX_TRIPLE, setOf(Palm.UP)))
+    private val input = Mappings.Input(list, band, calls, mapOf("Bulb" to "torch.toggle"),
+        mapOf("left" to Calibration(palm = -140.0 to -12.0), "right" to Calibration()), "left")
 
-    private fun json() = org.json.JSONObject(Mappings.profilesJson(list, calls, dials, "left"))
-    private fun map(profile: Int) = json().getJSONArray("profiles").getJSONObject(profile).getJSONObject("map")
+    private fun json() = org.json.JSONObject(Mappings.profilesJson(input))
+    private fun profile(i: Int) = json().getJSONArray("profiles").getJSONObject(i)
+    private fun map(i: Int) = profile(i).getJSONObject("map")
 
     @Test fun `every profile gets every gesture, defaults for keys it never stored`() {
         val first = map(0)
         assertEquals(Gesture.entries.map { it.key }.toSet(), first.keys().asSequence().toSet())
         assertEquals("media.previous", first.getString("swipe_up"))
-        assertEquals("", first.getString("index_double"))
         assertEquals("media.next", first.getString("swipe_down"))
         assertEquals("", first.getString("middle_hold"))
         assertEquals("", first.getString("index_triple"))
-        assertEquals("", first.getString("middle_triple"))
-        assertEquals("media.next", map(1).getString("middle_hold"))
-        assertEquals("Reading", json().getJSONArray("profiles").getJSONObject(1).getString("name"))
+        assertEquals("", first.getString("index_drag_left"))
     }
 
-    @Test fun `automation is named after its gesture, in the map and in the calls`() {
+    @Test fun `the band controls and the calibrations go along`() {
+        val json = json()
+        val next = json.getJSONObject("band").getJSONObject("next")
+        assertEquals("index_triple", next.getString("gesture"))
+        assertEquals("up", next.getJSONArray("palm").getString(0))
+        assertEquals(-140.0, json.getJSONObject("calibration").getJSONObject("left").getJSONObject("palm").getDouble("down"), 0.0)
+        assertTrue(json.getJSONObject("calibration").getJSONObject("right").isNull("palm"))
+        assertEquals("torch.toggle", json.getJSONObject("drawings").getString("Bulb"))
+    }
+
+    @Test fun `automation is named after what made it`() {
         assertEquals("automation:middle_tap", map(0).getString("middle_tap"))
         assertEquals("automation:middle_tap", json().getJSONObject("calls").getString("middle_tap"))
+        assertEquals("automation:index_tap:up", profile(0).getJSONObject("palm").getJSONObject("index_tap").getString("up"))
+        assertEquals("", profile(0).getJSONObject("palm").getJSONObject("index_tap").getString("sideways"))
+        assertEquals("automation:drawing:Bulb", profile(0).getJSONObject("drawings").getString("Bulb"))
+        val sliders = profile(0).getJSONObject("middle").getJSONObject("drags").getJSONArray("sliders")
+        assertEquals("automation:dial:middle_left_right:up", sliders.getJSONObject(0).getString("up"))
+        assertTrue(sliders.isNull(1))
+        assertEquals("brightness.down", sliders.getJSONObject(2).getString("down"))
+        assertEquals("automation:dial:dial:down", profile(2).getJSONObject("index").getJSONObject("dial").getString("down"))
+    }
+
+    @Test fun `dials are their two actions, nothing is null, drags in gestures mode say so`() {
+        assertEquals("volume.up", profile(0).getJSONObject("index").getJSONObject("dial").getString("up"))
+        assertTrue(profile(1).getJSONObject("index").isNull("dial"))
+        assertEquals("dial.seek_forward", profile(1).getJSONObject("middle").getJSONObject("dial").getString("up"))
+        assertTrue(profile(0).getJSONObject("middle").isNull("dial"))
+        assertEquals("gestures", profile(0).getJSONObject("index").getString("drags"))
+    }
+
+    @Test fun `automation names read back`() {
+        assertEquals(Mappings.Automation.Gesture("index_tap", null), Mappings.automation("index_tap"))
+        assertEquals(Mappings.Automation.Gesture("index_tap", "up"), Mappings.automation("index_tap:up"))
+        assertEquals(Mappings.Automation.Step("dial", +1), Mappings.automation("dial:dial:up"))
+        assertEquals(Mappings.Automation.Step("middle_left_right", -1), Mappings.automation("dial:middle_left_right:down"))
+        assertEquals(Mappings.Automation.Drawing("Light: on"), Mappings.automation("drawing:Light: on"))
     }
 
     @Test fun `the calls leave out as usual, nothing is a dash`() {
@@ -54,14 +91,6 @@ class MappingsTest {
         // An app whose profile is gone has none of its own, as in ProfileList.active.
         assertFalse(json.getJSONObject("apps").has("gone.app"))
         assertEquals("left", json.getString("hand"))
-    }
-
-    @Test fun `the dial is its two actions, a dial set to nothing is null`() {
-        val profiles = json().getJSONArray("profiles")
-        assertEquals("volume.up", profiles.getJSONObject(0).getJSONObject("dial").getString("up"))
-        assertEquals("volume.down", profiles.getJSONObject(0).getJSONObject("dial").getString("down"))
-        assertTrue(profiles.getJSONObject(1).isNull("dial"))
-        assertEquals("automation:dial_up", profiles.getJSONObject(2).getJSONObject("dial").getString("up"))
     }
 
     @Test fun `a tap spot round-trips with four decimals`() {

@@ -196,6 +196,9 @@ class SetupActivity : Screen() {
             Profiles.speak(this),
             Profiles.vibrate(this),
             Profiles.sequences(this),
+            Profiles.band(this),
+            Profiles.sharedDrawings(this),
+            Drawings.load(this),
         )
     }
 
@@ -208,6 +211,9 @@ class SetupActivity : Screen() {
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
+        Profiles.updateBand(applicationContext) { settings.band }
+        Profiles.updateSharedDrawings(applicationContext) { settings.sharedDrawings }
+        settings.drawings?.let { restored -> Drawings.update(applicationContext) { restored } }
         BandService.instance?.remap()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()

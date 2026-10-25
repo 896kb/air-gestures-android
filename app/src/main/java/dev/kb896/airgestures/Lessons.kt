@@ -78,9 +78,13 @@ object Lessons {
     }
 }
 
-/** The settings backup file: everything but the owner key (that has its own export). */
+/**
+ * The settings backup file: everything but the owner key (that has its own export) and the
+ * calibrations (they belong to a band). Version 2 adds the band controls and the drawings;
+ * version 1 still restores, with today's band controls and without the built-in actions.
+ */
 object Backup {
-    const val VERSION = 1
+    const val VERSION = 2
 
     data class Settings(
         val profiles: ProfileList,
@@ -91,6 +95,11 @@ object Backup {
         val vibrate: Boolean,
         /** Null in a backup made before sequences: restoring it leaves the sequences as they are. */
         val sequences: Sequences.Library? = null,
+        val band: BandControls = BandControls.standard(),
+        /** Drawing name → its action in every profile without its own. */
+        val sharedDrawings: Map<String, String> = emptyMap(),
+        /** Null in a version 1 backup: restoring it leaves the drawings as they are. */
+        val drawings: DrawingLibrary? = null,
     )
 
     fun write(settings: Settings): String {
@@ -105,21 +114,31 @@ object Backup {
             put("speak", settings.speak)
             put("vibrate", settings.vibrate)
             settings.sequences?.let { put("sequences", JSONObject(it.toJson())) }
+            put("band", settings.band.toJson())
+            put("shared_drawings", JSONObject(settings.sharedDrawings))
+            settings.drawings?.let { put("drawings", JSONArray(it.toJson())) }
         }.toString(2)
     }
 
-    /** The settings in [text], or null for anything that isn't a whole backup of this version. */
+    /** The settings in [text], or null for anything that isn't a whole backup of version 1 or 2. */
     fun read(text: String): Settings? = runCatching {
         val json = JSONObject(text)
-        require(json.getInt("version") == VERSION) { "another version" }
-        val calls = json.getJSONObject("calls")
+        val version = json.getInt("version")
+        require(version == 1 || version == VERSION) { "another version" }
+        val stored = json.getJSONObject("calls")
+        val calls = stored.keys().asSequence().associateWith { stored.getString(it) }
+        val profiles = ProfileList.fromJson(json.getJSONArray("profiles").toString(), json.getJSONObject("apps").toString(), json.getString("picked"))
+        val shared = json.optJSONObject("shared_drawings")
         Settings(
-            ProfileList.fromJson(json.getJSONArray("profiles").toString(), json.getJSONObject("apps").toString(), json.getString("picked")),
-            calls.keys().asSequence().associateWith { calls.getString(it) },
+            if (version == 1) profiles.withoutBuiltins() else profiles,
+            if (version == 1) calls - ProfileList.builtinCalls(calls) else calls,
             json.getString("hand"),
             json.optBoolean("speak", false),
             json.optBoolean("vibrate", false),
             json.opt("sequences")?.let { Sequences.Library.fromJson(it.toString()) },
+            band = json.optJSONObject("band")?.let { BandControls.fromJson(it.toString()) } ?: BandControls.standard(),
+            sharedDrawings = shared?.keys()?.asSequence()?.associateWith { shared.getString(it) }.orEmpty(),
+            drawings = json.optJSONArray("drawings")?.let { DrawingLibrary.fromJson(it.toString()) },
         )
     }.getOrNull()
 }

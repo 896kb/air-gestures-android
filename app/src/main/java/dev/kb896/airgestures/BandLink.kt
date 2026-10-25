@@ -190,6 +190,8 @@ class BandLink(
         }
         val bonded = bondedBand
         if (bonded != null) {
+            // Calibrations are kept per band.
+            if (prefs.bandAddress != bonded.address) prefs.bandAddress = bonded.address
             listener.onPhase(Phase.SEARCHING, bonded.name)
             // Directly when the band is probably near (fast); else Android's background
             // reconnect, which waits as long as it takes but can be slow to notice the band.

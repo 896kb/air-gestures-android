@@ -1,10 +1,12 @@
 package dev.kb896.airgestures
 
 import android.content.Context
+import org.json.JSONObject
 
 /**
  * Where the [ProfileList] lives (the app's settings, as JSON) and which app is in front.
- * The first read moves the mapping from before profiles into Profile 1.
+ * The first read moves the mapping from before profiles into Profile 1. Also the band controls
+ * (once, above the profiles) and the shared drawing actions.
  */
 object Profiles {
     private const val PROFILES = "profiles"
@@ -14,6 +16,11 @@ object Profiles {
     private const val VIBRATE = "profile.vibrate"
     private const val SEQUENCES = "sequences"
     private const val BROKEN = "profiles.broken"
+    private const val BAND = "band.controls"
+    private const val SHARED_DRAWINGS = "drawings.shared"
+    private const val VERSION_KEY = "controls.version"
+    /** 2: band controls (from 0.7.7, and from the first controls dev build with built-in actions). */
+    private const val VERSION = 2
 
     @Volatile
     private var cached: ProfileList? = null
@@ -49,15 +56,34 @@ object Profiles {
             val picked = prefs.getString(PICKED, null) ?: "p1"
             val apps = prefs.getString(APPS, null) ?: "{}"
             // Unreadable app assignments cost only the assignments, not the profiles.
-            runCatching { return ProfileList.fromJson(profiles, apps, picked) }
-            runCatching { return ProfileList.fromJson(profiles, "{}", picked) }
+            runCatching { return migrated(context, ProfileList.fromJson(profiles, apps, picked)) }
+            runCatching { return migrated(context, ProfileList.fromJson(profiles, "{}", picked)) }
             // The profiles themselves are unreadable: keep a copy before starting over.
             android.util.Log.w("AirGestures", "profiles unreadable; kept as $BROKEN, starting from the old mapping")
             prefs.edit().putString(BROKEN, profiles).apply()
         }
         // Before profiles (or unreadable): the stored mapping becomes Profile 1.
         val map = Gesture.entries.associate { it.key to (prefs.getString("map.${it.key}", null) ?: it.default.id) }
-        return ProfileList.migrated(map, DialChoice.of(prefs.getString("dial.choice", null)).key).also { write(context, it) }
+        return migrated(context, ProfileList.migrated(map, DialChoice.of(prefs.getString("dial.choice", null)).key).also { write(context, it) })
+    }
+
+    /**
+     * Once: built-in action ids (the first controls dev build stored them in profiles and During
+     * calls) go, their gestures back to their defaults; the band controls start on today's
+     * gestures (0.7.7 had them fixed there, so its profiles keep doing what they did).
+     */
+    private fun migrated(context: Context, list: ProfileList): ProfileList {
+        val prefs = prefs(context)
+        if (prefs.getInt(VERSION_KEY, 0) >= VERSION) return list
+        val clean = list.withoutBuiltins()
+        val calls = Gesture.entries.associate { it.key to (prefs.getString("call.${it.key}", null) ?: "") }
+        prefs.edit().apply {
+            for (key in ProfileList.builtinCalls(calls)) remove("call.$key")
+            if (!prefs.contains(BAND)) putString(BAND, BandControls.standard().toJson().toString())
+            putInt(VERSION_KEY, VERSION)
+        }.apply()
+        if (clean != list) write(context, clean)
+        return clean
     }
 
     private fun write(context: Context, list: ProfileList) {
@@ -72,6 +98,29 @@ object Profiles {
             write(context, it)
         }
     }
+
+    @Volatile
+    private var band: BandControls? = null
+
+    /** The band controls; today's gestures until changed (or when unreadable). */
+    fun band(context: Context): BandControls = band ?: synchronized(this) {
+        band ?: (prefs(context).getString(BAND, null)?.let { runCatching { BandControls.fromJson(it) }.getOrNull() }
+            ?: BandControls.standard()).also { band = it }
+    }
+
+    fun updateBand(context: Context, change: (BandControls) -> BandControls): BandControls = synchronized(this) {
+        change(band(context)).also {
+            band = it
+            prefs(context).edit().putString(BAND, it.toJson().toString()).apply()
+        }
+    }
+
+    /** Drawing name → its action in every profile without its own. */
+    fun sharedDrawings(context: Context): Map<String, String> =
+        prefs(context).getString(SHARED_DRAWINGS, null)?.let { runCatching { JSONObject(it).let { o -> o.keys().asSequence().associateWith(o::getString) } }.getOrNull() }.orEmpty()
+
+    fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) =
+        prefs(context).edit().putString(SHARED_DRAWINGS, JSONObject(change(sharedDrawings(context))).toString()).apply()
 
     /** The profile in force now (the app in front's own, else the picked one). */
     fun active(context: Context) = load(context).active(foreground)

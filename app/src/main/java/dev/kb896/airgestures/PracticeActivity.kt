@@ -36,7 +36,7 @@ class PracticeActivity : Screen() {
             Profiles.load(this).profiles.size,
             dial = DialChoice.of(active.dial) != DialChoice.NONE,
             map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
-            band = BandControls.standard(),
+            band = Profiles.band(this),
         )
         count = Cb.label(this, "")
         title = Cb.text(this, 24f, R.font.geist_semibold, Cb.INK_900, -.02f)
@@ -131,7 +131,7 @@ class PracticeActivity : Screen() {
             is Lessons.Done.Gesture, Lessons.Done.Hold -> {
                 val gesture = step.gesture ?: return ""
                 // The band controls come first (lessons are palm down).
-                when (val builtin = BandControls.standard().on(gesture, Palm.DOWN)) {
+                when (val builtin = Profiles.band(this).on(gesture, Palm.DOWN)) {
                     Builtin.CONTROLS -> "turn the controls off (band control)"
                     Builtin.DRAW -> "open the drawing pad (band control)"
                     // The band's own switch: where it would go (an app's own profile stays).
