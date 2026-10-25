@@ -184,6 +184,7 @@ class PalmCalibrationActivity : Screen() {
             if (saved) addView(pill("Done", R.drawable.ic_check) { finish() }.first)
         })
         if (saved) content.addView(note("Saved for this band and your $hand wrist."))
+        content.addView(navRow(R.drawable.ic_move_up_right, "Teach your drags") { open<TeachDragsActivity>() })
     }
 
     private fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {

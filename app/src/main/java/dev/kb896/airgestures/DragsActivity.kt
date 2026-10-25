@@ -32,6 +32,7 @@ class DragsActivity : GestureScreen() {
                 text = "Drags read the same with the palm down, up or sideways."
                 setLineSpacing(0f, 1.3f)
             })
+            addView(navRow(R.drawable.ic_move_up_right, "Mixed up? Teach your drags") { open<TeachDragsActivity>() })
         }, title = "${part.label} drags")
     }
 
