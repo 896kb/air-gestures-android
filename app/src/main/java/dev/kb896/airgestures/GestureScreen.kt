@@ -55,7 +55,7 @@ abstract class GestureScreen : Screen() {
             }
         }
 
-    /** The rows of [profile]'s gestures, its dial and the fixed middle hold. */
+    /** The rows of [profile]'s gestures and its dial. */
     fun profileRows(profile: String) = column(gap = 4f).apply {
         val prefs = Prefs(context)
         for (gesture in Gesture.entries) {
@@ -69,7 +69,6 @@ abstract class GestureScreen : Screen() {
         val dial = prefs.dial(profile)
         val dialGuide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
         addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, dialGuide) { pickDial(profile) })
-        addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, onClick = null))
     }
 
     /** The During calls rows: every gesture, As usual unless set. */
@@ -99,13 +98,13 @@ abstract class GestureScreen : Screen() {
 
     /**
      * The action picker: [calls] adds As usual, Nothing and the call actions; [inSequence] leaves
-     * out what a sequence can't hold (another sequence, automation, nothing). Actions that need
+     * out what a sequence can't hold (another sequence, automation, nothing, the band's built-ins). Actions that need
      * more (an app, a spot, a swipe, a sequence) ask for it before [onChosen] gets the id.
      */
     fun pickAction(title: String, current: String, calls: Boolean = false, inSequence: Boolean = false, onChosen: (String) -> Unit) {
         val actions = Action.entries.filter { action ->
             when {
-                inSequence -> action != Action.NONE && !action.callOnly && action != Action.SEQUENCE && action != Action.AUTOMATION
+                inSequence -> action != Action.NONE && !action.callOnly && !action.builtin && action != Action.SEQUENCE && action != Action.AUTOMATION
                 calls -> action != Action.NONE
                 else -> !action.callOnly
             }

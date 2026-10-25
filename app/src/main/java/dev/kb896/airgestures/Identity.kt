@@ -81,7 +81,7 @@ object Identity {
         val owner = key ?: return "no owner key among the picked files (air-gestures-band.json, or owner.key)"
         if (owner.size != 32 && owner.size != 97) return "that isn't a usable owner key (${owner.size} bytes)"
         try {
-            Bridge.close(Bridge.open(owner, 0, false, "", ""))
+            Bridge.close(Bridge.open(owner, 0, false, "{}"))
         } catch (e: Exception) {
             return "that isn't a usable owner key: ${e.message}"
         }

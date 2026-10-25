@@ -6,6 +6,12 @@ const val APP_PREFIX = "app:"
 /** What a gesture can do, as the bridge names it (see Actions.kt). */
 enum class Action(val id: String, val label: String, val icon: Int) {
     NONE("", "Nothing", R.drawable.ic_minus),
+
+    /** Built into the band layer (band-core): any gesture can have them. */
+    CONTROLS("controls.toggle", "Controls on/off", R.drawable.ic_power),
+    NEXT_PROFILE("profile.next", "Next profile", R.drawable.ic_layers),
+    PREVIOUS_PROFILE("profile.previous", "Previous profile", R.drawable.ic_layers),
+
     PLAY_PAUSE("media.play_pause", "Play or pause", R.drawable.ic_play),
     NEXT("media.next", "Next track", R.drawable.ic_skip_forward),
     PREVIOUS("media.previous", "Previous track", R.drawable.ic_skip_back),
@@ -51,6 +57,9 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     /** Whether it belongs to the During calls picker only. */
     val callOnly get() = this == ANSWER || this == END_CALL
 
+    /** Done by the band's layer itself (band-core), so only a gesture can run it. */
+    val builtin get() = this == CONTROLS || this == NEXT_PROFILE || this == PREVIOUS_PROFILE
+
     companion object {
         fun of(id: String) = when {
             id.startsWith(APP_PREFIX) -> OPEN_APP
@@ -63,8 +72,8 @@ enum class Action(val id: String, val label: String, val icon: Int) {
 }
 
 /**
- * The mappable gestures (the middle hold stays the controls toggle), with the
- * defaults mirroring the desktop layout, and what each does during a call by default.
+ * The mappable gestures, with the defaults mirroring the desktop layout, and what each
+ * does during a call by default.
  */
 enum class Gesture(val key: String, val label: String, val default: Action, val callDefault: String = Mappings.AS_USUAL) {
     SWIPE_UP("swipe_up", "Swipe up", Action.PREVIOUS),
@@ -75,6 +84,9 @@ enum class Gesture(val key: String, val label: String, val default: Action, val 
     INDEX_DOUBLE("index_double", "Index double tap", Action.NONE, Action.ANSWER.id),
     MIDDLE_TAP("middle_tap", "Middle tap", Action.NONE),
     MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE, Action.END_CALL.id),
+    INDEX_TRIPLE("index_triple", "Index triple tap", Action.NEXT_PROFILE),
+    MIDDLE_TRIPLE("middle_triple", "Middle triple tap", Action.PREVIOUS_PROFILE),
+    MIDDLE_HOLD("middle_hold", "Middle hold", Action.CONTROLS),
 }
 
 /** What pinch and turn does: one action per step each way. */

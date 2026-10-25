@@ -84,9 +84,28 @@ class BandLink(
         publishStatus()
     }
 
-    fun setMapping(mapping: String) = synchronized(lock) {
-        if (handle != 0L) Bridge.setMapping(handle, mapping)
+    /** New profiles, hand or call layer (Prefs.profilesJson); the next connection reads them anyway. */
+    fun setProfiles(json: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setProfiles(handle, json)
     }
+
+    /** The app in front ("": none known). */
+    fun setForeground(app: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setForeground(handle, app)
+    }
+
+    fun setInCall(inCall: Boolean) = synchronized(lock) {
+        if (handle != 0L) Bridge.setInCall(handle, inCall)
+    }
+
+    /** A lesson or a text field is listening: gestures are reported, nothing runs. Kept for the next connection. */
+    fun setPractice(on: Boolean) = synchronized(lock) {
+        practice = on
+        if (handle != 0L) Bridge.setPractice(handle, on)
+    }
+
+    /** What [setPractice] last said. */
+    private var practice = false
 
     /**
      * The band is probably near (the system saw it, the phone was unlocked): while waiting for
@@ -291,7 +310,10 @@ class BandLink(
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
             synchronized(lock) {
-                handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping())
+                handle = Bridge.open(key.readBytes(), guess, prefs.paused, prefs.profilesJson())
+                Bridge.setForeground(handle, Profiles.foreground ?: "")
+                Bridge.setInCall(handle, CallWatch.inCall)
+                Bridge.setPractice(handle, practice)
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")

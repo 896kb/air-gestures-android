@@ -43,15 +43,6 @@ class Prefs(context: Context) {
 
     fun setDial(profile: String, dial: DialChoice) = Profiles.update(context) { it.withDial(profile, dial.key) }
 
-    /** A practice lesson is open (its controls state is [practiceWasPaused]). */
-    var practising: Boolean
-        get() = prefs.getBoolean("practice.on", false)
-        set(value) = prefs.edit().putBoolean("practice.on", value).apply()
-
-    var practiceWasPaused: Boolean
-        get() = prefs.getBoolean("practice.was_paused", false)
-        set(value) = prefs.edit().putBoolean("practice.was_paused", value).apply()
-
     /** The service should keep the band connected. */
     var running: Boolean
         get() = prefs.getBoolean("running", false)
@@ -76,23 +67,13 @@ class Prefs(context: Context) {
     fun setCallAction(gesture: Gesture, id: String) =
         prefs.edit().putString("call.${gesture.key}", id).apply()
 
-    /**
-     * `gesture=action;…` plus `dial_up`/`dial_down` for the bridge: the profile in force, with
-     * the call layer while in a call, and `triples=profiles` once there are profiles to move between.
-     */
-    fun mapping(inCall: Boolean = CallWatch.inCall): String {
-        val list = Profiles.load(context)
-        val active = list.active(Profiles.foreground)
-        val dial = DialChoice.of(active.dial)
-        return Mappings.effective(
-            Gesture.entries.associateTo(LinkedHashMap()) { it.key to (active.map[it.key] ?: it.default.id) },
-            Gesture.entries.associate { it.key to callActionId(it) },
-            dial.up,
-            dial.down,
-            hand,
-            inCall,
-        ) + if (list.profiles.size >= 2) ";triples=profiles" else ""
-    }
+    /** Everything the bridge needs to know about gestures, as JSON (see [Mappings.profilesJson]). */
+    fun profilesJson(): String = Mappings.profilesJson(
+        Profiles.load(context),
+        Gesture.entries.associate { it.key to callActionId(it) },
+        { key -> DialChoice.of(key).let { if (it.up.isEmpty() && it.down.isEmpty()) null else it.up to it.down } },
+        hand,
+    )
 
     /**
      * Every action id a gesture can run, in any profile and during calls, with the steps of the

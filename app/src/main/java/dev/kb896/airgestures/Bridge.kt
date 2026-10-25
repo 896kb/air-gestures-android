@@ -1,29 +1,40 @@
 package dev.kb896.airgestures
 
-/** The Rust band-core session and gesture controller (rust/bridge). Not thread-safe: callers serialise. */
+/** The Rust band-core session and shared controls (rust/bridge). Not thread-safe: callers serialise. */
 object Bridge {
     init {
         System.loadLibrary("airgestures_bridge")
     }
 
-    /** A connection for the desktop's owner.key and band.json scheme guess, with the app's settings. */
-    @JvmStatic external fun open(ownerKey: ByteArray, schemeGuess: Int, paused: Boolean, dial: String, mapping: String): Long
+    /** A connection for the desktop's owner.key and band.json scheme guess, with the lock and the profiles JSON (Prefs.profilesJson). */
+    @JvmStatic external fun open(ownerKey: ByteArray, schemeGuess: Int, paused: Boolean, profiles: String): Long
     /** The first bytes to write once the L2CAP channel is open. */
     @JvmStatic external fun request(handle: Long): ByteArray
     /** Bytes read from the band; returns bytes to write. */
     @JvmStatic external fun feed(handle: Long, bytes: ByteArray, now: Double): ByteArray
     /** Call every ~50 ms; returns bytes to write. */
     @JvmStatic external fun tick(handle: Long, now: Double): ByteArray
-    /** Action names to run since the last call, '\n'-joined ("media.next", "dial.changed.brightness", …). */
+    /**
+     * Action names to run since the last call, '\n'-joined ("media.next", …), and the controls'
+     * events, starting with `@`: `@gesture <label>`, `@controls on|off`, `@profile <index> <step>`,
+     * `@held <app>`, `@practiced <action>`.
+     */
     @JvmStatic external fun actions(handle: Long): String
     /** Log lines since the last call, '\n'-joined. */
     @JvmStatic external fun log(handle: Long): String
-    /** Status snapshot JSON: connected, paused, battery, charging, hand, dial, last_gesture, last_action, gestures. */
+    /** Status snapshot JSON: connected, paused, battery, charging, hand, last_gesture, last_action, gestures, the update's. */
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
-    @JvmStatic external fun setDial(handle: Long, dial: String)
-    /** `gesture=action;…` (see Prefs.mapping). */
-    @JvmStatic external fun setMapping(handle: Long, mapping: String)
+    /** New profiles, hand and call layer (Prefs.profilesJson); throws on bad JSON. A switch it causes isn't reported. */
+    @JvmStatic external fun setProfiles(handle: Long, json: String)
+    /** The app in front ("": none known); a switch it causes isn't reported. */
+    @JvmStatic external fun setForeground(handle: Long, app: String)
+    /** A call is ringing or running: the During calls layer goes on top. */
+    @JvmStatic external fun setInCall(handle: Long, inCall: Boolean)
+    /** Practice: gestures and what they'd run come as `@gesture` / `@practiced`; nothing runs. */
+    @JvmStatic external fun setPractice(handle: Long, practice: Boolean)
+    /** What's worth a warning in a profiles JSON, '\n'-joined: `no-controls <index>`, `no-way-out <index>`. */
+    @JvmStatic external fun profileWarnings(json: String): String
     /** Before [request]: also ask for these stream flags (`1,4,7`) and log what comes back (see Prefs.probe). */
     @JvmStatic external fun setProbe(handle: Long, fields: String)
     /** Debug: a ConfigReq as hex to write to the band; returns bytes to write. The answer goes to the log. */

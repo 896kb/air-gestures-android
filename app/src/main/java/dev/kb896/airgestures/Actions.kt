@@ -92,8 +92,8 @@ class Actions(
             "nav.select" -> return navigate { it.select() }
             "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }
             "nav.scroll_back" -> return navigate { it.scroll(forward = false) }
-            "profile.next" -> return BandService.instance?.profileStep(+1)
-            "profile.previous" -> return BandService.instance?.profileStep(-1)
+            // The band's layer does these itself; only a gesture can.
+            Action.CONTROLS.id, Action.NEXT_PROFILE.id, Action.PREVIOUS_PROFILE.id -> return "$action works on a gesture only"
             else -> return when {
                 action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
                 action.startsWith(Tap.PREFIX) -> tap(action)

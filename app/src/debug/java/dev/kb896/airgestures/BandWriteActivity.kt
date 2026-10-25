@@ -27,7 +27,6 @@ class BandWriteActivity : Screen() {
     private val quiet = object : BandService.Practice {
         override fun gesture(label: String) = Unit
         override fun action(id: String) = Unit
-        override fun held() = Unit
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

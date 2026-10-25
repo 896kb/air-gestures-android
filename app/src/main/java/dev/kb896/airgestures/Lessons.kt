@@ -13,17 +13,13 @@ object Lessons {
         /** Pinch and turn: any of the dial's actions. */
         data object Dial : Done()
 
-        /** The middle hold: the controls flipping. */
+        /** The middle hold (the bridge's label `middle hold`). */
         data object Hold : Done()
 
-        /** A triple tap: the profile action the bridge sends. */
-        data class Action(val action: String) : Done()
-
-        fun matches(gesture: String? = null, action: String? = null, held: Boolean = false, dial: Set<String> = emptySet()) = when (this) {
+        fun matches(gesture: String? = null, action: String? = null, dial: Set<String> = emptySet()) = when (this) {
             is Gesture -> gesture == label
             Dial -> action != null && action in dial
-            Hold -> held
-            is Action -> action == this.action
+            Hold -> gesture == "middle hold"
         }
     }
 
@@ -32,8 +28,17 @@ object Lessons {
 
     private fun tap(gesture: Gesture, title: String, how: String) = Step(title, how, Done.Gesture(gesture.label.lowercase()), gesture)
 
-    /** The lessons for [profiles] profiles; pinch and turn only when the profile's [dial] does something. */
-    fun steps(profiles: Int, dial: Boolean): List<Step> = buildList {
+    /**
+     * The lessons for [profiles] profiles whose active one has [map] (gesture key → action id,
+     * every key resolved); pinch and turn only when its [dial] does something. A triple tap only
+     * when it does something there (a profile switch needs 2+ profiles): the band otherwise
+     * doesn't wait for it, and three taps are three taps.
+     */
+    fun steps(profiles: Int, dial: Boolean, map: Map<String, String>): List<Step> = buildList {
+        fun triples(gesture: Gesture): Boolean {
+            val id = map[gesture.key] ?: gesture.default.id
+            return id.isNotEmpty() && (profiles >= 2 || (id != Action.NEXT_PROFILE.id && id != Action.PREVIOUS_PROFILE.id))
+        }
         add(tap(Gesture.SWIPE_UP, "Swipe up", "Slide your thumb up along the side of your index finger."))
         add(tap(Gesture.SWIPE_DOWN, "Swipe down", "Slide your thumb down along the side of your index finger."))
         add(tap(Gesture.SWIPE_LEFT, "Swipe left", "Slide your thumb across your index finger, to the left."))
@@ -43,10 +48,19 @@ object Lessons {
         add(tap(Gesture.MIDDLE_TAP, "Tap your middle finger", "Touch your thumb to your middle finger, once."))
         add(tap(Gesture.MIDDLE_DOUBLE, "Double-tap your middle finger", "Two quick taps of your thumb on your middle finger."))
         if (dial) add(Step("Pinch and turn", "Pinch thumb and index finger together, hold, and turn your wrist.", Done.Dial))
-        add(Step("Hold your middle finger", "Keep your thumb on your middle finger for a second. It turns the controls off and on.", Done.Hold))
-        if (profiles >= 2) {
-            add(Step("Triple-tap your index finger", "Three quick taps of your thumb on your index finger: the next profile.", Done.Action("profile.next")))
-            add(Step("Triple-tap your middle finger", "Three quick taps of your thumb on your middle finger: the previous profile.", Done.Action("profile.previous")))
+        add(
+            Step(
+                "Hold your middle finger",
+                "Keep your thumb on your middle finger for a second. It runs what the middle hold is set to (by default the controls on/off).",
+                Done.Hold,
+                Gesture.MIDDLE_HOLD,
+            ),
+        )
+        if (triples(Gesture.INDEX_TRIPLE)) {
+            add(tap(Gesture.INDEX_TRIPLE, "Triple-tap your index finger", "Three quick taps of your thumb on your index finger."))
+        }
+        if (triples(Gesture.MIDDLE_TRIPLE)) {
+            add(tap(Gesture.MIDDLE_TRIPLE, "Triple-tap your middle finger", "Three quick taps of your thumb on your middle finger."))
         }
     }
 }

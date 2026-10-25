@@ -193,7 +193,6 @@ class WriteService : AccessibilityService() {
     private val gestures = object : BandService.Practice {
         override fun gesture(label: String) = main.post { onGesture(label) }.let {}
         override fun action(id: String) = Unit
-        override fun held() = Unit
     }
 
     /** Choosing among a word's suggestions (a swipe up), and where a selection is anchored. */

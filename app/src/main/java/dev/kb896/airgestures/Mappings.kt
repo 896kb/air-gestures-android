@@ -1,5 +1,7 @@
 package dev.kb896.airgestures
 
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
 /** The plain logic behind the mapping and the new actions, kept free of Android so it's unit-tested. */
@@ -11,28 +13,47 @@ object Mappings {
     const val AUTOMATION = "automation"
 
     /**
-     * The `gesture=action;…;dial_up=…;dial_down=…;hand=…` string the bridge gets: [normal]
-     * (gesture key → action id, in order), with [calls] on top while [inCall]. A stored
-     * [AUTOMATION] becomes `automation:<gesture>`, since the bridge reports only action names.
+     * What the bridge gets (see rust/bridge/src/profiles.rs): every profile with every gesture
+     * key resolved (defaults for keys a profile never stored), the dial's two actions ([dials]:
+     * a dial key → up and down, null for nothing), the picked profile and the apps' own (as
+     * indexes), and the call layer ([calls]: gesture key → action id, [AS_USUAL] or [NOTHING]).
+     * A stored [AUTOMATION] becomes `automation:<gesture>`, since the bridge reports only action names.
      */
-    fun effective(
-        normal: Map<String, String>,
+    fun profilesJson(
+        list: ProfileList,
         calls: Map<String, String>,
-        dialUp: String,
-        dialDown: String,
+        dials: (String) -> Pair<String, String>?,
         hand: String,
-        inCall: Boolean,
     ): String {
-        val gestures = normal.entries.joinToString(";") { (key, action) ->
-            val during = if (inCall) calls[key] else null
-            val id = when (during) {
-                null, AS_USUAL -> action
-                NOTHING -> ""
-                else -> during
+        val profiles = JSONArray()
+        for (profile in list.profiles) {
+            val map = JSONObject()
+            for (gesture in Gesture.entries) {
+                val id = profile.map[gesture.key] ?: gesture.default.id
+                map.put(gesture.key, if (id == AUTOMATION) "$AUTOMATION:${gesture.key}" else id)
             }
-            "$key=${if (id == AUTOMATION) "$AUTOMATION:$key" else id}"
+            profiles.put(JSONObject().apply {
+                put("name", profile.name)
+                put("map", map)
+                put("dial", dials(profile.dial)?.let { (up, down) -> JSONObject().put("up", up).put("down", down) } ?: JSONObject.NULL)
+            })
         }
-        return "$gestures;dial_up=$dialUp;dial_down=$dialDown;hand=$hand"
+        val index = { id: String -> list.profiles.indexOfFirst { it.id == id } }
+        return JSONObject().apply {
+            put("hand", hand)
+            // An unknown pick is the first profile, as in ProfileList.active.
+            put("picked", index(list.picked).coerceAtLeast(0))
+            // An app whose profile is gone has none of its own.
+            put("apps", JSONObject(list.apps.mapValues { index(it.value) }.filterValues { it >= 0 }))
+            put("calls", JSONObject(calls.filterValues { it != AS_USUAL }.mapValues { (key, id) ->
+                when (id) {
+                    NOTHING -> "-"
+                    AUTOMATION -> "$AUTOMATION:$key"
+                    else -> id
+                }
+            }))
+            put("profiles", profiles)
+        }.toString()
     }
 }
 

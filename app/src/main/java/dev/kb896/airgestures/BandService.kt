@@ -34,7 +34,7 @@ class BandService : Service(), BandLink.Listener {
         registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
-        calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
+        calls = CallWatch(this) { remap() }.also { it.start() }
         // The app's Companion (the CDM link), not this class's companion object.
         dev.kb896.airgestures.Companion.observe(this)
         val notifications = getSystemService(NotificationManager::class.java)
@@ -49,11 +49,6 @@ class BandService : Service(), BandLink.Listener {
         instance = this
         main.post(updateCheck)
         Alerts.scheduleReminder(this)
-        // A lesson the app never closed (it was killed): the controls go back as they were.
-        if (prefs.practising) {
-            prefs.practising = false
-            prefs.paused = prefs.practiceWasPaused
-        }
     }
 
     /** Look for a newer release now and then while the band is kept connected. */
@@ -95,16 +90,12 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** From the app (button, tile, widget, notification); the band's own switch comes as `@controls`. */
     fun setPaused(paused: Boolean) {
-        // Asked for (button, tile, widget, notification, a lesson): not a middle hold.
-        commandedAt = android.os.SystemClock.uptimeMillis()
         prefs.paused = paused
         link.setPaused(paused)
         pausedChanged(paused)
     }
-
-    /** When the controls were last switched by the app rather than by the band. */
-    private var commandedAt = 0L
 
     /** Record the controls' state; the status notification shows it. */
     private fun pausedChanged(paused: Boolean) {
@@ -131,9 +122,11 @@ class BandService : Service(), BandLink.Listener {
         }
     }
 
-    /** Send the mapping in force to the band again (a profile, call or setting changed). */
+    /** Send the profiles, the call state and the app in front to the band again (any of them changed). */
     fun remap() {
-        link.setMapping(prefs.mapping())
+        link.setProfiles(prefs.profilesJson())
+        link.setInCall(CallWatch.inCall)
+        link.setForeground(Profiles.foreground ?: "")
         showProfile()
     }
 
@@ -147,23 +140,33 @@ class BandService : Service(), BandLink.Listener {
         }
     }
 
-    /** A triple tap: the next (+1) or previous (−1) profile, unless the app in front has its own. */
-    fun profileStep(by: Int): String? {
-        if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        switched(Profiles.update(this) { it.step(by) }.active(Profiles.foreground), back = by < 0)
-        return null
-    }
-
-    /** The widget's picker chose a profile: like a triple tap, but straight to [id]. */
+    /** The widget's picker chose a profile: the band gets it, and the user is told. */
     fun pick(id: String): String? {
         if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        switched(Profiles.update(this) { it.picking(id) }.active(Profiles.foreground))
+        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
+        remap()
+        announce(now)
         return null
     }
 
-    /** Another profile is in force: the band gets it, and the user is told which. */
-    private fun switched(profile: Profile, back: Boolean = false) {
+    /** The band moved to another profile (a gesture with Next or Previous profile): store the pick, then tell the user. */
+    private fun bandSwitched(index: Int, step: Int) {
+        val id = Profiles.load(this).profiles.getOrNull(index)?.id ?: return
+        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
+        // Again to the band: a remap sent meanwhile (e.g. a call starting) carried the old pick.
         remap()
+        announce(now, back = step < 0)
+    }
+
+    /** The band turned the controls on or off (a gesture with Controls on/off). */
+    private fun bandToggled(on: Boolean) {
+        prefs.paused = !on
+        pausedChanged(!on)
+    }
+
+    /** Another profile is in force: tell the user which. */
+    private fun announce(profile: Profile, back: Boolean = false) {
+        showProfile()
         Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
         if (Profiles.speak(this)) actions.announce(profile.name)
         if (Profiles.vibrate(this)) buzz(times = if (back) 2 else 1)
@@ -233,7 +236,7 @@ class BandService : Service(), BandLink.Listener {
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
         prefs.hand = hand
-        link.setMapping(prefs.mapping())
+        link.setProfiles(prefs.profilesJson())
     }
 
     // BandLink.Listener: called from Bluetooth and link threads.
@@ -249,17 +252,8 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
-        var paused = status.optBoolean("paused")
-        val lesson = practice
-        // A flip to off within a moment of the app switching the controls is that switch
-        // (or a late report of it), not the middle hold.
-        val ours = android.os.SystemClock.uptimeMillis() - commandedAt < 1_500
-        if (lesson != null && paused && !ours) {
-            // The middle hold in a lesson: it counts, but the controls stay on.
-            lesson.held()
-            link.setPaused(false)
-            paused = false
-        }
+        // Mirrored as the bridge has it (right after a reconnect too); `@controls` says it first.
+        val paused = status.optBoolean("paused")
         if (paused != prefs.paused) prefs.paused = paused
         if (paused != state.value.paused) pausedChanged(paused)
         val before = state.value
@@ -269,7 +263,6 @@ class BandService : Service(), BandLink.Listener {
                 battery = if (status.isNull("battery")) null else status.getInt("battery"),
                 charging = status.optBoolean("charging"),
                 hand = status.optString("hand").takeUnless { status.isNull("hand") },
-                dial = status.optString("dial", dial),
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
                 firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
@@ -289,7 +282,6 @@ class BandService : Service(), BandLink.Listener {
         val now = state.value
         if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
         if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
-        if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
         if (level != null && (level != before.battery || now.charging != before.charging)) {
             Alerts.battery(this, now.band, level, now.charging)
@@ -327,43 +319,53 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onActions(actions: List<String>) = main.post {
-        // In a lesson nothing runs; the lesson sees what would have.
-        practice?.let { lesson -> actions.forEach(lesson::action) } ?: actions.forEach { action ->
-            this.actions.run(action)?.let(::onLog)
+        for (line in actions) {
+            if (!line.startsWith("@")) {
+                // In a lesson nothing runs (the bridge sends `@practiced` instead).
+                if (practice == null) this.actions.run(line)?.let(::onLog)
+                continue
+            }
+            val kind = line.removePrefix("@").substringBefore(' ')
+            val rest = line.substringAfter(' ', "")
+            when (kind) {
+                "gesture" -> practice?.gesture(rest)
+                "practiced" -> practice?.action(rest)
+                "controls" -> bandToggled(rest == "on")
+                "profile" -> rest.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }
+                    ?.let { (index, step) -> bandSwitched(index, step) }
+                "held" -> {
+                    Toast.makeText(this, "This app has its own profile", Toast.LENGTH_SHORT).show()
+                    onLog("profile: this app has its own profile")
+                }
+            }
         }
     }.let {}
 
     /** Run one action as a gesture would (e.g. a sequence's Try it); a failure goes to the log. */
     fun runAction(action: String) = actions.run(action)?.let(::onLog)
 
-    /** What a practice lesson hears from the band while it's open. */
+    /** What a practice lesson hears from the band while it's open: each gesture's label, and what it would run. */
     interface Practice {
         fun gesture(label: String)
         fun action(id: String)
-        fun held()
     }
 
     /** Set while a lesson is open: gestures are reported to it and run nothing. */
     var practice: Practice? = null
         private set
+
     /**
-     * Start a lesson: the controls go on (the band reports more), and come back as they were
-     * after. How they were is kept in the prefs, so a service restarted mid-lesson keeps it.
+     * Start a lesson: the band's layer goes into practice (gestures are reported, nothing runs,
+     * the built-ins don't act), whether the controls are on or off.
      */
     fun startPractice(lesson: Practice) {
-        if (!prefs.practising) {
-            prefs.practiceWasPaused = state.value.paused
-            prefs.practising = true
-        }
         practice = lesson
-        if (state.value.paused) setPaused(false)
+        link.setPractice(true)
     }
 
     fun endPractice() {
         practice = null
-        if (!prefs.practising) return
-        prefs.practising = false
-        if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused)
+        link.setPractice(false)
     }
 
     /**
@@ -451,7 +453,6 @@ class BandService : Service(), BandLink.Listener {
         val battery: Int? = null,
         val charging: Boolean = false,
         val hand: String? = null,
-        val dial: String = "volume",
         val lastGesture: String? = null,
         val gestures: Long = 0,
         val log: List<String> = emptyList(),
@@ -582,10 +583,18 @@ class BandService : Service(), BandLink.Listener {
 
         private fun front(context: Context, change: () -> Unit) {
             val list = Profiles.load(context)
-            val before = list.active(Profiles.foreground)
+            val app = Profiles.foreground
+            val before = list.active(app)
             change()
             val after = list.active(Profiles.foreground)
-            if (after.id != before.id) instance?.switched(after)
+            val service = instance ?: return
+            if (after.id != before.id) {
+                service.remap()
+                service.announce(after)
+            } else if (Profiles.foreground != app) {
+                // The band's layer follows the app in front too (its own profile; whether next and previous may switch).
+                service.link.setForeground(Profiles.foreground ?: "")
+            }
         }
 
         fun setDial(context: Context, profile: String, dial: DialChoice) {
