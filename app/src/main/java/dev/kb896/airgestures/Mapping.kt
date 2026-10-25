@@ -7,7 +7,7 @@ const val APP_PREFIX = "app:"
 enum class Action(val id: String, val label: String, val icon: Int) {
     NONE("", "Nothing", R.drawable.ic_minus),
 
-    /** Built into the band layer (band-core): any gesture can have them. */
+    /** Built into the band layer (band-core): any gesture can have them. First in the picker, after Nothing. */
     CONTROLS("controls.toggle", "Controls on/off", R.drawable.ic_power),
     NEXT_PROFILE("profile.next", "Next profile", R.drawable.ic_layers),
     PREVIOUS_PROFILE("profile.previous", "Previous profile", R.drawable.ic_layers),
@@ -73,7 +73,8 @@ enum class Action(val id: String, val label: String, val icon: Int) {
 
 /**
  * The mappable gestures, with the defaults mirroring the desktop layout, and what each
- * does during a call by default.
+ * does during a call by default. In the order the screens list them: the swipes, each
+ * finger's taps (single, double, triple), then the hold.
  */
 enum class Gesture(val key: String, val label: String, val default: Action, val callDefault: String = Mappings.AS_USUAL) {
     SWIPE_UP("swipe_up", "Swipe up", Action.PREVIOUS),
@@ -82,9 +83,9 @@ enum class Gesture(val key: String, val label: String, val default: Action, val 
     SWIPE_RIGHT("swipe_right", "Swipe right", Action.NONE),
     INDEX_TAP("index_tap", "Index tap", Action.PLAY_PAUSE),
     INDEX_DOUBLE("index_double", "Index double tap", Action.NONE, Action.ANSWER.id),
+    INDEX_TRIPLE("index_triple", "Index triple tap", Action.NEXT_PROFILE),
     MIDDLE_TAP("middle_tap", "Middle tap", Action.NONE),
     MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE, Action.END_CALL.id),
-    INDEX_TRIPLE("index_triple", "Index triple tap", Action.NEXT_PROFILE),
     MIDDLE_TRIPLE("middle_triple", "Middle triple tap", Action.PREVIOUS_PROFILE),
     MIDDLE_HOLD("middle_hold", "Middle hold", Action.CONTROLS),
 }

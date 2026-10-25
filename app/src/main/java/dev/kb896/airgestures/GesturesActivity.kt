@@ -55,7 +55,7 @@ class GesturesActivity : GestureScreen() {
         })
         profiles.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {
             text = if (list.profiles.size > 1) {
-                "Index triple tap: next profile. Middle triple tap: previous. With more than one profile, index and middle taps wait a moment to tell a triple tap apart."
+                "By default an index triple tap goes to the next profile and a middle triple tap to the previous; any gesture can, with Next or Previous profile. A tap waits a moment when its triple tap does something, to tell them apart."
             } else {
                 "Add a profile for another set of gestures; switch between them with a triple tap, or give apps their own."
             }
