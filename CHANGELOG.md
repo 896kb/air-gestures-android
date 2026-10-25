@@ -14,6 +14,24 @@ fails without one.
   `battery` (−1 when unknown), `charging`, `connected` and `controls` (on or off), sent
   to it alone, whenever one of them changes. A remote app can then tell a flat band from
   a lost connection.
+- **Band controls:** Controls on/off, Next profile, Previous profile and the new Draw sit
+  above the profiles, one gesture each (by default the middle hold, the index and middle
+  triple taps; Draw on nothing), the same in every profile, in apps' own profiles and during
+  calls. Each can be limited to palm positions. A profile's action on a band-control gesture
+  is kept and shown as paused, and runs again once the band control moves; picking a used
+  gesture says what will pause.
+- **The pinch:** index and middle each have a hold, a dial (pinch and turn) and six drags
+  (left, right, toward, away, up, down) as gestures or sliders. With a dial or drags, a
+  finger's hold acts when you let go.
+- **Palm position:** every gesture can do something else with the palm up or sideways (up
+  to two positions); calibrate per band and wrist.
+- **Drawings:** pinch and draw in the air or on a table, matched against the drawings you
+  teach (three tries each); shared or per-profile actions; a pad shows what you draw.
+- **Teach your drags** for your own wrist.
+- **Automation:** overrides carry `palm`; the middle dial, sliders and drawings have their
+  own names.
+- The settings backup is version 2 (band controls and drawings); version 1 backups still
+  restore.
 
 ## 0.7.7
 
