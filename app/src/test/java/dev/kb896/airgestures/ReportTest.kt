@@ -45,4 +45,23 @@ class ReportTest {
         assertNull(choices[0].pauses[0].place)
         assertEquals(0, choices[1].count)
     }
+
+    @Test fun `only what a move would newly pause asks, and a slider paused twice counts once`() {
+        val now = Report("""{"paused":[{"control":"draw","gesture":"middle_double","place":0,"palm":null,"positions":["up"]}],
+            "paused_sliders":[{"control":"previous","gesture":"middle_drag_left","profile":1,"finger":"middle","pair":0,"positions":["down"]},
+                              {"control":"next","gesture":"middle_drag_right","profile":1,"finger":"middle","pair":0,"positions":["up"]}]}""")
+        assertEquals(1, now.count(1))
+        assertEquals(setOf(Palm.DOWN, Palm.UP), now.pausedSlider(1, Part.MIDDLE, 0)!!.positions)
+        val move = Report.choices("""[{"gesture":"middle_double","pauses":[
+            {"control":"draw","gesture":"middle_double","place":0,"palm":null,"positions":["up"]},
+            {"control":"draw","gesture":"middle_double","place":0,"palm":null,"positions":["down","up"]},
+            {"control":"draw","gesture":"middle_double","place":"calls","palm":null,"positions":["up"]}],"sliders":[
+            {"control":"draw","gesture":"middle_drag_left","profile":1,"finger":"middle","pair":0,"positions":["down"]}]}]""")[0]
+        // Already paused palm up there: not new; palm down there is; During calls is; the slider isn't.
+        assertEquals(listOf(false, true, true), move.pauses.map { now.isNew(it) })
+        assertFalse(now.isNew(move.sliders[0]))
+        assertEquals(2, now.newCount(move))
+        assertEquals("bad-json", Report.choicesError("""{"error":"bad-json"}"""))
+        assertNull(Report.choicesError("[]"))
+    }
 }

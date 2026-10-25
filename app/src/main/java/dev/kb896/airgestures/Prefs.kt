@@ -42,13 +42,6 @@ class Prefs(context: Context) {
     /** The wrist band-core reads gestures for: the band's, else the one it's set to (as the bridge's `Setup::hand_in_use`). */
     fun handInUse(): String? = BandService.state.value.hand ?: hand.takeIf { it != "band" }
 
-    /** What pinch and turn does in the profile in force. */
-    val dial: DialChoice
-        get() = DialChoice.of(Profiles.active(context).dial)
-
-    /** What pinch and turn does in [profile]. */
-    fun dial(profile: String): DialChoice = DialChoice.of(Profiles.load(context).profile(profile)?.dial)
-
     fun setDial(profile: String, dial: DialChoice) = Profiles.update(context) { it.withDial(profile, dial.key) }
 
     /** The service should keep the band connected. */
@@ -62,8 +55,6 @@ class Prefs(context: Context) {
         val chosen = if (profile == null) list.active(Profiles.foreground) else list.profile(profile)
         return chosen?.map?.get(gesture.key) ?: gesture.default.id
     }
-
-    fun action(gesture: Gesture, profile: String? = null): Action = Action.of(actionId(gesture, profile))
 
     fun setAction(profile: String, gesture: Gesture, id: String) =
         Profiles.update(context) { it.withAction(profile, gesture.key, id) }

@@ -75,7 +75,7 @@ class ProfileActivity : GestureScreen() {
         for (part in listOf(Part.INDEX, Part.MIDDLE)) {
             val drags = profile.drags(part)
             // What's paused behind it: sliders, or drag gestures' actions.
-            val paused = report.pausedSliders.count { it.profile == index && it.part == part } +
+            val paused = report.pausedSliders.filter { it.profile == index && it.part == part }.distinctBy { it.pair }.size +
                 report.paused.count { it.place == index && it.gesture.drag && it.gesture.part == part }
             dials.addView(gestureRow(R.drawable.ic_move_up_right, "${part.label} drags", if (drags.sliders) "Sliders" else "Gestures", false, count = paused) {
                 DragsActivity.open(this, profileId, part)

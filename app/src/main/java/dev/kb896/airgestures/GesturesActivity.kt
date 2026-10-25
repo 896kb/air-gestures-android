@@ -151,9 +151,13 @@ class GesturesActivity : GestureScreen() {
         })
     }
 
-    /** What band-core finds worth a warning in the whole set; only notes, nothing is blocked. */
+    /**
+     * What band-core finds worth a warning in the whole set, and what it can't use as set
+     * (invalid); only notes, nothing is blocked.
+     */
     private fun showWarnings(report: Report) {
-        val texts = report.warnings.mapNotNull { kind ->
+        val list = Profiles.load(this)
+        val notes = report.warnings.mapNotNull { kind ->
             when (kind) {
                 "no-controls" -> "No gesture turns the controls on and off. You can still do it from the app."
                 "no-way-out" -> "No gesture switches profiles. Use the app or the widget to switch."
@@ -161,6 +165,21 @@ class GesturesActivity : GestureScreen() {
                 else -> null
             }
         }
+        val invalid = report.invalid.mapNotNull { line ->
+            val words = line.split(' ')
+            when (words[0]) {
+                "binding" -> {
+                    val place = words.getOrNull(1)?.toIntOrNull()?.let { list.profiles.getOrNull(it)?.name } ?: "During calls"
+                    val gesture = Gesture.of(words.getOrNull(2))?.label ?: words.getOrNull(2)
+                    "$place: $gesture has more than two palm overrides, so its normal action never runs. Remove one."
+                }
+                "band" -> Builtin.of(words.getOrNull(1))?.let { "${it.label} is limited to no palm position or to all three: pick Any position or one or two." }
+                "draw-cant-cancel" -> "Draw on a hold, a triple tap or a drag can't cancel its drawing: it ends by itself, or with the pad's close button."
+                else -> null
+            }
+        }
+        val error = report.error?.let { "The band's rules couldn't read your settings ($it): what's paused or wrong isn't shown." }
+        val texts = listOfNotNull(error) + invalid + notes
         warnings.removeAllViews()
         for (warning in texts) {
             warnings.addView(row(gap = 12f).apply {

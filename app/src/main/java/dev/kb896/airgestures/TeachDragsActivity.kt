@@ -123,8 +123,4 @@ class TeachDragsActivity : Screen() {
         })
     }
 
-    private fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {
-        this.text = text
-        setLineSpacing(0f, 1.3f)
-    }
 }

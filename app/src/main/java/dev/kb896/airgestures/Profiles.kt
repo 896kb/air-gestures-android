@@ -119,8 +119,10 @@ object Profiles {
     fun sharedDrawings(context: Context): Map<String, String> =
         prefs(context).getString(SHARED_DRAWINGS, null)?.let { runCatching { JSONObject(it).let { o -> o.keys().asSequence().associateWith(o::getString) } }.getOrNull() }.orEmpty()
 
-    fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) =
+    /** Read, change and store under the store's lock, so two changes don't lose one. */
+    fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) = synchronized(this) {
         prefs(context).edit().putString(SHARED_DRAWINGS, JSONObject(change(sharedDrawings(context))).toString()).apply()
+    }
 
     /** The profile in force now (the app in front's own, else the picked one). */
     fun active(context: Context) = load(context).active(foreground)

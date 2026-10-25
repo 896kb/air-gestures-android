@@ -119,7 +119,8 @@ fn a_null_or_wrong_shape_field_is_its_default_not_an_error() {
     assert_eq!(profiles.calls.get(&Gesture::MiddleDouble), Some(&CallBinding::Nothing));
     assert!(!profiles.calls.contains_key(&Gesture::IndexDouble));
     assert!(profiles.drawings.is_empty(), "nothing, and \"\" is nothing too");
-    assert_eq!(profiles.list.len(), 2, "the profile that isn't one is skipped");
+    assert_eq!(profiles.list.len(), 3, "the profile that isn't one is an empty one in its place: indexes stay");
+    assert!(profiles.list[1].gestures.is_empty() && profiles.list[1].index.dial.is_none());
     let a = &profiles.list[0];
     assert_eq!(a.gestures.get(&Gesture::SwipeUp), None);
     assert_eq!(a.gestures[&Gesture::IndexTap].normal.as_deref(), Some("media.next"));
@@ -127,5 +128,9 @@ fn a_null_or_wrong_shape_field_is_its_default_not_an_error() {
     assert!(a.index.dial.is_none() && a.middle.dial.is_none(), "a dial without its down is none");
     assert_eq!(a.middle.drags, DragMode::Gestures);
     // Sliders: the one without its down is none, a missing third is none.
-    assert_eq!(profiles.list[1].index.drags, DragMode::Sliders([None, Some(dial("volume.up", "volume.down")), None]));
+    assert_eq!(profiles.list[2].index.drags, DragMode::Sliders([None, Some(dial("volume.up", "volume.down")), None]));
+    // No name: the profile still counts, with no name.
+    let (_, named) = parse(r#"{"profiles":[{"map":{"swipe_up":"x"}},{"name":null}]}"#).unwrap();
+    assert_eq!(named.list.len(), 2);
+    assert_eq!(named.list[0].gestures[&Gesture::SwipeUp].normal.as_deref(), Some("x"));
 }

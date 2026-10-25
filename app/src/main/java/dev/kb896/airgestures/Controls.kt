@@ -14,6 +14,9 @@ enum class Palm(val key: String, val label: String) {
     }
 }
 
+/** "palm up", "palm down or sideways": these positions in words, in [Palm] order. */
+fun Set<Palm>.words(separator: String = " or ") = Palm.entries.filter { it in this }.joinToString(separator) { it.label.lowercase() }
+
 /** The band controls (band-core's `Builtin`): above every profile, each on one gesture or none. */
 enum class Builtin(val key: String, val label: String, val icon: Int) {
     CONTROLS("controls", "Controls on/off", R.drawable.ic_power),
@@ -32,7 +35,7 @@ data class BandControl(val gesture: Gesture, val palms: Set<Palm>? = null) {
 
     /** "Index triple tap", "Index triple tap · palm up or sideways". */
     val label: String
-        get() = gesture.label + (palms?.let { p -> " · " + Palm.entries.filter { it in p }.joinToString(" or ") { it.label.lowercase() } } ?: "")
+        get() = gesture.label + (palms?.let { " · " + it.words() } ?: "")
 }
 
 /** The four band controls; stored once, above the profiles. Free of Android, so it's unit-tested. */
@@ -66,13 +69,17 @@ data class BandControls(val at: Map<Builtin, BandControl> = emptyMap()) {
             Builtin.PREVIOUS to BandControl(Gesture.MIDDLE_TRIPLE),
         ))
 
-        /** Unknown gestures are no gesture, unknown positions are skipped; throws on bad JSON. */
+        /**
+         * Unknown gestures are no gesture, unknown positions are skipped, and no position or all
+         * three is any position (as the bridge reads it); throws on bad JSON.
+         */
         fun fromJson(text: String): BandControls {
             val json = JSONObject(text)
             val at = Builtin.entries.mapNotNull { builtin ->
                 val c = json.optJSONObject(builtin.key) ?: return@mapNotNull null
                 val gesture = Gesture.of(c.optString("gesture")) ?: return@mapNotNull null
                 val palms = c.optJSONArray("palm")?.let { a -> (0 until a.length()).mapNotNull { Palm.of(a.optString(it)) }.toSet() }
+                    ?.takeIf { it.isNotEmpty() && it.size < Palm.entries.size }
                 builtin to BandControl(gesture, palms)
             }.toMap()
             return BandControls(at)

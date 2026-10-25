@@ -33,10 +33,25 @@ class Report(json: String) {
     private val holds = root.optJSONArray("hold_waits")
 
     fun count(control: Builtin) = paused.count { it.control == control } + pausedSliders.count { it.control == control }
-    /** In profile [place] (an index), or During calls (null). */
-    fun count(place: Int?) = paused.count { it.place == place } + if (place == null) 0 else pausedSliders.count { it.profile == place }
+    /** In profile [place] (an index), or During calls (null); a slider two band controls pause counts once. */
+    fun count(place: Int?) = paused.count { it.place == place } +
+        if (place == null) 0 else pausedSliders.filter { it.profile == place }.distinctBy { it.part to it.pair }.size
     fun paused(place: Int?, gesture: Gesture, palm: Palm?) = paused.firstOrNull { it.place == place && it.gesture == gesture && it.palm == palm }
-    fun pausedSlider(profile: Int, part: Part, pair: Int) = pausedSliders.firstOrNull { it.profile == profile && it.part == part && it.pair == pair }
+    /** A slider's pause, in every position any band control pauses it (the first band control's name). */
+    fun pausedSlider(profile: Int, part: Part, pair: Int): PausedSlider? {
+        val all = pausedSliders.filter { it.profile == profile && it.part == part && it.pair == pair }
+        return all.firstOrNull()?.copy(positions = all.flatMap { it.positions }.toSet())
+    }
+
+    /** Moving a band control would pause this where nothing pauses it now (place, gesture, override and position). */
+    fun isNew(p: Paused) = !paused.filter { it.place == p.place && it.gesture == p.gesture && it.palm == p.palm }
+        .flatMap { it.positions }.containsAll(p.positions)
+
+    fun isNew(s: PausedSlider) = !pausedSliders.filter { it.profile == s.profile && it.part == s.part && it.pair == s.pair }
+        .flatMap { it.positions }.containsAll(s.positions)
+
+    /** What [choice] would newly pause: what's worth asking about. */
+    fun newCount(choice: Choice) = choice.pauses.count(::isNew) + choice.sliders.count(::isNew)
     /** Where [part]'s hold acts when you let go in profile [profile] (band-core's `Profiles::hold_waits`): the palm positions. */
     fun holdWaits(profile: Int, part: Part): Set<Palm> =
         palms(holds?.optJSONObject(profile)?.optJSONArray(if (part == Part.MIDDLE) "middle" else "index"))
@@ -44,6 +59,9 @@ class Report(json: String) {
     companion object {
         /** For the stored settings, from band-core. */
         fun of(context: Context) = Report(runCatching { Bridge.profileReport(Prefs(context).profilesJson()) }.getOrDefault("{}"))
+
+        /** Bridge.bandChoices' refusal (`bad-json`, `unknown-control`), or null for a list. */
+        fun choicesError(json: String): String? = runCatching { JSONObject(json).optString("error").ifEmpty { null } }.getOrNull()
 
         /** Bridge.bandChoices' answer. */
         fun choices(json: String): List<Choice> = objects(runCatching { JSONArray(json) }.getOrNull()).mapNotNull { o ->

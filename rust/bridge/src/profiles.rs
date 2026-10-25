@@ -14,8 +14,10 @@
 //! - `hand`: `band`, `left` or `right`.
 //!
 //! Only JSON that isn't JSON is an error: a field that is `null` or the wrong shape reads as
-//! its default (a map entry that isn't a string is skipped, a profile that isn't an object is
-//! left out, a dial or slider without both actions is none, `{"gesture": null}` is no gesture).
+//! its default (a map entry that isn't a string is skipped, a dial or slider without both
+//! actions is none, `{"gesture": null}` is no gesture). A profile that isn't an object, or
+//! has no name, is an empty profile in its place, so the profile indexes (`picked`, `apps`)
+//! still point where the app means.
 
 use std::collections::BTreeMap;
 
@@ -55,10 +57,10 @@ fn overrides<'de, D: Deserializer<'de>>(d: D) -> Result<BTreeMap<String, BTreeMa
     })
 }
 
-/// The profiles: the ones that read as a profile (one that doesn't is left out).
+/// The profiles, one per entry: one that doesn't read as a profile is an empty one in its place.
 fn profile_list<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<ProfileJson>, D::Error> {
     Ok(match Value::deserialize(d)? {
-        Value::Array(list) => list.into_iter().filter_map(|v| ProfileJson::deserialize(v).ok()).collect(),
+        Value::Array(list) => list.into_iter().map(|v| ProfileJson::deserialize(v).unwrap_or_default()).collect(),
         _ => Vec::new(),
     })
 }
@@ -115,9 +117,9 @@ struct ControlJson {
     palm: Option<Vec<String>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct ProfileJson {
-    #[serde(deserialize_with = "lenient")]
+    #[serde(default, deserialize_with = "lenient")]
     name: String,
     #[serde(default, deserialize_with = "strings")]
     map: BTreeMap<String, String>,

@@ -130,4 +130,16 @@ class ProfileListTest {
         assertEquals(Drags(), old.indexDrags)
         assertTrue(old.palm.isEmpty() && old.drawings.isEmpty())
     }
+
+    @Test fun `a bad palm entry or a null is skipped, not the whole list`() {
+        val list = ProfileList.fromJson(
+            """[{"id":"p1","name":"A","map":{"swipe_up":null,"index_tap":"media.next"},"dial":"volume",
+                "palm":{"index_tap":null,"swipe_up":3,"middle_tap":{"up":null,"down":"x"}},"drawings":{"Bulb":null,"Z":"y"}}]""",
+            "{}", "p1",
+        )
+        val p = list.profile("p1")!!
+        assertEquals(mapOf("index_tap" to "media.next"), p.map)
+        assertEquals(mapOf("middle_tap" to mapOf("down" to "x")), p.palm)
+        assertEquals(mapOf("Z" to "y"), p.drawings)
+    }
 }

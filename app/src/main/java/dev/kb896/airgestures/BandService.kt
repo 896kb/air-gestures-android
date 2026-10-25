@@ -162,8 +162,6 @@ class BandService : Service(), BandLink.Listener {
     private fun bandToggled(on: Boolean) {
         prefs.paused = !on
         pausedChanged(!on)
-        // Off ends an open draw session; band-core doesn't report it.
-        if (!on) pad.cancelled()
     }
 
     /** Another profile is in force: tell the user which. */
@@ -344,7 +342,8 @@ class BandService : Service(), BandLink.Listener {
                 "draw-started" -> pad.started()
                 "pen" -> pad.pen(rest == "down")
                 "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
-                    pad.point(s.toInt(), x.toFloat(), y.toFloat())
+                    val stroke = s.toIntOrNull() ?: return@let
+                    pad.point(stroke, x.toFloatOrNull() ?: return@let, y.toFloatOrNull() ?: return@let)
                 }
                 "draw-finished" -> pad.finished(rest)
                 "drawn" -> pad.drawn(rest)
@@ -354,7 +353,8 @@ class BandService : Service(), BandLink.Listener {
                 }
                 "draw-cancelled" -> pad.cancelled()
                 "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->
-                    dragTeaching?.sample(w[0], doubleArrayOf(w[1].toDouble(), w[2].toDouble(), w[3].toDouble()), w[4].toDouble())
+                    val numbers = w.drop(1).map { it.toDoubleOrNull() ?: return@let }
+                    dragTeaching?.sample(w[0], doubleArrayOf(numbers[0], numbers[1], numbers[2]), numbers[3])
                 }
             }
         }

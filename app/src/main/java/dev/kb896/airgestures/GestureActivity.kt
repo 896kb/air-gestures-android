@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.view.Gravity
 import android.widget.LinearLayout
 
 /**
@@ -46,7 +45,7 @@ class GestureActivity : GestureScreen() {
         // Mockup 6: which band control is on it, and that the choice waits.
         for (b in band.onGesture(gesture)) {
             val c = band[b] ?: continue
-            val where = c.palms?.let { p -> " with the ${Palm.entries.filter { it in p }.joinToString(" or ") { it.label.lowercase() }}" } ?: ""
+            val where = c.palms?.let { " with the ${it.words()}" } ?: ""
             body.addView(banner(pausedChip(),
                 "${b.label} is on ${gesture.label.lowercase()}$where, in every profile. What you pick here is kept and runs once it moves.",
                 "Band controls") { BandControlActivity.open(this, b) })
@@ -72,8 +71,8 @@ class GestureActivity : GestureScreen() {
                     isClickable = true
                     setOnClickListener {
                         when {
-                            dark -> pickOverride(palm, own.orEmpty())
-                            overrides.size < ProfileList.MAX_OVERRIDES -> pickOverride(palm, normalId)
+                            dark -> pickOverride(palm, own.orEmpty(), normalId)
+                            overrides.size < ProfileList.MAX_OVERRIDES -> pickOverride(palm, normalId, normalId)
                             else -> pickNormal(normalId)
                         }
                     }
@@ -108,7 +107,7 @@ class GestureActivity : GestureScreen() {
                     }.first)
                     isClickable = true
                     background = ripple()
-                    setOnClickListener { pickOverride(palm, id) }
+                    setOnClickListener { pickOverride(palm, id, normalId) }
                 })
             }
             val free = Palm.entries.filter { it.key !in overrides }
@@ -116,7 +115,7 @@ class GestureActivity : GestureScreen() {
                 addView(row().apply {
                     addView(pill("Add an override", R.drawable.ic_hand) {
                         choose("Palm position", free.map { Option(it.label, false, R.drawable.ic_hand) }, heading = gesture.label) { i ->
-                            pickOverride(free[i], normalId)
+                            pickOverride(free[i], normalId, normalId)
                         }
                     }.first)
                 })
@@ -137,19 +136,10 @@ class GestureActivity : GestureScreen() {
 
         // A hold that waits for the release (band-core's hold_waits).
         if (gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD) {
-            val waits = report.holdWaits(index, gesture.part)
-            if (waits.isNotEmpty()) {
-                val where = if (waits.size == Palm.entries.size) "" else
-                    " (" + Palm.entries.filter { it in waits }.joinToString(" or ") { it.label.lowercase() } + ")"
-                body.addView(note("Acts when you let go$where: this finger's dial or drags do something too."))
+            letGo(report.holdWaits(index, gesture.part))?.let { hint ->
+                body.addView(note("Acts ${hint.removePrefix("when ")}: this finger's dial or drags do something too."))
             }
         }
-    }
-
-    private fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {
-        this.text = text
-        setLineSpacing(0f, 1.3f)
-        gravity = Gravity.START
     }
 
     private fun pickNormal(current: String) = pickAction(gesture.label, current) { id ->
@@ -157,8 +147,9 @@ class GestureActivity : GestureScreen() {
         render()
     }
 
-    private fun pickOverride(palm: Palm, current: String) = pickAction("${gesture.label} · ${palm.label.lowercase()}", current) { id ->
-        change { it.withOverride(profileId, gesture.key, palm, id) }
+    /** An override in [palm]; picking the normal action ([normal]) there is no override at all. */
+    private fun pickOverride(palm: Palm, current: String, normal: String) = pickAction("${gesture.label} · ${palm.label.lowercase()}", current) { id ->
+        change { if (id == normal) it.withoutOverride(profileId, gesture.key, palm) else it.withOverride(profileId, gesture.key, palm, id) }
     }
 
     private fun change(how: (ProfileList) -> ProfileList) {

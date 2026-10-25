@@ -187,11 +187,6 @@ class PalmCalibrationActivity : Screen() {
         content.addView(navRow(R.drawable.ic_move_up_right, "Teach your drags") { open<TeachDragsActivity>() })
     }
 
-    private fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {
-        this.text = text
-        setLineSpacing(0f, 1.3f)
-    }
-
     /** The progress ring, the step in the middle. */
     private class Ring(context: Context) : View(context) {
         var progress = 0f

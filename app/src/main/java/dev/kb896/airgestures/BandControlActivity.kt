@@ -2,11 +2,9 @@ package dev.kb896.airgestures
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
 import android.widget.LinearLayout
-import android.widget.TextView
 
 /**
  * One band control (mockup 12): its gesture (the picker, mockup 2, asks before pausing what's
@@ -73,11 +71,6 @@ class BandControlActivity : GestureScreen() {
         }
     }
 
-    private fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {
-        this.text = text
-        setLineSpacing(0f, 1.3f)
-    }
-
     /** The other band control on [gesture] in [palm], if any (judgement 4: they may share a gesture in other positions). */
     private fun heldBy(gesture: Gesture, palm: Palm): Builtin? {
         val band = Profiles.band(this)
@@ -102,8 +95,8 @@ class BandControlActivity : GestureScreen() {
             val start = if (Palm.UP in free) Palm.UP else free.firstOrNull() ?: return@segment
             changePalms(at, setOf(start))
         }
-        mark(any, !only)
-        mark(limited, only)
+        markSegment(any, !only)
+        markSegment(limited, only)
         palmBody.addView(row().apply { addView(segmented(any, limited)) })
         if (!only) return
         val chosen = at.palms.orEmpty()
@@ -112,7 +105,6 @@ class BandControlActivity : GestureScreen() {
                 val held = heldBy(at.gesture, palm)
                 val (chip, shape) = pill(palm.label.removePrefix("Palm ").replaceFirstChar { it.uppercase() }) {
                     when {
-                        held != null -> Unit
                         palm in chosen -> if (chosen.size > 1) changePalms(at, chosen - palm)
                         chosen.size >= 2 -> {
                             palmNote = "Up to two: with all three, pick Any position."
@@ -128,7 +120,12 @@ class BandControlActivity : GestureScreen() {
                 } else {
                     shape.pressed = 0f
                 }
-                if (held != null) chip.alpha = .4f
+                chip.isSelected = palm in chosen
+                if (held != null) {
+                    // Another band control's position here: off (judgement 4).
+                    chip.isEnabled = false
+                    chip.alpha = .4f
+                }
                 addView(chip)
             }
         })
@@ -140,29 +137,33 @@ class BandControlActivity : GestureScreen() {
         palmBody.addView(note("In the other positions, ${at.gesture.label} does what each profile says."))
     }
 
-    /** The segmented control's active segment: ink-filled. */
-    private fun mark(view: TextView, active: Boolean) {
-        view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
-        view.background = if (active) GradientDrawable().apply {
-            cornerRadius = dp(999f)
-            setColor(Cb.INK_900)
-        } else null
-    }
-
     private fun palmKeys(palms: Set<Palm>?) = palms?.let { p -> Palm.entries.filter { it in p }.joinToString(",") { it.key } }.orEmpty()
 
-    /** New positions for the same gesture: asked first when they'd pause more than now. */
+    /**
+     * The bridge's answer for [palms], or null after saying what went wrong (the settings
+     * unreadable: not shown as a list of nothing).
+     */
+    private fun choices(palms: Set<Palm>?): List<Report.Choice>? {
+        val json = Bridge.bandChoices(Prefs(this).profilesJson(), builtin.key, palmKeys(palms))
+        Report.choicesError(json)?.let { error ->
+            sheet("Can't list the gestures", note("The band's rules couldn't read your settings ($error). Nothing was changed."), "OK", cancel = false) { true }
+            return null
+        }
+        return Report.choices(json)
+    }
+
+    /** New positions for the same gesture: asked first when they'd pause anything not paused now. */
     private fun changePalms(at: BandControl, palms: Set<Palm>?) {
         palmNote = null
         val control = BandControl(at.gesture, palms)
-        val choice = Report.choices(Bridge.bandChoices(Prefs(this).profilesJson(), builtin.key, palmKeys(palms)))
-            .firstOrNull { it.gesture == at.gesture }
-        if (choice != null && choice.count > Report.of(this).count(builtin)) prompt(choice, control) else save(control)
+        val choice = (choices(palms) ?: return).firstOrNull { it.gesture == at.gesture }
+        val report = Report.of(this)
+        if (choice != null && report.newCount(choice) > 0) prompt(choice, control, report) else save(control)
     }
 
     private fun pickGesture() {
         val at = at
-        val choices = Report.choices(Bridge.bandChoices(Prefs(this).profilesJson(), builtin.key, palmKeys(at?.palms)))
+        val choices = choices(at?.palms) ?: return
         val options = listOf(Option("Nothing", at == null, R.drawable.ic_minus, detail = if (at == null) "Now" else null)) +
             choices.map { c ->
                 val now = c.gesture == at?.gesture
@@ -176,20 +177,23 @@ class BandControlActivity : GestureScreen() {
             if (index == 0) return@choose save(null)
             val choice = choices[index - 1]
             val control = BandControl(choice.gesture, at?.palms)
-            if (choice.count == 0 || choice.gesture == at?.gesture) save(control) else prompt(choice, control)
+            val report = Report.of(this)
+            if (choice.gesture == at?.gesture || report.newCount(choice) == 0) save(control) else prompt(choice, control, report)
         }
     }
 
-    /** Mockup 3: "<gesture> is used in N places", each with its action and a Will pause chip. */
-    private fun prompt(choice: Report.Choice, control: BandControl) {
+    /**
+     * Mockup 3: "<gesture> is used in N places", each with its action; a Will pause chip on what
+     * the move would newly pause ([report]: now), a Paused one on what's paused already.
+     */
+    private fun prompt(choice: Report.Choice, control: BandControl, report: Report) {
         val list = Profiles.load(this)
-        val pairs = listOf("left/right", "toward/away", "up/down")
-        fun place(name: String, action: String) = row(gap = 10f).apply {
+        fun place(name: String, action: String, new: Boolean) = row(gap = 10f).apply {
             addView(column(gap = 2f).apply {
                 addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = name })
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = action })
             }, weighted())
-            addView(willPauseChip())
+            addView(if (new) willPauseChip() else pausedChip())
         }
         val body = column(gap = 10f).apply {
             for (p in choice.pauses) {
@@ -201,12 +205,13 @@ class BandControlActivity : GestureScreen() {
                     else -> profile.palm[p.gesture.key]?.get(p.palm.key).orEmpty()
                 }
                 val where = p.palm?.let { " · ${it.label.lowercase()}" }.orEmpty()
-                addView(place(name + where, label(id, calls = profile == null)))
+                addView(place(name + where, label(id, calls = profile == null), report.isNew(p)))
             }
             for (s in choice.sliders) {
                 val profile = list.profiles.getOrNull(s.profile) ?: continue
                 val target = profile.drags(s.part).targets.getOrNull(s.pair) ?: DialChoice.NONE.key
-                addView(place("${profile.name} · ${s.part.label} ${pairs.getOrElse(s.pair) { "" }} slider", DialChoice.of(target).label))
+                val pair = Drags.PAIRS.getOrNull(s.pair)?.first?.lowercase().orEmpty()
+                addView(place("${profile.name} · ${s.part.label} $pair slider", DialChoice.of(target).label, report.isNew(s)))
             }
             addView(note("They stay saved and come back if you move ${builtin.label} to another gesture."))
         }

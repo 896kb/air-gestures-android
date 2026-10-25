@@ -1,6 +1,7 @@
 package dev.kb896.airgestures
 
 import android.content.Context
+import android.util.AtomicFile
 import org.json.JSONArray
 import java.io.File
 
@@ -56,16 +57,37 @@ object Drawings {
     @Volatile
     private var cached: DrawingLibrary? = null
 
-    private fun file(context: Context) = File(context.filesDir, "drawings.json")
+    private fun file(context: Context) = AtomicFile(File(context.filesDir, "drawings.json"))
 
-    fun load(context: Context): DrawingLibrary = cached ?: synchronized(this) {
-        cached ?: (runCatching { DrawingLibrary.fromJson(file(context).readText()) }.getOrNull() ?: DrawingLibrary()).also { cached = it }
+    fun load(context: Context): DrawingLibrary = cached ?: synchronized(this) { cached ?: read(context) }
+
+    /**
+     * The stored drawings (none before the first). An unreadable file is copied aside as
+     * drawings.broken (as profiles.broken) before anything can overwrite it, and isn't cached:
+     * the next load tries it again.
+     */
+    private fun read(context: Context): DrawingLibrary {
+        val file = file(context)
+        if (!file.baseFile.exists()) return DrawingLibrary().also { cached = it }
+        return runCatching { DrawingLibrary.fromJson(String(file.readFully())) }.getOrElse {
+            android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
+            runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
+            return DrawingLibrary()
+        }.also { cached = it }
     }
 
     fun update(context: Context, change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary = synchronized(this) {
         change(load(context)).also {
+            val file = file(context)
+            val out = file.startWrite()
+            try {
+                out.write(it.toJson().toByteArray())
+                file.finishWrite(out)
+            } catch (e: Exception) {
+                file.failWrite(out)
+                throw e
+            }
             cached = it
-            file(context).writeText(it.toJson())
         }
     }
 

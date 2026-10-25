@@ -2,7 +2,6 @@ package dev.kb896.airgestures
 
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -49,33 +48,26 @@ class DragsActivity : GestureScreen() {
         render()
     }
 
-    /** The segmented control's active segment: ink-filled, as MainActivity's wrist control. */
-    private fun mark(view: TextView, active: Boolean) {
-        view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
-        view.background = if (active) GradientDrawable().apply {
-            cornerRadius = dp(999f)
-            setColor(Cb.INK_900)
-        } else null
-    }
-
     override fun render() {
         val list = Profiles.load(this)
         val index = list.profiles.indexOfFirst { it.id == profileId }
         val profile = list.profiles.getOrNull(index) ?: return finish()
         val report = Report.of(this)
         val drags = profile.drags(part)
-        mark(gestures, !drags.sliders)
-        mark(sliders, drags.sliders)
+        markSegment(gestures, !drags.sliders)
+        markSegment(sliders, drags.sliders)
         rows.removeAllViews()
         if (!drags.sliders) {
             for (gesture in Gesture.drags(part)) rows.addView(profileRow(profile, index, gesture, report))
             return
         }
-        for ((pair, name, detail) in PAIRS) {
+        for ((pair, names) in Drags.PAIRS.withIndex()) {
+            val (name, detail) = names
             val target = DialChoice.of(drags.targets.getOrNull(pair))
             val paused = report.pausedSlider(index, part, pair)
             val tags = listOfNotNull(paused?.let { "${it.control.label} is on a drag of this pair" to false })
-            rows.addView(gestureRow(target.icon, name, target.label, target == DialChoice.NONE, paused = paused != null, tags = tags, hint = detail) {
+            val hint = listOfNotNull(pausedWhere(paused?.positions), detail).joinToString(" · ")
+            rows.addView(gestureRow(target.icon, name, target.label, target == DialChoice.NONE, paused = paused != null, tags = tags, hint = hint) {
                 val choices = dialChoices
                 choose(name, choices.map { Option(it.label, it == target, it.icon) }, heading = "${part.label} slider") { i ->
                     val targets = drags.targets.toMutableList().also { it[pair] = choices[i].key }
@@ -90,13 +82,6 @@ class DragsActivity : GestureScreen() {
     companion object {
         const val EXTRA_PROFILE = "profile"
         const val EXTRA_PART = "part"
-
-        /** The sliders: band-core's pair index, the name, which way is up. */
-        private val PAIRS = listOf(
-            Triple(0, "Left/right", "right = forward"),
-            Triple(1, "Toward/away", "away = up"),
-            Triple(2, "Up/down", "up = up"),
-        )
 
         fun open(context: Context, profile: String, part: Part) = context.startActivity(
             Intent(context, DragsActivity::class.java).putExtra(EXTRA_PROFILE, profile).putExtra(EXTRA_PART, part.name),

@@ -42,4 +42,16 @@ class ControlsTest {
         assertEquals(listOf("Tap", "Double tap", "Triple tap", "Hold"), Gesture.entries.filter { it.part == Part.INDEX && !it.drag }.map { it.short })
         assertEquals(6, Gesture.entries.count { it.part == Part.MIDDLE && it.drag })
     }
+
+    @Test fun `no palm position or all three is any position`() {
+        val band = BandControls.fromJson("""{"next":{"gesture":"index_triple","palm":[]},"previous":{"gesture":"middle_triple","palm":["up","down","sideways"]}}""")
+        assertNull(band[Builtin.NEXT]!!.palms)
+        assertNull(band[Builtin.PREVIOUS]!!.palms)
+    }
+
+    @Test fun `palm words`() {
+        assertEquals("palm up", setOf(Palm.UP).words())
+        assertEquals("palm down or sideways", setOf(Palm.SIDE, Palm.DOWN).words())
+        assertEquals("palm down, sideways", setOf(Palm.SIDE, Palm.DOWN).words(", "))
+    }
 }

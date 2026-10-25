@@ -149,6 +149,22 @@ abstract class Screen : Activity() {
         addView(content)
     }
 
+    /** A quiet line of explanation under or between cards. */
+    fun note(text: String) = Cb.text(this, 13f, color = Cb.INK_500).apply {
+        this.text = text
+        setLineSpacing(0f, 1.3f)
+    }
+
+    /** A segmented control's segment, active (ink-filled, selected) or not. */
+    fun markSegment(view: TextView, active: Boolean) {
+        view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
+        view.background = if (active) GradientDrawable().apply {
+            cornerRadius = dp(999f)
+            setColor(Cb.INK_900)
+        } else null
+        view.isSelected = active
+    }
+
     /** A coral PAUSED chip: an action a band control holds back. */
     fun pausedChip() = Cb.chip(this, Cb.Signal.STOP, "Paused")
 

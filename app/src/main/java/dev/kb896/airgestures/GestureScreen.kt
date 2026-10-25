@@ -138,12 +138,7 @@ abstract class GestureScreen : Screen() {
             profile.palm[gesture.key]?.get(palm.key)?.let { "${palm.label} · ${label(it, calls = false)}" to (report.paused(index, gesture, palm) != null) }
         }
         val hold = gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD
-        val waits = if (hold) report.holdWaits(index, gesture.part) else emptySet()
-        val letGo = when {
-            waits.isEmpty() -> null
-            waits.size == Palm.entries.size -> "when you let go"
-            else -> "when you let go · " + Palm.entries.filter { it in waits }.joinToString(" or ") { it.label.lowercase() }
-        }
+        val letGo = if (hold) letGo(report.holdWaits(index, gesture.part)) else null
         val paused = report.paused(index, gesture, null)
         val hint = listOfNotNull(pausedWhere(paused), letGo).joinToString(" · ").ifEmpty { null }
         val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
@@ -157,8 +152,19 @@ abstract class GestureScreen : Screen() {
      * Under a Paused chip, when it's paused only in some positions (a band control limited to the
      * palm up): "palm up only", "palm down, sideways only". Null when it's paused in all three.
      */
-    fun pausedWhere(paused: Report.Paused?): String? = paused?.positions?.takeIf { it.size < Palm.entries.size }
-        ?.let { p -> Palm.entries.filter { it in p }.joinToString(", ") { it.label.lowercase() } + " only" }
+    fun pausedWhere(paused: Report.Paused?) = pausedWhere(paused?.positions)
+
+    fun pausedWhere(positions: Set<Palm>?): String? = positions?.takeIf { it.size < Palm.entries.size }?.let { it.words(", ") + " only" }
+
+    /**
+     * A hold that waits for the release in [waits] (band-core's hold_waits): "when you let go",
+     * naming the positions when not all three; null when it never waits.
+     */
+    fun letGo(waits: Set<Palm>): String? = when {
+        waits.isEmpty() -> null
+        waits.size == Palm.entries.size -> "when you let go"
+        else -> "when you let go · " + waits.words()
+    }
 
     /**
      * The During calls rows, grouped as a profile's: every gesture but the drags (as usual in a

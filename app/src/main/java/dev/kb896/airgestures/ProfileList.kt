@@ -8,7 +8,12 @@ data class Drags(
     val sliders: Boolean = false,
     /** Left/right, toward/away, up/down: a [DialChoice] key each (kept in gestures mode). */
     val targets: List<String> = List(3) { DialChoice.NONE.key },
-)
+) {
+    companion object {
+        /** The sliders' pairs in band-core's order: the name, and which way is up. */
+        val PAIRS = listOf("Left/right" to "right = forward", "Toward/away" to "away = up", "Up/down" to "up = up")
+    }
+}
 
 /**
  * One gesture set: a name, an action id per gesture key, palm overrides, both fingers' dials
@@ -156,7 +161,9 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
             return Drags(o.optBoolean("sliders", false), targets?.takeIf { it.size == 3 } ?: Drags().targets)
         }
 
-        private fun strings(o: JSONObject?) = o?.keys()?.asSequence()?.associateWith { o.getString(it) }.orEmpty()
+        /** The entries that are strings (a JSON null or a number is skipped, never "null"). */
+        private fun strings(o: JSONObject?): Map<String, String> =
+            o?.keys()?.asSequence()?.mapNotNull { key -> (o.opt(key) as? String)?.let { key to it } }?.toMap().orEmpty()
 
         /** Before profiles: the one mapping there was becomes Profile 1. */
         fun migrated(map: Map<String, String>, dial: String) =
@@ -173,9 +180,11 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                 Profile(
                     item.getString("id"),
                     item.getString("name"),
-                    map.keys().asSequence().associateWith { map.getString(it) },
+                    strings(map),
                     item.getString("dial"),
-                    palm = palm?.keys()?.asSequence()?.associateWith { strings(palm.getJSONObject(it)) }.orEmpty(),
+                    // A gesture whose overrides aren't an object is skipped, not the whole list.
+                    palm = palm?.keys()?.asSequence()?.mapNotNull { key -> palm.optJSONObject(key)?.let { key to strings(it) } }
+                        ?.filter { it.second.isNotEmpty() }?.toMap().orEmpty(),
                     middleDial = item.optString("middle_dial", DialChoice.NONE.key),
                     indexDrags = drags(drags?.optJSONObject("index")),
                     middleDrags = drags(drags?.optJSONObject("middle")),

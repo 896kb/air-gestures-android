@@ -89,4 +89,18 @@ class LessonsBackupTest {
         assertFalse("index_double" in restored.calls)
         assertNull(restored.drawings)
     }
+
+    @Test fun `a restore sets every call action, the ones the backup lacks to their defaults`() {
+        val calls = Backup.restoredCalls(mapOf("index_double" to "call.answer", "swipe_up" to "-"))
+        assertEquals(Gesture.entries.size, calls.size)
+        assertEquals("-", calls["swipe_up"])
+        assertEquals(Gesture.MIDDLE_DOUBLE.callDefault, calls["middle_double"])
+        assertEquals(Mappings.AS_USUAL, calls["index_drag_left"])
+    }
+
+    @Test fun `a version 1 backup leaves the shared drawings as they are`() {
+        val v1 = """{"version":1,"profiles":[{"id":"p1","name":"A","map":{},"dial":"volume"}],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""
+        assertNull(Backup.read(v1)!!.sharedDrawings)
+        assertEquals(mapOf("Bulb" to "torch.toggle"), Backup.read(Backup.write(settings))!!.sharedDrawings)
+    }
 }

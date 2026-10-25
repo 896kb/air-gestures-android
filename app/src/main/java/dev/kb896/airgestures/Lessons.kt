@@ -96,11 +96,14 @@ object Backup {
         /** Null in a backup made before sequences: restoring it leaves the sequences as they are. */
         val sequences: Sequences.Library? = null,
         val band: BandControls = BandControls.standard(),
-        /** Drawing name → its action in every profile without its own. */
-        val sharedDrawings: Map<String, String> = emptyMap(),
+        /** Drawing name → its action in every profile without its own; null in a version 1 backup (left as they are). */
+        val sharedDrawings: Map<String, String>? = emptyMap(),
         /** Null in a version 1 backup: restoring it leaves the drawings as they are. */
         val drawings: DrawingLibrary? = null,
     )
+
+    /** Every gesture's call action after a restore: the backup's, else its default (a 0.7.7 backup lacks the newer gestures). */
+    fun restoredCalls(calls: Map<String, String>) = Gesture.entries.associate { it.key to (calls[it.key] ?: it.callDefault) }
 
     fun write(settings: Settings): String {
         val (profiles, apps) = settings.profiles.toJson()
@@ -115,7 +118,7 @@ object Backup {
             put("vibrate", settings.vibrate)
             settings.sequences?.let { put("sequences", JSONObject(it.toJson())) }
             put("band", settings.band.toJson())
-            put("shared_drawings", JSONObject(settings.sharedDrawings))
+            settings.sharedDrawings?.let { put("shared_drawings", JSONObject(it)) }
             settings.drawings?.let { put("drawings", JSONArray(it.toJson())) }
         }.toString(2)
     }
@@ -137,7 +140,8 @@ object Backup {
             json.optBoolean("vibrate", false),
             json.opt("sequences")?.let { Sequences.Library.fromJson(it.toString()) },
             band = json.optJSONObject("band")?.let { BandControls.fromJson(it.toString()) } ?: BandControls.standard(),
-            sharedDrawings = shared?.keys()?.asSequence()?.associateWith { shared.getString(it) }.orEmpty(),
+            sharedDrawings = if (version == 1) null else
+                shared?.keys()?.asSequence()?.mapNotNull { key -> (shared.opt(key) as? String)?.let { key to it } }?.toMap().orEmpty(),
             drawings = json.optJSONArray("drawings")?.let { DrawingLibrary.fromJson(it.toString()) },
         )
     }.getOrNull()

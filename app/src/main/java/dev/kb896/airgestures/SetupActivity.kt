@@ -206,13 +206,14 @@ class SetupActivity : Screen() {
     private fun apply(settings: Backup.Settings) {
         val prefs = Prefs(this)
         Profiles.update(applicationContext) { settings.profiles }
-        for (gesture in Gesture.entries) settings.calls[gesture.key]?.let { prefs.setCallAction(gesture, it) }
+        // Every gesture: the backup's call action, else its default (not what was set before).
+        for ((key, id) in Backup.restoredCalls(settings.calls)) Gesture.of(key)?.let { prefs.setCallAction(it, id) }
         prefs.hand = settings.hand
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         Profiles.updateBand(applicationContext) { settings.band }
-        Profiles.updateSharedDrawings(applicationContext) { settings.sharedDrawings }
+        settings.sharedDrawings?.let { restored -> Profiles.updateSharedDrawings(applicationContext) { restored } }
         settings.drawings?.let { restored -> Drawings.update(applicationContext) { restored } }
         BandService.instance?.remap()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
