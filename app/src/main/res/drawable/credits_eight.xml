@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 896.ro's pixel 8 (its favicon glyph), in pure #00ff00 green, as on band.896.ro. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="46dp"
+    android:height="40dp"
+    android:viewportWidth="11.5"
+    android:viewportHeight="10">
+    <group android:translateX="1.25">
+        <path
+            android:fillColor="#FF00FF00"
+            android:pathData="M3 1h1v1h-1zM4 1h1v1h-1zM5 1h1v1h-1zM2 2h1v1h-1zM6 2h1v1h-1zM2 3h1v1h-1zM6 3h1v1h-1zM3 4h1v1h-1zM4 4h1v1h-1zM5 4h1v1h-1zM2 5h1v1h-1zM6 5h1v1h-1zM2 6h1v1h-1zM6 6h1v1h-1zM2 7h1v1h-1zM6 7h1v1h-1zM3 8h1v1h-1zM4 8h1v1h-1zM5 8h1v1h-1z" />
+    </group>
+</vector>
