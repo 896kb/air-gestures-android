@@ -55,6 +55,8 @@ when a gesture needs it.
 Needs the Android SDK (platform 36) and NDK, JDK 21, and Rust with the
 `aarch64-linux-android` target and `cargo-ndk`.
 
+`rust/band-core` is a git submodule ([band-core](https://gitlab.com/896kb/band-core), shared with the Linux daemon): clone with `git clone --recursive`, or run `git submodule update --init` after a plain clone.
+
 ```sh
 ./build-rust.sh      # the Rust bridge → app/src/main/jniLibs
 ./gradlew assembleDebug

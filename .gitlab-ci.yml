@@ -25,6 +25,8 @@ variables:
   NDK_VERSION: "30.0.16248370"
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
   RUSTUP_HOME: "$CI_PROJECT_DIR/.rustup"
+  # rust/band-core is a submodule (gitlab.com/896kb/band-core, public).
+  GIT_SUBMODULE_STRATEGY: recursive
 
 # Every job runs on the homelab's docker runner (brigadahq-docker), not GitLab's
 # metered shared runners.
