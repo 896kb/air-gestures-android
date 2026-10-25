@@ -68,19 +68,21 @@ abstract class GestureScreen : Screen() {
             addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
             addView(column(gap = 3f).apply {
                 gravity = android.view.Gravity.END
-                addView(row(gap = 6f).apply {
-                    gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                    if (paused) addView(pausedChip())
-                    addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
-                })
+                // Above the action, not beside it: beside, a long action squeezes the gesture's name onto two lines.
+                // Each at its own width, at the end (a vertical layout's default is the whole width).
+                val end = { android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { gravity = android.view.Gravity.END } }
+                if (paused) addView(compactChip(pausedChip()), end())
+                addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action }, end())
                 for ((tag, tagPaused) in tags) {
                     addView(row(gap = 6f).apply {
                         gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                        if (tagPaused) addView(pausedChip().apply { textSize = 8f })
+                        if (tagPaused) addView(compactChip(pausedChip()))
                         addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = tag })
-                    })
+                    }, end())
                 }
-                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint })
+                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint }, end())
             })
             // (i): how this action is used (Send to automation's guide).
             if (info != null) {
@@ -98,6 +100,13 @@ abstract class GestureScreen : Screen() {
             background = ripple()
             setOnClickListener { onClick() }
         }
+
+    /** A status chip sized for a row's right side (9 sp, tighter padding). */
+    private fun compactChip(chip: android.widget.TextView) = chip.apply {
+        textSize = 9f
+        letterSpacing = .06f
+        setPadding(dpi(7f), dpi(3f), dpi(7f), dpi(3f))
+    }
 
     /** The rows of [profile]'s gestures and its dial. */
     fun profileRows(profile: String) = column(gap = 4f).apply {

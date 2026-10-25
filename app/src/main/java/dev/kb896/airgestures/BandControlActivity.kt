@@ -121,7 +121,13 @@ class BandControlActivity : GestureScreen() {
                         else -> changePalms(at, chosen + palm)
                     }
                 }
-                shape.pressed = if (palm in chosen) 1f else 0f
+                if (palm in chosen) {
+                    // Chosen: ink-filled, as the segmented control's active segment.
+                    chip.background = NeuDrawable(this@BandControlActivity, 999f, fill = Cb.INK_900, solid = true, soft = false)
+                    chip.setTextColor(android.graphics.Color.WHITE)
+                } else {
+                    shape.pressed = 0f
+                }
                 if (held != null) chip.alpha = .4f
                 addView(chip)
             }
