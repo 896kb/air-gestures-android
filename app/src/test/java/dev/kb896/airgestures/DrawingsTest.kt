@@ -30,4 +30,14 @@ class DrawingsTest {
         assertEquals(listOf("Zed"), library.names)
         assertTrue(library.without("Zed").drawings.isEmpty())
     }
+
+    @Test fun `an own action of nothing is the shared one, stale names are pruned`() {
+        assertEquals("torch.toggle", DrawingLibrary.action(own = mapOf("Bulb" to ""), shared = mapOf("Bulb" to "torch.toggle"), name = "Bulb"))
+        assertEquals("media.next", DrawingLibrary.action(own = mapOf("Bulb" to "media.next"), shared = mapOf("Bulb" to "torch.toggle"), name = "Bulb"))
+        assertEquals("", DrawingLibrary.action(own = emptyMap(), shared = emptyMap(), name = "Bulb"))
+        val list = ProfileList(listOf(Profile("p1", "A", emptyMap(), "volume", drawings = mapOf("Bulb" to "x", "Gone" to "y", "Empty" to ""))), "p1", emptyMap())
+        val pruned = list.prunedDrawings(setOf("Bulb", "Empty"))
+        assertEquals(mapOf("Bulb" to "x"), pruned.profile("p1")!!.drawings)
+        assertEquals(mapOf("Bulb" to "z"), DrawingLibrary.pruned(mapOf("Bulb" to "z", "Gone" to "w", "Empty" to ""), setOf("Bulb", "Empty")))
+    }
 }

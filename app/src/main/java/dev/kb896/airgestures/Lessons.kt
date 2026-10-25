@@ -28,6 +28,12 @@ object Lessons {
             }
     }
 
+    /**
+     * Whether the middle dial gets a lesson: its turns must be told from the index dial's, and
+     * `@practiced` names only the action, so a middle dial on the same actions has none.
+     */
+    fun middleDialLesson(index: Set<String>, middle: Set<String>) = middle.isNotEmpty() && (middle intersect index).isEmpty()
+
     /** One lesson: what to do, how, what finishes it, and the gesture it maps (for "would: …"). */
     class Step(val title: String, val how: String, val done: Done, val gesture: Gesture? = null)
 

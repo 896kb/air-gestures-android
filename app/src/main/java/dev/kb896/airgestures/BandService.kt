@@ -444,7 +444,11 @@ class BandService : Service(), BandLink.Listener {
     fun cancelDrawing() = link.cancelDrawing()
     fun palmNow() = link.palmNow()
     /** The drawings changed: the band matches against the new ones. */
-    fun drawingsChanged() = link.setLibrary(Drawings.load(this).toJson())
+    fun drawingsChanged() {
+        val library = Drawings.load(this)
+        Profiles.pruneDrawingActions(this, library.names.toSet())
+        link.setLibrary(library.toJson())
+    }
 
     /**
      * After an install the band reboots; when it reconnects, say whether it now runs the firmware

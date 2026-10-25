@@ -175,42 +175,52 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
             }
             addView(result, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
+        // On a short or narrow display the card shrinks to fit, and the close button follows it.
+        val metrics = service.resources.displayMetrics
+        val width = minOf(dp(WIDTH_DP), metrics.widthPixels - dp(32f))
+        val height = minOf(dp(HEIGHT_DP), metrics.heightPixels - dp(96f))
         val params = WindowManager.LayoutParams(
-            dp(WIDTH_DP).toInt(),
-            dp(HEIGHT_DP).toInt(),
+            width.toInt(),
+            height.toInt(),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.CENTER }
-        windows.addView(view, params)
-        card = view
-        // The close button: a small window over the card's top-right corner, where the header leaves room.
-        val button = FrameLayout(service).apply {
-            addView(ImageView(service).apply {
-                setImageResource(R.drawable.ic_x)
-                imageTintList = ColorStateList.valueOf(Cb.INK_300)
-            }, FrameLayout.LayoutParams(dp(18f).toInt(), dp(18f).toInt(), Gravity.CENTER))
-            contentDescription = "Close"
-            isClickable = true
-            setOnClickListener {
-                BandService.instance?.cancelDrawing()
-                hide()
+        try {
+            windows.addView(view, params)
+            card = view
+            // The close button: a small window over the card's top-right corner, where the header leaves room.
+            val button = FrameLayout(service).apply {
+                addView(ImageView(service).apply {
+                    setImageResource(R.drawable.ic_x)
+                    imageTintList = ColorStateList.valueOf(Cb.INK_300)
+                }, FrameLayout.LayoutParams(dp(18f).toInt(), dp(18f).toInt(), Gravity.CENTER))
+                contentDescription = "Close"
+                isClickable = true
+                setOnClickListener {
+                    BandService.instance?.cancelDrawing()
+                    hide()
+                }
             }
+            val size = dp(CLOSE_DP).toInt()
+            windows.addView(button, WindowManager.LayoutParams(
+                size,
+                size,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.CENTER
+                // From the screen's centre to the header's last slot: inside the 16 dp padding, 12 dp from the top.
+                x = (width / 2 - dp(16f + CLOSE_DP / 2)).toInt()
+                y = -(height / 2 - dp(12f + CLOSE_DP / 2)).toInt()
+            })
+            close = button
+        } catch (e: Exception) {
+            // The overlay can't show (the service went, a window refused): no pad, results as toasts.
+            android.util.Log.w("AirGestures", "draw pad: ${e.message}")
+            hide()
         }
-        val size = dp(CLOSE_DP).toInt()
-        windows.addView(button, WindowManager.LayoutParams(
-            size,
-            size,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-            PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.CENTER
-            // From the screen's centre to the header's last slot: inside the 16 dp padding, 12 dp from the top.
-            x = dp(WIDTH_DP / 2 - 16f - CLOSE_DP / 2).toInt()
-            y = -dp(HEIGHT_DP / 2 - 12f - CLOSE_DP / 2).toInt()
-        })
-        close = button
     }
 
     companion object {

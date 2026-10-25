@@ -46,7 +46,11 @@ class DrawingsActivity : GestureScreen() {
         body.addView(card("All profiles", column(gap = 8f).apply {
             if (library.drawings.isEmpty()) addView(note("No drawings yet: teach one, then a drawing runs its action."))
             for (drawing in library.drawings) {
-                addView(drawingRow(drawing, Labels.action(context, shared[drawing.name].orEmpty())) { sharedMenu(drawing.name) })
+                val action = shared[drawing.name].orEmpty()
+                // No shared action but some profiles' own: say where it does something.
+                val owners = list.profiles.filter { it.drawings[drawing.name].orEmpty().isNotEmpty() }.map { it.name }
+                val label = if (action.isEmpty() && owners.isNotEmpty()) "only in ${owners.joinToString(", ")}" else Labels.action(context, action)
+                addView(drawingRow(drawing, label) { sharedMenu(drawing.name) })
             }
             addView(row().apply { addView(pill("Teach a drawing", R.drawable.ic_pencil) { TeachDrawingActivity.open(this@DrawingsActivity, null, null) }.first) })
         }))
@@ -55,7 +59,8 @@ class DrawingsActivity : GestureScreen() {
             ?: list.profiles.filter { p -> p.drawings.keys.any { library.get(it) != null } }
         for (profile in profiles) {
             body.addView(card("${profile.name}'s own", column(gap = 8f).apply {
-                val own = library.drawings.filter { it.name in profile.drawings }
+                // An own action is never "" (that's the shared one): stored ones were pruned.
+                val own = library.drawings.filter { profile.drawings[it.name].orEmpty().isNotEmpty() }
                 if (own.isEmpty()) addView(note("None: every drawing does what All profiles says."))
                 for (drawing in own) {
                     val tag = if (shared[drawing.name].orEmpty().isNotEmpty()) "replaces shared" else null
@@ -78,7 +83,11 @@ class DrawingsActivity : GestureScreen() {
             addView(StrokesView(context, ink = Cb.INK_900, widthDp = 2f).apply { strokes = thumbnail(drawing) })
         }, LinearLayout.LayoutParams(dpi(40f), dpi(40f)))
         addView(column(gap = 2f).apply {
-            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = drawing.name; isSingleLine = true })
+            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
+                text = drawing.name
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
             addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = action })
         }, weighted())
         if (tag != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = tag })
@@ -98,7 +107,7 @@ class DrawingsActivity : GestureScreen() {
         )
         choose(name, options, heading = "Drawing") { i ->
             when (i) {
-                0 -> pickAction(name, current) { id -> changed { Profiles.updateSharedDrawings(applicationContext) { it + (name to id) } } }
+                0 -> pickAction(name, current) { id -> changed { Profiles.updateDrawingActions(applicationContext) { l, shared -> l to shared + (name to id) } } }
                 1 -> TeachDrawingActivity.open(this, name, null)
                 2 -> rename(name)
                 3 -> confirm("Delete $name?", "It's gone from every profile, with its actions.", "Delete") { changed { remove(name) } }
@@ -115,33 +124,35 @@ class DrawingsActivity : GestureScreen() {
         )
         choose(name, options, heading = profile.name) { i ->
             when (i) {
-                0 -> pickAction(name, current) { id -> changed { Profiles.update(applicationContext) { it.withDrawing(profile.id, name, id) } } }
+                // Nothing here is "use the shared one": no own action, not an own "Nothing" (the shared one would run).
+                0 -> pickAction(name, current) { id ->
+                    changed { Profiles.updateDrawingActions(applicationContext) { l, shared -> l.withDrawing(profile.id, name, id.ifEmpty { null }) to shared } }
+                }
                 1 -> TeachDrawingActivity.open(this, name, profile.id)
                 // The shared action applies there again.
-                2 -> changed { Profiles.update(applicationContext) { it.withDrawing(profile.id, name, null) } }
+                2 -> changed { Profiles.updateDrawingActions(applicationContext) { l, shared -> l.withDrawing(profile.id, name, null) to shared } }
             }
         }
     }
 
     private fun rename(old: String) = ask("Rename", old, "Save") { typed ->
         val new = cleanName(typed)
+        if (new.isEmpty()) {
+            sheet("A drawing needs a name", note("Type a name for $old."), "OK", cancel = false) { true }
+            return@ask
+        }
         if (!DrawTeach.nameFree(new, Drawings.load(this).names, own = old)) {
             sheet("That name is taken", note("Another drawing is called $new: pick another name."), "OK", cancel = false) { true }
             return@ask
         }
         if (new == old) return@ask
-        changed {
-            Drawings.update(applicationContext) { it.renamed(old, new) }
-            Profiles.updateSharedDrawings(applicationContext) { shared -> shared[old]?.let { (shared - old) + (new to it) } ?: shared }
-            Profiles.update(applicationContext) { it.renamedDrawing(old, new) }
-        }
+        changed { renameDrawing(applicationContext, old, new) }
     }
 
-    /** A drawing and its actions, everywhere. */
+    /** A drawing and its actions, everywhere: the library first (the source of truth), then its actions. */
     private fun remove(name: String) {
         Drawings.update(applicationContext) { it.without(name) }
-        Profiles.updateSharedDrawings(applicationContext) { it - name }
-        Profiles.update(applicationContext) { it.renamedDrawing(name, null) }
+        Profiles.updateDrawingActions(applicationContext) { l, shared -> l.renamedDrawing(name, null) to (shared - name) }
     }
 
     /** After any change: the band matches against the new drawings, with the new actions. */
@@ -160,6 +171,18 @@ class DrawingsActivity : GestureScreen() {
 
         /** A drawing's first try, as StrokesView draws it. */
         fun thumbnail(drawing: Drawing) = drawing.tries.firstOrNull().orEmpty().map { s -> s.map { (x, y) -> x.toFloat() to y.toFloat() } }
+
+        /**
+         * [old] becomes [new] without losing its actions if it stops halfway: the actions are
+         * copied to the new name, the library is written, then the old name's actions go.
+         */
+        fun renameDrawing(context: Context, old: String, new: String) {
+            Profiles.updateDrawingActions(context) { l, shared ->
+                l.renamedDrawing(new, null).copiedDrawing(old, new) to ((shared - new) + (shared[old]?.let { mapOf(new to it) } ?: emptyMap()))
+            }
+            Drawings.update(context) { it.renamed(old, new) }
+            Profiles.updateDrawingActions(context) { l, shared -> l.renamedDrawing(old, null) to (shared - old) }
+        }
 
         /** A name on one line (the band's `@drawn` line carries it), trimmed. */
         fun cleanName(name: String) = name.replace(Regex("\\s+"), " ").trim()

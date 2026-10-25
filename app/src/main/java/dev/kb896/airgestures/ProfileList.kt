@@ -116,6 +116,14 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
         p.copy(drawings = (p.drawings - old) + (if (new == null) emptyMap() else mapOf(new to action)))
     })
 
+    /** [old]'s own actions also under [new] (a rename's first step: nothing is lost if it stops there). */
+    fun copiedDrawing(old: String, new: String) = copy(profiles = profiles.map { p ->
+        p.drawings[old]?.let { p.copy(drawings = p.drawings + (new to it)) } ?: p
+    })
+
+    /** Only actions for drawings that exist ([names]), and no "" ones. */
+    fun prunedDrawings(names: Set<String>) = copy(profiles = profiles.map { p -> p.copy(drawings = DrawingLibrary.pruned(p.drawings, names)) })
+
     /** The first controls dev build's built-in action ids out of every profile (their gestures go back to their defaults). */
     fun withoutBuiltins() = copy(profiles = profiles.map { p ->
         p.copy(

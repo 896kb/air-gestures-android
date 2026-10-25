@@ -115,4 +115,10 @@ class LessonsBackupTest {
         assertFalse(sliders.any { it.gesture == Gesture.INDEX_DRAG_LEFT })
         assertFalse(Lessons.steps(1, true, defaults, BandControls.standard()).any { it.done == Lessons.Done.MiddleDial })
     }
+
+    @Test fun `the middle dial lesson needs its own actions`() {
+        assertTrue(Lessons.middleDialLesson(index = setOf("volume.up", "volume.down"), middle = setOf("brightness.up", "brightness.down")))
+        assertFalse(Lessons.middleDialLesson(index = setOf("volume.up", "volume.down"), middle = setOf("volume.up", "volume.down")))
+        assertFalse(Lessons.middleDialLesson(index = emptySet(), middle = emptySet()))
+    }
 }

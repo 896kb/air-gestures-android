@@ -31,6 +31,13 @@ data class DrawingLibrary(val drawings: List<Drawing> = emptyList()) {
     }).toString()
 
     companion object {
+        /** What a drawing runs in a profile: its own action, else the shared one; an own "" is no own action ("" = nothing). */
+        fun action(own: Map<String, String>, shared: Map<String, String>, name: String) =
+            own[name]?.takeIf { it.isNotEmpty() } ?: shared[name].orEmpty()
+
+        /** Actions for drawings that exist ([names]), "" ones dropped: drawings.json is the source of truth. */
+        fun pruned(actions: Map<String, String>, names: Set<String>) = actions.filter { it.key in names && it.value.isNotEmpty() }
+
         fun tryJson(strokes: List<Stroke>) = JSONArray(strokes.map { s -> JSONArray(s.map { (x, y) -> JSONArray().put(x).put(y) }) })
 
         /** One try's strokes from JSON (`@draw-finished`, a stored try). */
@@ -80,7 +87,11 @@ object Drawings {
             android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
             runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
             return DrawingLibrary()
-        }.also { cached = it }
+        }.also {
+            cached = it
+            // Actions only for drawings that exist (the library is the source of truth).
+            Profiles.pruneDrawingActions(context, it.names.toSet())
+        }
     }
 
     fun update(context: Context, change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary = synchronized(this) {
@@ -99,5 +110,5 @@ object Drawings {
     }
 
     /** The action [name] runs in [profile]: its own, else the shared one ("" = none). */
-    fun action(context: Context, profile: Profile, name: String) = profile.drawings[name] ?: Profiles.sharedDrawings(context)[name].orEmpty()
+    fun action(context: Context, profile: Profile, name: String) = DrawingLibrary.action(profile.drawings, Profiles.sharedDrawings(context), name)
 }

@@ -119,6 +119,28 @@ object Profiles {
     fun sharedDrawings(context: Context): Map<String, String> =
         prefs(context).getString(SHARED_DRAWINGS, null)?.let { runCatching { JSONObject(it).let { o -> o.keys().asSequence().associateWith(o::getString) } }.getOrNull() }.orEmpty()
 
+    /**
+     * The drawings' actions, the profiles' own and the shared ones, changed together and
+     * stored in one edit (under the store's lock).
+     */
+    fun updateDrawingActions(context: Context, change: (ProfileList, Map<String, String>) -> Pair<ProfileList, Map<String, String>>) =
+        synchronized(this) {
+            val (list, shared) = change(load(context), sharedDrawings(context))
+            cached = list
+            val (profiles, apps) = list.toJson()
+            prefs(context).edit().putString(PROFILES, profiles).putString(APPS, apps).putString(PICKED, list.picked)
+                .putString(SHARED_DRAWINGS, JSONObject(shared).toString()).apply()
+        }
+
+    /** Actions only for drawings that exist ([names]): drawings.json is the source of truth. */
+    fun pruneDrawingActions(context: Context, names: Set<String>) {
+        val list = load(context)
+        val shared = sharedDrawings(context)
+        val prunedList = list.prunedDrawings(names)
+        val prunedShared = DrawingLibrary.pruned(shared, names)
+        if (prunedList != list || prunedShared != shared) updateDrawingActions(context) { _, _ -> prunedList to prunedShared }
+    }
+
     /** Read, change and store under the store's lock, so two changes don't lose one. */
     fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) = synchronized(this) {
         prefs(context).edit().putString(SHARED_DRAWINGS, JSONObject(change(sharedDrawings(context))).toString()).apply()

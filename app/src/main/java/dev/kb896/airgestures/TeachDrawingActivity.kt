@@ -33,6 +33,17 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     private var fresh = false
     private var liveView: StrokesView? = null
     private lateinit var body: LinearLayout
+    /** The service teaching runs in: a new one (the link restarted, the band came) is taught in again. */
+    private var service: BandService? = null
+    private val watch = object : Runnable {
+        override fun run() {
+            if (BandService.instance !== service) {
+                startTeaching()
+                render()
+            }
+            main.postDelayed(this, WATCH_MS)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,7 +54,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         own = extra != null
         name = editing.orEmpty()
         action = editing?.let { e ->
-            (if (own) list.profile(profileId)?.drawings?.get(e) else null) ?: Profiles.sharedDrawings(this)[e]
+            (if (own) list.profile(profileId)?.drawings?.get(e)?.takeIf { it.isNotEmpty() } else null) ?: Profiles.sharedDrawings(this)[e]
         }.orEmpty()
         body = column(gap = 20f)
         show(pageColumn().apply { addView(body) }, title = if (editing != null) "Teach $editing again" else "Teach a drawing")
@@ -52,16 +63,30 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     override fun onResume() {
         super.onResume()
         listening = this
-        BandService.instance?.startTeachingDrawing(this)
-        if (!teach.full) BandService.instance?.drawTry()
+        startTeaching()
+        main.postDelayed(watch, WATCH_MS)
         render()
     }
 
     override fun onPause() {
         if (listening === this) listening = null
         main.removeCallbacksAndMessages(null)
-        BandService.instance?.endTeachingDrawing()
+        service?.endTeachingDrawing()
+        service = null
         super.onPause()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // The rows' widths follow the screen's.
+        render()
+    }
+
+    /** Teaching (and practice: nothing runs) in the service running now; a try opens unless it waits for Draw. */
+    private fun startTeaching() {
+        service = BandService.instance
+        service?.startTeachingDrawing(this)
+        if (!teach.full && !waiting) service?.drawTry()
     }
 
     // BandService.Drawing: this screen's draw sessions.
@@ -69,7 +94,13 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     override fun started() {
         live.clear()
         fresh = false
+        // A session opened (Draw, or from the band): the wait is over and the live tile shows again.
+        val wasWaiting = waiting
         waiting = false
+        if (wasWaiting) {
+            message = null
+            render()
+        }
         liveView?.strokes = emptyList()
     }
 
@@ -105,9 +136,11 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
 
     /** "Looks like Circle": another drawing these tries would be taken for (then they start again). */
     private fun lookalike(): String? {
+        // Not knowing is no "alike": Save waits until the check works.
+        val failed = "Couldn't check against your drawings: Save waits until it can. Start again to retry."
         val answer = runCatching { JSONObject(Bridge.looksLike(Drawings.load(this).except(editing).toJson(), teach.json())) }.getOrNull()
-            ?: return null
-        answer.optString("error").takeIf { it.isNotEmpty() }?.let { return "Couldn't compare with your drawings ($it)." }
+            ?: return failed
+        if (answer.optString("error").isNotEmpty()) return failed
         if (answer.isNull("like")) return null
         val like = answer.optString("like")
         teach.tries.clear()
@@ -132,7 +165,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
 
     override fun render() {
         body.removeAllViews()
-        if (BandService.instance == null) body.addView(note("Connect the band to draw your tries."))
+        if (service == null) body.addView(note("Connect the band to draw your tries: teaching starts when it's there."))
         // The three tries.
         body.addView(row(gap = 10f).apply {
             liveView = null
@@ -201,19 +234,20 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     private fun save() {
         val clean = DrawingsActivity.cleanName(name)
         val old = editing
-        Drawings.update(applicationContext) { library ->
-            // Taught again under another name: the old one goes, its actions move.
-            (if (old != null && old != clean) library.without(old) else library).with(Drawing(clean, teach.tries.toList()))
+        when {
+            // Taught again under another name: a rename first (its actions move safely), then the new tries.
+            old != null && old != clean -> DrawingsActivity.renameDrawing(applicationContext, old, clean)
+            // A new drawing: whatever an old one of that name left behind goes.
+            old == null -> Profiles.updateDrawingActions(applicationContext) { l, shared -> l.renamedDrawing(clean, null) to (shared - clean) }
         }
-        if (old != null && old != clean) {
-            Profiles.updateSharedDrawings(applicationContext) { shared -> shared[old]?.let { (shared - old) + (clean to it) } ?: shared }
-            Profiles.update(applicationContext) { it.renamedDrawing(old, clean) }
-        }
+        Drawings.update(applicationContext) { it.with(Drawing(clean, teach.tries.toList())) }
         val where = profileId
-        if (own && where != null) {
-            Profiles.update(applicationContext) { it.withDrawing(where, clean, action) }
-        } else {
-            Profiles.updateSharedDrawings(applicationContext) { it + (clean to action) }
+        Profiles.updateDrawingActions(applicationContext) { l, shared ->
+            when {
+                // Only in one profile with no action: nothing to store (the shared one runs there).
+                own && where != null -> (if (action.isEmpty()) l else l.withDrawing(where, clean, action)) to shared
+                else -> l to shared + (clean to action)
+            }
         }
         BandService.instance?.drawingsChanged()
         BandService.instance?.remap()
@@ -231,6 +265,8 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
 
         /** The pause before the next try opens. */
         private const val NEXT_MS = 600L
+        /** How often it checks the service is the one teaching. */
+        private const val WATCH_MS = 1000L
 
         /** The teach screen in front, for the debug build's test hook (DebugActions). */
         @Volatile

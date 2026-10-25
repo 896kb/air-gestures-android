@@ -367,7 +367,8 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_checkTries<'local>(
     }
 }
 
-/// The drawing in the library these tries look like, or `""` (see `teach::looks_like`).
+/// The drawing in the library these tries look like: `{"like": name | null}`, or
+/// `{"error": "bad-library" | "bad-tries"}` (see `teach::looks_like`).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_looksLike<'local>(
     mut env: JNIEnv<'local>,

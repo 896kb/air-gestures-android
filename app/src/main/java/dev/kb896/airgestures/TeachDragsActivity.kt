@@ -50,6 +50,11 @@ class TeachDragsActivity : Screen() {
         render()
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        render()
+    }
+
     override fun onPause() {
         main.removeCallbacks(watch)
         service?.endDragTeaching()

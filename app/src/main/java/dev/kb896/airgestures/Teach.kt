@@ -71,8 +71,11 @@ class PalmSampler(private val awayFrom: Double? = null) {
         const val STEADY = 6.0
         /** Readings further apart than this (ms) aren't one steady hold. */
         const val GAP = 200L
-        /** Palm up counts once the roll is this far (degrees) from palm down. */
-        const val AWAY = 40.0
+        /**
+         * Palm up counts once the roll is this far (degrees) from palm down: band-core's
+         * `palm::MIN_APART`, which a calibration must reach anyway (the bridge doesn't expose it).
+         */
+        const val AWAY = 60.0
 
         /** The circular mean of rolls (degrees), as band-core takes it. */
         fun mean(rolls: DoubleArray): Double {
@@ -181,10 +184,10 @@ class DrawTeach {
     companion object {
         const val TRIES = 3
 
-        /** A name no other drawing has ([own]: the one being taught again keeps its own). */
+        /** A name no other drawing has, ignoring case ([own]: the one being renamed or taught again, which may change only its case). */
         fun nameFree(name: String, names: Collection<String>, own: String?): Boolean {
             val clean = name.trim()
-            return clean.isNotEmpty() && (clean == own || names.none { it.equals(clean, ignoreCase = true) })
+            return clean.isNotEmpty() && names.filter { it != own }.none { it.equals(clean, ignoreCase = true) }
         }
     }
 }

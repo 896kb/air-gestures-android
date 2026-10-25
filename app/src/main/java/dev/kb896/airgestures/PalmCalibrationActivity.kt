@@ -61,6 +61,13 @@ class PalmCalibrationActivity : Screen() {
         main.post(ticker)
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Rebuilt for the new width (progress is kept: the activity isn't recreated).
+        built = ""
+        render()
+    }
+
     override fun onPause() {
         main.removeCallbacks(ticker)
         // Away from the screen isn't holding still: the current hold starts again.
@@ -94,8 +101,9 @@ class PalmCalibrationActivity : Screen() {
     }
 
     private fun next() {
-        buzz()
         if (step == Palm.DOWN) {
+            // Palm down held still: accepted (band-core checks both together, at the end).
+            buzz()
             down = sampler.rolls
             step = Palm.UP
             // Palm up counts only once the hand has turned well away from palm down.
@@ -109,6 +117,7 @@ class PalmCalibrationActivity : Screen() {
                 BandService.instance?.remap()
                 saved = true
                 message = null
+                buzz()
             }
             else -> {
                 message = when {

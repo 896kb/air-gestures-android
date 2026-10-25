@@ -89,4 +89,9 @@ class TeachTest {
         assertEquals(DragTeach.Step.TURN, t.current)
         assertNull(t.json())
     }
+
+    @Test fun `renaming by case alone is allowed`() {
+        assertTrue(DrawTeach.nameFree("bulb", listOf("Bulb", "Zed"), own = "Bulb"))
+        assertFalse(DrawTeach.nameFree("zed", listOf("Bulb", "Zed"), own = "Bulb"))
+    }
 }

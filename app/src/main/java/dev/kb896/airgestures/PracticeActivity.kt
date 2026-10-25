@@ -37,7 +37,11 @@ class PracticeActivity : Screen() {
             dial = DialChoice.of(active.dial) != DialChoice.NONE,
             map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
             band = Profiles.band(this),
-            middleDial = DialChoice.of(active.middleDial) != DialChoice.NONE,
+            // A middle dial on the index dial's actions can't be told apart from an index turn: no lesson then.
+            middleDial = Lessons.middleDialLesson(
+                Mappings.dial(active.dial, "dial")?.toList().orEmpty().toSet(),
+                Mappings.dial(active.middleDial, "middle_dial")?.toList().orEmpty().toSet(),
+            ),
             sliders = listOf(Part.INDEX, Part.MIDDLE).filter { active.drags(it).sliders }.toSet(),
         )
         count = Cb.label(this, "")
