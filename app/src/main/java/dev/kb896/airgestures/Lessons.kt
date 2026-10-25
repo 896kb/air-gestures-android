@@ -13,14 +13,19 @@ object Lessons {
         /** Pinch and turn: any of the dial's actions. */
         data object Dial : Done()
 
+        /** Pinch and turn with the middle finger: any of the middle dial's actions. */
+        data object MiddleDial : Done()
+
         /** The middle hold (the bridge's label `middle hold`). */
         data object Hold : Done()
 
-        fun matches(gesture: String? = null, action: String? = null, dial: Set<String> = emptySet()) = when (this) {
-            is Gesture -> gesture == label
-            Dial -> action != null && action in dial
-            Hold -> gesture == "middle hold"
-        }
+        fun matches(gesture: String? = null, action: String? = null, dial: Set<String> = emptySet(), middleDial: Set<String> = emptySet()) =
+            when (this) {
+                is Gesture -> gesture == label
+                Dial -> action != null && action in dial
+                MiddleDial -> action != null && action in middleDial
+                Hold -> gesture == "middle hold"
+            }
     }
 
     /** One lesson: what to do, how, what finishes it, and the gesture it maps (for "would: …"). */
@@ -33,9 +38,18 @@ object Lessons {
      * every key resolved) and the [band] controls; pinch and turn only when its [dial] does
      * something. A triple tap or the index hold only when it does something there (a profile
      * switch needs 2+ profiles), as band-core decides whether its taps wait: the band otherwise
-     * doesn't wait for it, and three taps are three taps. Lessons are palm down.
+     * doesn't wait for it, and three taps are three taps. Lessons are palm down. The middle
+     * dial when [middleDial] does something; a drag when it does something and its finger's
+     * drags are gestures (not one of [sliders]).
      */
-    fun steps(profiles: Int, dial: Boolean, map: Map<String, String>, band: BandControls): List<Step> = buildList {
+    fun steps(
+        profiles: Int,
+        dial: Boolean,
+        map: Map<String, String>,
+        band: BandControls,
+        middleDial: Boolean = false,
+        sliders: Set<Part> = emptySet(),
+    ): List<Step> = buildList {
         fun does(gesture: Gesture): Boolean = when (band.on(gesture, Palm.DOWN)) {
             Builtin.CONTROLS, Builtin.DRAW -> true
             Builtin.NEXT, Builtin.PREVIOUS -> profiles >= 2
@@ -51,6 +65,9 @@ object Lessons {
         add(tap(Gesture.MIDDLE_TAP, "Tap your middle finger", "Touch your thumb to your middle finger, once."))
         add(tap(Gesture.MIDDLE_DOUBLE, "Double-tap your middle finger", "Two quick taps of your thumb on your middle finger."))
         if (dial) add(Step("Pinch and turn", "Pinch thumb and index finger together, hold, and turn your wrist.", Done.Dial))
+        if (middleDial) {
+            add(Step("Pinch and turn with your middle finger", "Pinch thumb and middle finger together, hold, and turn your wrist.", Done.MiddleDial))
+        }
         add(
             Step(
                 "Hold your middle finger",
@@ -74,6 +91,16 @@ object Lessons {
         }
         if (does(Gesture.MIDDLE_TRIPLE)) {
             add(tap(Gesture.MIDDLE_TRIPLE, "Triple-tap your middle finger", "Three quick taps of your thumb on your middle finger."))
+        }
+        // The drags that do something, in the words of Teach your drags.
+        for (part in listOf(Part.INDEX, Part.MIDDLE)) {
+            if (part in sliders) continue
+            for (gesture in Gesture.drags(part)) {
+                if (!does(gesture)) continue
+                val move = DragTeach.Step.entries.firstOrNull { gesture.key.endsWith("_drag_${it.key}") } ?: continue
+                val how = move.how.replaceFirst("Pinch and ", "Pinch thumb and ${part.label.lowercase()} finger, then ")
+                add(tap(gesture, "Pinch and ${move.title.lowercase()}, ${part.label.lowercase()} finger", how))
+            }
         }
     }
 }

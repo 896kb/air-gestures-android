@@ -37,6 +37,8 @@ class PracticeActivity : Screen() {
             dial = DialChoice.of(active.dial) != DialChoice.NONE,
             map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
             band = Profiles.band(this),
+            middleDial = DialChoice.of(active.middleDial) != DialChoice.NONE,
+            sliders = listOf(Part.INDEX, Part.MIDDLE).filter { active.drags(it).sliders }.toSet(),
         )
         count = Cb.label(this, "")
         title = Cb.text(this, 24f, R.font.geist_semibold, Cb.INK_900, -.02f)
@@ -116,8 +118,11 @@ class PracticeActivity : Screen() {
     private fun heard(gesture: String? = null, action: String? = null) {
         val step = steps.getOrNull(at) ?: return
         if (done) return
-        val dial = DialChoice.of(Profiles.active(this).dial).let { setOf(it.up, it.down) - "" }
-        if (step.done.matches(gesture, action, dial)) {
+        // The names the bridge reports for each dial's steps (automation's carry the dial's name).
+        val active = Profiles.active(this)
+        val dial = Mappings.dial(active.dial, "dial")?.toList().orEmpty().toSet()
+        val middleDial = Mappings.dial(active.middleDial, "middle_dial")?.toList().orEmpty().toSet()
+        if (step.done.matches(gesture, action, dial, middleDial)) {
             done = true
             render()
         }
@@ -147,6 +152,7 @@ class PracticeActivity : Screen() {
                 }
             }
             Lessons.Done.Dial -> "${DialChoice.of(profile.dial).label} (${profile.name})"
+            Lessons.Done.MiddleDial -> "${DialChoice.of(profile.middleDial).label} (${profile.name})"
         }
     }
 }

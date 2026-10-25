@@ -103,4 +103,16 @@ class LessonsBackupTest {
         assertNull(Backup.read(v1)!!.sharedDrawings)
         assertEquals(mapOf("Bulb" to "torch.toggle"), Backup.read(Backup.write(settings))!!.sharedDrawings)
     }
+
+    @Test fun `a middle dial and a bound drag get their lessons, drags only as gestures`() {
+        val steps = Lessons.steps(1, dial = true, map = defaults + ("index_drag_left" to "media.next"), band = BandControls.standard(), middleDial = true)
+        assertTrue(steps.any { it.done == Lessons.Done.Gesture("index drag left") })
+        val middle = steps.single { it.done == Lessons.Done.MiddleDial }
+        assertTrue(middle.done.matches(action = "volume.up", middleDial = setOf("volume.up", "volume.down")))
+        assertFalse(middle.done.matches(action = "volume.up", dial = setOf("volume.up")))
+        // The index finger's drags as sliders: no drag gesture to practise.
+        val sliders = Lessons.steps(1, true, defaults + ("index_drag_left" to "media.next"), BandControls.standard(), sliders = setOf(Part.INDEX))
+        assertFalse(sliders.any { it.gesture == Gesture.INDEX_DRAG_LEFT })
+        assertFalse(Lessons.steps(1, true, defaults, BandControls.standard()).any { it.done == Lessons.Done.MiddleDial })
+    }
 }
