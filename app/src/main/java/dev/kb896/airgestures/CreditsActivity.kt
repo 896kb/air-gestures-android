@@ -22,6 +22,11 @@ class CreditsActivity : Screen() {
             R.drawable.credits_eight, "Made by", "Radu", "The app, its band protocol core and the Linux daemon.",
             "896.ro", "https://896.ro",
         ),
+        Person(
+            R.drawable.ic_activity, "Band vibration and Bluetooth music controls", "Tudor Palasan (iinsaane)",
+            "Band vibration feedback, volume detents, per-profile Bluetooth music controls and reconnect stability.",
+            "iinsaane on GitHub", "https://github.com/iinsaane",
+        ),
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
