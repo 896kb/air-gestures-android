@@ -65,10 +65,38 @@ import kotlin.concurrent.thread
  *
  *     ... --ez signin true
  *
+ * The draw pad, played without a band (the accessibility service must be on): a pen-down
+ * circle, then `drawn` with the name given, `not-drawn` for "", or left open for `open`:
+ *
+ *     ... --es pad Lightbulb
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra("pad")?.let { name ->
+            val pad = TouchService.instance?.pad ?: run {
+                Log.i("AirGestures", "debug pad: the accessibility service is off")
+                return
+            }
+            val main = android.os.Handler(android.os.Looper.getMainLooper())
+            main.post { pad.started() }
+            main.postDelayed({ pad.pen(true) }, 400)
+            for (i in 0..36) {
+                val a = i / 36.0 * 2 * Math.PI
+                main.postDelayed({ pad.point(0, (10 * Math.cos(a)).toFloat(), (10 * Math.sin(a)).toFloat()) }, 450L + i * 40)
+            }
+            // A second stroke: the bulb's base.
+            main.postDelayed({ pad.pen(true) }, 2100)
+            for (i in 0..5) main.postDelayed({ pad.point(1, -4f + i * 1.6f, -13f) }, 2150L + i * 40)
+            main.postDelayed({ pad.pen(false) }, 2500)
+            when (name) {
+                "open" -> Unit
+                "" -> main.postDelayed({ pad.notDrawn() }, 2700)
+                else -> main.postDelayed({ pad.drawn(name) }, 2700)
+            }
+            return
+        }
         intent.getStringExtra("probe")?.let { probe ->
             val prefs = Prefs(context)
             prefs.probe = probe.trim()

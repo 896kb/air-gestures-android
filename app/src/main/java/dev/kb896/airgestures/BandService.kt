@@ -409,13 +409,13 @@ class BandService : Service(), BandLink.Listener {
         private set
     private var dragTeaching: DragTeaching? = null
 
-    /** Results without a pad: toasts (Task 16 words them with `DrawPad.result`). */
+    /** Results without a pad (no accessibility service, judgement 9): toasts. */
     private val toasts = object : Drawing {
-        override fun drawn(name: String) = toast(name)
+        override fun drawn(name: String) = toast(DrawPad.result(this@BandService, name))
         override fun notDrawn() = toast("Not one of your drawings")
     }
-    /** Task 16 puts the overlay pad between the two: `drawing ?: TouchService.instance?.pad ?: toasts`. */
-    private val pad: Drawing get() = drawing ?: toasts
+    /** Where a draw session shows: a teach screen while one is open, else the pad over the app in front, else toasts. */
+    private val pad: Drawing get() = drawing ?: TouchService.instance?.pad ?: toasts
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
