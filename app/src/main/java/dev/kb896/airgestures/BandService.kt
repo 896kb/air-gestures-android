@@ -679,5 +679,17 @@ class BandService : Service(), BandLink.Listener {
             Prefs(context).setDial(profile, dial)
             instance?.remap()
         }
+
+        /** Store what the middle finger's pinch and turn does in [profile], live on the band when the service runs. */
+        fun setMiddleDial(context: Context, profile: String, dial: DialChoice) {
+            Profiles.update(context) { it.withMiddleDial(profile, dial.key) }
+            instance?.remap()
+        }
+
+        /** Store a finger's drags (gestures or sliders) in [profile], live on the band when the service runs. */
+        fun setDrags(context: Context, profile: String, part: Part, drags: Drags) {
+            Profiles.update(context) { it.withDrags(profile, part, drags) }
+            instance?.remap()
+        }
     }
 }

@@ -70,6 +70,17 @@ class ProfileActivity : GestureScreen() {
                 pickDial(profileId, part)
             })
         }
+        // Judgement 3: each finger's drags are a row here, opening the Drags screen (mockup 13b).
+        val index = list.profiles.indexOf(profile)
+        for (part in listOf(Part.INDEX, Part.MIDDLE)) {
+            val drags = profile.drags(part)
+            // What's paused behind it: sliders, or drag gestures' actions.
+            val paused = report.pausedSliders.count { it.profile == index && it.part == part } +
+                report.paused.count { it.place == index && it.gesture.drag && it.gesture.part == part }
+            dials.addView(gestureRow(R.drawable.ic_move_up_right, "${part.label} drags", if (drags.sliders) "Sliders" else "Gestures", false, count = paused) {
+                DragsActivity.open(this, profileId, part)
+            })
+        }
 
         apps.removeAllViews()
         apps.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {

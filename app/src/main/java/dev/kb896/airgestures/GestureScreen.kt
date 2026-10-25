@@ -49,7 +49,8 @@ abstract class GestureScreen : Screen() {
     /**
      * A gesture's row: its icon and name, then on the right its [action] (a coral Paused chip
      * before it when a band control holds it back), each tag under it (a palm override, "palm up ·
-     * Next track"; `true`: that one is paused), a [hint] ("when you let go"), the (i) and the chevron.
+     * Next track"; `true`: that one is paused), a [hint] ("when you let go"), the (i), the coral
+     * [count] of paused actions behind it (a row opening another screen) and the chevron.
      */
     fun gestureRow(
         iconRes: Int,
@@ -60,6 +61,7 @@ abstract class GestureScreen : Screen() {
         tags: List<Pair<String, Boolean>> = emptyList(),
         hint: String? = null,
         info: (() -> Unit)? = null,
+        count: Int = 0,
         onClick: () -> Unit,
     ) =
         row(gap = 12f).apply {
@@ -95,6 +97,7 @@ abstract class GestureScreen : Screen() {
                     setOnClickListener { info() }
                 })
             }
+            if (count > 0) addView(Cb.count(context, count))
             addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))
             isClickable = true
             background = ripple()
@@ -312,18 +315,20 @@ abstract class GestureScreen : Screen() {
     /** An app's name, or its package if it's gone. */
     fun appName(pkg: String) = Labels.appName(this, pkg)
 
-    /** What [part]'s pinch and turn does in [profile]. */
+    /** The dial choices as the pickers list them: Nothing first (mockup 11). */
+    val dialChoices get() = listOf(DialChoice.NONE) + DialChoice.entries.filter { it != DialChoice.NONE }
+
+    /** What [part]'s pinch and turn does in [profile] (mockup 11: the middle dial says what it does to the hold). */
     fun pickDial(profile: String, part: Part) {
         val current = DialChoice.of(Profiles.load(this).profile(profile)?.dialOf(part))
+        val note = if (part == Part.MIDDLE) {
+            if (current != DialChoice.NONE) "Middle hold now acts when you let go." else "With a dial, the middle hold acts when you let go."
+        } else null
         val title = if (part == Part.MIDDLE) "Middle dial" else "Index dial"
-        choose(title, DialChoice.entries.map { Option(it.label, it == current, it.icon) }) { index ->
-            val choice = DialChoice.entries[index]
-            if (part == Part.MIDDLE) {
-                Profiles.update(applicationContext) { it.withMiddleDial(profile, choice.key) }
-                BandService.instance?.remap()
-            } else {
-                BandService.setDial(applicationContext, profile, choice)
-            }
+        val choices = dialChoices
+        choose(title, choices.map { Option(it.label, it == current, it.icon) }, note = note) { index ->
+            val choice = choices[index]
+            if (part == Part.MIDDLE) BandService.setMiddleDial(applicationContext, profile, choice) else BandService.setDial(applicationContext, profile, choice)
             render()
             if (choice == DialChoice.AUTOMATION) automationGuide(firstTime = true)
         }

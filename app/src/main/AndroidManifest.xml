@@ -70,6 +70,7 @@
         <activity android:name=".BandControlActivity" android:exported="false" />
         <activity android:name=".CallsActivity" android:exported="false" />
         <activity android:name=".GestureActivity" android:exported="false" />
+        <activity android:name=".DragsActivity" android:exported="false" />
         <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SequenceActivity" android:exported="false" />
 
