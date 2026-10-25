@@ -250,20 +250,3 @@ fn profile(json: ProfileJson) -> Profile<String> {
     profile.drawings = json.drawings.into_iter().filter(|(_, id)| !id.is_empty()).collect();
     profile
 }
-
-/// The warnings, one word each line (`no-controls`, `no-way-out`, `draw-on-tap`); invalid JSON:
-/// nothing. Only until Task 2 replaces it with `report::report`.
-pub fn warnings(json: &str) -> String {
-    use band_core::controls::Warning;
-    let Ok((_, profiles)) = parse(json) else { return String::new() };
-    profiles
-        .warnings()
-        .iter()
-        .map(|w| match w {
-            Warning::NoControls => "no-controls",
-            Warning::NoWayOut => "no-way-out",
-            Warning::DrawOnTap => "draw-on-tap",
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}

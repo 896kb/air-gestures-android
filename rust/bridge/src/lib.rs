@@ -19,6 +19,7 @@ mod jni_api;
 pub mod meta;
 pub mod metaauth;
 pub mod profiles;
+pub mod report;
 pub mod status;
 pub mod words;
 

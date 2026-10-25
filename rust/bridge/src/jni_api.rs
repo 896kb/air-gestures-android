@@ -197,16 +197,35 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPractice<'local>(
     unsafe { connection(handle) }.set_practice(practice != 0);
 }
 
-/// What's worth a warning in these profiles, one word per line: `no-controls`, `no-way-out`,
-/// `draw-on-tap` (invalid JSON: `""`).
+/// What the screens show about a profiles JSON (see `report::report`); invalid JSON: `{}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileWarnings<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileReport<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     json: JString<'local>,
 ) -> jstring {
     match get_string(&mut env, &json) {
-        Ok(json) => string_out(&mut env, crate::profiles::warnings(&json)),
+        Ok(json) => string_out(&mut env, crate::report::report(&json)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Where a band control could go and what it would pause (see `report::band_choices`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_bandChoices<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    json: JString<'local>,
+    control: JString<'local>,
+    palm: JString<'local>,
+) -> jstring {
+    let strings = get_string(&mut env, &json)
+        .and_then(|json| Ok((json, get_string(&mut env, &control)?, get_string(&mut env, &palm)?)));
+    match strings {
+        Ok((json, control, palm)) => string_out(&mut env, crate::report::band_choices(&json, &control, &palm)),
         Err(message) => {
             throw(&mut env, &message);
             std::ptr::null_mut()
