@@ -60,7 +60,9 @@ class GesturesActivity : GestureScreen() {
         band.removeAllViews()
         for (builtin in Builtin.entries) {
             val at = controls[builtin]
-            band.addView(navRow(builtin.icon, builtin.label, detail = at?.label ?: "Nothing", count = report.count(builtin)) {
+            // The palm positions on a line of their own.
+            val detail = at?.let { c -> c.gesture.label + (c.palms?.let { "\n" + it.words() } ?: "") } ?: "Nothing"
+            band.addView(navRow(builtin.icon, builtin.label, detail = detail, count = report.count(builtin)) {
                 BandControlActivity.open(this, builtin)
             })
         }

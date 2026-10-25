@@ -131,8 +131,16 @@ abstract class Screen : Activity() {
     fun navRow(iconRes: Int, label: String, badge: String? = null, detail: String? = null, count: Int = 0, onClick: () -> Unit) = row(gap = 12f).apply {
         setPadding(dpi(4f), dpi(12f), dpi(4f), dpi(12f))
         addView(icon(iconRes, 18f))
-        addView(Cb.text(context, 15f, R.font.geist_medium, Cb.INK_900).apply { text = label }, weighted())
-        if (detail != null) addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = detail })
+        // The label keeps its line; the detail takes the rest and wraps there (a band control limited to palm positions).
+        addView(Cb.text(context, 15f, R.font.geist_medium, Cb.INK_900).apply {
+            text = label
+            isSingleLine = true
+        })
+        addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
+            text = detail.orEmpty()
+            maxLines = 3
+            gravity = Gravity.END
+        }, weighted())
         if (badge != null) addView(Cb.chip(context, Cb.Signal.WARN, badge))
         if (count > 0) addView(Cb.count(context, count))
         addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))

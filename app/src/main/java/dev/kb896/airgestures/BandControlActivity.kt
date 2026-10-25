@@ -58,7 +58,7 @@ class BandControlActivity : GestureScreen() {
         if (at != null && paused > 0) {
             notes.addView(row(gap = 10f).apply {
                 addView(Cb.count(context, paused))
-                addView(note("${at.label} is used in $paused ${if (paused == 1) "place" else "places"}: they're paused"), weighted())
+                addView(note("${at.label} is used in " + if (paused == 1) "1 place: it's paused" else "$paused places: they're paused"), weighted())
             })
         }
         if (builtin == Builtin.DRAW) {

@@ -36,7 +36,11 @@ class Report(json: String) {
     /** In profile [place] (an index), or During calls (null); a slider two band controls pause counts once. */
     fun count(place: Int?) = paused.count { it.place == place } +
         if (place == null) 0 else pausedSliders.filter { it.profile == place }.distinctBy { it.part to it.pair }.size
-    fun paused(place: Int?, gesture: Gesture, palm: Palm?) = paused.firstOrNull { it.place == place && it.gesture == gesture && it.palm == palm }
+    /** What's paused there, in every position any band control pauses it (the first band control's name). */
+    fun paused(place: Int?, gesture: Gesture, palm: Palm?): Paused? {
+        val all = paused.filter { it.place == place && it.gesture == gesture && it.palm == palm }
+        return all.firstOrNull()?.copy(positions = all.flatMap { it.positions }.toSet())
+    }
     /** A slider's pause, in every position any band control pauses it (the first band control's name). */
     fun pausedSlider(profile: Int, part: Part, pair: Int): PausedSlider? {
         val all = pausedSliders.filter { it.profile == profile && it.part == part && it.pair == pair }

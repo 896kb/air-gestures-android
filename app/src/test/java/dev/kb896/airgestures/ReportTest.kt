@@ -51,6 +51,9 @@ class ReportTest {
             "paused_sliders":[{"control":"previous","gesture":"middle_drag_left","profile":1,"finger":"middle","pair":0,"positions":["down"]},
                               {"control":"next","gesture":"middle_drag_right","profile":1,"finger":"middle","pair":0,"positions":["up"]}]}""")
         assertEquals(1, now.count(1))
+        val two = Report("""{"paused":[{"control":"next","gesture":"index_tap","place":0,"palm":null,"positions":["down"]},
+            {"control":"draw","gesture":"index_tap","place":0,"palm":null,"positions":["up"]}]}""")
+        assertEquals(setOf(Palm.DOWN, Palm.UP), two.paused(0, Gesture.INDEX_TAP, null)!!.positions)
         assertEquals(setOf(Palm.DOWN, Palm.UP), now.pausedSlider(1, Part.MIDDLE, 0)!!.positions)
         val move = Report.choices("""[{"gesture":"middle_double","pauses":[
             {"control":"draw","gesture":"middle_double","place":0,"palm":null,"positions":["up"]},

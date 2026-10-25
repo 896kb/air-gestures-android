@@ -67,7 +67,11 @@ abstract class GestureScreen : Screen() {
         row(gap = 12f).apply {
             setPadding(0, dpi(8f), 0, dpi(8f))
             addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
-            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
+            // The gesture's name keeps its line; the right side takes the rest and wraps there.
+            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
+                text = gesture
+                isSingleLine = true
+            })
             addView(column(gap = 3f).apply {
                 gravity = android.view.Gravity.END
                 // Above the action, not beside it: beside, a long action squeezes the gesture's name onto two lines.
@@ -76,16 +80,16 @@ abstract class GestureScreen : Screen() {
                     android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
                 ).apply { gravity = android.view.Gravity.END } }
                 if (paused) addView(compactChip(pausedChip()), end())
-                addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action }, end())
+                addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action; gravity = android.view.Gravity.END }, end())
                 for ((tag, tagPaused) in tags) {
                     addView(row(gap = 6f).apply {
                         gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
                         if (tagPaused) addView(compactChip(pausedChip()))
-                        addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = tag })
+                        addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = tag; gravity = android.view.Gravity.END }, weighted())
                     }, end())
                 }
-                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint }, end())
-            })
+                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint; gravity = android.view.Gravity.END }, end())
+            }, weighted())
             // (i): how this action is used (Send to automation's guide).
             if (info != null) {
                 addView(android.widget.FrameLayout(context).apply {
