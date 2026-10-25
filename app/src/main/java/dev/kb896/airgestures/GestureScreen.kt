@@ -153,9 +153,12 @@ abstract class GestureScreen : Screen() {
         }
     }
 
-    /** Paused only in some positions (a band control limited to the palm up): "paused palm up". */
+    /**
+     * Under a Paused chip, when it's paused only in some positions (a band control limited to the
+     * palm up): "palm up only", "palm down, sideways only". Null when it's paused in all three.
+     */
     fun pausedWhere(paused: Report.Paused?): String? = paused?.positions?.takeIf { it.size < Palm.entries.size }
-        ?.let { p -> "paused " + Palm.entries.filter { it in p }.joinToString(" or ") { it.label.lowercase() } }
+        ?.let { p -> Palm.entries.filter { it in p }.joinToString(", ") { it.label.lowercase() } + " only" }
 
     /**
      * The During calls rows, grouped as a profile's: every gesture but the drags (as usual in a
