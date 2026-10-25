@@ -7,9 +7,11 @@
 //! ported from the Linux app.
 
 use band_core::events::Event;
+use band_core::haptics::HapticsCommand;
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
 use serde::Serialize;
+use std::collections::VecDeque;
 
 pub mod claim;
 pub mod config;
@@ -35,6 +37,12 @@ fn config_with(mapping: &str) -> Config {
 /// Battery query period and the quiet time before a stream-state query.
 const BATTERY_EVERY: f64 = 5.0;
 const QUIET_QUERY: f64 = 2.0;
+const OFF_PULSE_MS: u64 = 80;
+const ON_PULSE_MS: u64 = 300;
+const PROFILE_PULSE_MS: u64 = 40;
+const VOLUME_PULSE_MS: u64 = 18;
+const VOLUME_DETENT_INTERVAL: f64 = 0.100;
+const DOUBLE_GAP: f64 = 0.100;
 pub struct Connection {
     session: BandSession,
     controller: Controller,
@@ -44,11 +52,24 @@ pub struct Connection {
     next_battery: f64,
     actions: Vec<String>,
     log: Vec<String>,
+    band_vibration: bool,
+    haptics_queue: VecDeque<HapticStep>,
+    haptics_flight: Option<HapticFlight>,
+    haptics_next_at: f64,
+    last_clock: f64,
+    last_volume_detent: f64,
     /// The stream probe is on: the session's notes go to the log.
     probing: bool,
     /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
     field: Option<fieldtext::FieldTyping>,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct HapticStep { command: HapticsCommand, wait_after: f64, duration_ms: u64, priority: HapticPriority }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HapticPriority { State, Profile, Detent }
+#[derive(Debug, Clone, Copy)]
+struct HapticFlight { sequence: u32, sent_at: f64, duration_ms: u64, wait_after: f64, acknowledged: bool, priority: HapticPriority }
 
 #[derive(Serialize)]
 struct Snapshot<'a> {
@@ -104,6 +125,12 @@ impl Connection {
             next_battery: 0.0,
             actions: Vec::new(),
             log: Vec::new(),
+            band_vibration: true,
+            haptics_queue: VecDeque::new(),
+            haptics_flight: None,
+            haptics_next_at: 0.0,
+            last_clock: 0.0,
+            last_volume_detent: f64::NEG_INFINITY,
             probing: false,
             field: None,
         })
@@ -116,6 +143,7 @@ impl Connection {
 
     /// Bytes read from the band at `now` (seconds, monotonic); returns bytes to write.
     pub fn feed(&mut self, bytes: &[u8], now: f64) -> Result<Vec<u8>, String> {
+        self.last_clock = now;
         self.last_read = now;
         let result = self.session.feed(bytes, now).map_err(|e| e.to_string())?;
         let mut outgoing = result.outgoing;
@@ -128,6 +156,7 @@ impl Connection {
 
     /// Call every ~50 ms (held single taps fire on time); returns bytes to write.
     pub fn tick(&mut self, now: f64) -> Result<Vec<u8>, String> {
+        self.last_clock = now;
         let mut outgoing = Vec::new();
         for event in self.session.tick(now) {
             outgoing.extend(self.on_event(&event, now)?);
@@ -157,7 +186,175 @@ impl Connection {
                     .map_err(|e| e.to_string())?,
             );
         }
+        outgoing.extend(self.pump_haptics(now)?);
         Ok(outgoing)
+    }
+
+    /// Synchronize persistent gesture feedback on a newly opened Band session or
+    /// after the user's global band-vibration preference changes. This adds no cue.
+    pub fn set_band_vibration(&mut self, enabled: bool) -> Result<Vec<u8>, String> {
+        self.band_vibration = enabled;
+        self.replace_haptics_state();
+        self.push_pattern(if enabled && !self.controller.status().paused {
+            1
+        } else {
+            2
+        });
+        self.pump_haptics(self.last_clock)
+    }
+
+    /// Reassert the built-in controls pattern without a transition pulse.
+    pub fn sync_controls_haptics(&mut self, paused: bool) -> Result<Vec<u8>, String> {
+        self.replace_haptics_state();
+        self.push_pattern(if self.band_vibration && !paused { 1 } else { 2 });
+        self.pump_haptics(self.last_clock)
+    }
+
+    /// Queue the control transition cue. An active RPC completes before the
+    /// replacement sequence starts; later toggles replace queued obsolete steps.
+    pub fn controls_haptics(&mut self, paused: bool) -> Result<Vec<u8>, String> {
+        self.replace_haptics_state();
+        if !self.band_vibration {
+            self.push_pattern(2);
+        } else if paused {
+            self.push_vibration(OFF_PULSE_MS, DOUBLE_GAP, HapticPriority::State);
+            self.push_vibration(OFF_PULSE_MS, 0.0, HapticPriority::State);
+            self.push_pattern(2);
+        } else {
+            self.push_pattern(1);
+            self.push_vibration(ON_PULSE_MS, 0.0, HapticPriority::State);
+        }
+        self.pump_haptics(self.last_clock)
+    }
+
+    /// Replace the phone's one/two profile buzzes with matching Band pulses.
+    pub fn profile_haptics(&mut self, previous: bool) -> Result<Vec<u8>, String> {
+        if !self.band_vibration {
+            return Ok(Vec::new());
+        }
+        if self
+            .haptics_queue
+            .iter()
+            .any(|step| step.priority == HapticPriority::State)
+            || self
+                .haptics_flight
+                .is_some_and(|flight| flight.priority == HapticPriority::State)
+        {
+            return Ok(Vec::new());
+        }
+        self.haptics_queue
+            .retain(|step| step.priority != HapticPriority::Profile);
+        self.push_vibration(
+            PROFILE_PULSE_MS,
+            if previous { DOUBLE_GAP } else { 0.0 },
+            HapticPriority::Profile,
+        );
+        if previous {
+            self.push_vibration(PROFILE_PULSE_MS, 0.0, HapticPriority::Profile);
+        }
+        self.pump_haptics(self.last_clock)
+    }
+
+    /// One actual phone-volume detent, dropped during other haptics and rate-limited.
+    pub fn volume_detent(&mut self) -> Result<Vec<u8>, String> {
+        let now = self.last_clock;
+        if !self.band_vibration
+            || !self.live
+            || !self.session.streams_enabled()
+            || self.haptics_flight.is_some()
+            || !self.haptics_queue.is_empty()
+            || now - self.last_volume_detent < VOLUME_DETENT_INTERVAL
+        {
+            return Ok(Vec::new());
+        }
+        self.last_volume_detent = now;
+        self.haptics_queue.push_back(HapticStep {
+            command: HapticsCommand::Vibrate {
+                duration_ms: VOLUME_PULSE_MS,
+                amplitude: 128,
+            },
+            wait_after: 0.0,
+            duration_ms: VOLUME_PULSE_MS,
+            priority: HapticPriority::Detent,
+        });
+        self.pump_haptics(now)
+    }
+
+    fn push_pattern(&mut self, pattern_id: u32) {
+        self.haptics_queue.push_back(HapticStep {
+            command: HapticsCommand::Perform { pattern_id },
+            wait_after: 0.0,
+            duration_ms: 0,
+            priority: HapticPriority::State,
+        });
+    }
+
+    fn push_vibration(&mut self, duration_ms: u64, wait_after: f64, priority: HapticPriority) {
+        self.haptics_queue.push_back(HapticStep {
+            command: HapticsCommand::Vibrate {
+                duration_ms,
+                amplitude: 255,
+            },
+            wait_after,
+            duration_ms,
+            priority,
+        });
+    }
+
+    fn replace_haptics_state(&mut self) {
+        self.haptics_queue.clear();
+    }
+
+    fn pump_haptics(&mut self, now: f64) -> Result<Vec<u8>, String> {
+        self.retire_completed_haptics(now);
+        if self.haptics_flight.is_some()
+            || !self.live
+            || now < self.haptics_next_at
+            || !self.session.streams_enabled()
+            || self.haptics_queue.is_empty()
+        {
+            return Ok(Vec::new());
+        }
+        let step = self
+            .haptics_queue
+            .pop_front()
+            .expect("nonempty haptics queue");
+        match self.session.send_haptics(step.command, now) {
+            Ok(bytes) => {
+                let sequence = self.session.configuration_sequence();
+                self.haptics_flight = Some(HapticFlight {
+                    sequence,
+                    sent_at: now,
+                    duration_ms: step.duration_ms,
+                    wait_after: step.wait_after,
+                    acknowledged: false,
+                    priority: step.priority,
+                });
+                Ok(bytes)
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.log.push(format!("haptics unavailable: {message}"));
+                // A transient not-ready condition leaves the step queued for the
+                // next tick; other errors are logged and discarded to avoid spin.
+                if message.contains("live Band control channel") {
+                    self.haptics_queue.push_front(step);
+                }
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    fn retire_completed_haptics(&mut self, now: f64) {
+        if let Some(flight) = self.haptics_flight
+            && flight.acknowledged
+        {
+            let due = flight.sent_at + flight.duration_ms as f64 / 1000.0 + flight.wait_after;
+            if now >= due {
+                self.haptics_flight = None;
+                self.haptics_next_at = due;
+            }
+        }
     }
 
     /// Action names to run since the last call ("media.next", "volume.up", …).
@@ -207,7 +404,7 @@ impl Connection {
     /// the bytes to write. The answer and the config read back go to the log.
     pub fn probe_config(&mut self, hex: &str, now: f64) -> Result<Vec<u8>, String> {
         let hex: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
-        if hex.len() % 2 != 0 {
+        if !hex.len().is_multiple_of(2) {
             return Err("odd number of hex digits".into());
         }
         let body = (0..hex.len())
@@ -436,6 +633,13 @@ impl Connection {
                 }
             }
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
+            Event::HapticsFinished { sequence, rpc_success, haptics_success } => {
+                if let Some(flight) = self.haptics_flight.as_mut() && flight.sequence == *sequence {
+                    flight.acknowledged = true;
+                    if !rpc_success { self.log.push("Band haptics RPC failed".into()); }
+                    else if haptics_success != &Some(true) { self.log.push("Band omitted or rejected detailed haptics status".into()); }
+                }
+            }
             _ => {}
         }
         let gestures = self.controller.status().gestures;
@@ -475,5 +679,62 @@ impl Connection {
             }
         }
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod haptics_tests {
+    use super::*;
+    use p256::ecdsa::SigningKey;
+    use rand_core::OsRng;
+
+    fn connection() -> Connection {
+        let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
+        Connection::new(&identity.private_bytes(), 0, false, "", "").unwrap()
+    }
+
+    #[test]
+    fn controls_transition_queues_the_verified_cue_order() {
+        let mut connection = connection();
+        connection.controls_haptics(true).unwrap();
+        let off: Vec<_> = connection.haptics_queue.iter().copied().collect();
+        assert_eq!(off.len(), 3);
+        assert_eq!(off[0].command, HapticsCommand::Vibrate { duration_ms: 80, amplitude: 255 });
+        assert_eq!(off[0].wait_after, DOUBLE_GAP);
+        assert_eq!(off[1].command, off[0].command);
+        assert_eq!(off[2].command, HapticsCommand::Perform { pattern_id: 2 });
+
+        connection.controls_haptics(false).unwrap();
+        let on: Vec<_> = connection.haptics_queue.iter().copied().collect();
+        assert_eq!(on.len(), 2);
+        assert_eq!(on[0].command, HapticsCommand::Perform { pattern_id: 1 });
+        assert_eq!(on[1].command, HapticsCommand::Vibrate { duration_ms: 300, amplitude: 255 });
+    }
+
+    #[test]
+    fn preference_off_keeps_state_quiet_and_detents_do_not_backlog() {
+        let mut connection = connection();
+        connection.set_band_vibration(false).unwrap();
+        assert_eq!(connection.haptics_queue.len(), 1);
+        assert_eq!(connection.haptics_queue[0].command, HapticsCommand::Perform { pattern_id: 2 });
+        connection.controls_haptics(false).unwrap();
+        assert_eq!(connection.haptics_queue.len(), 1);
+        connection.last_clock = 1.0;
+        assert!(connection.volume_detent().unwrap().is_empty());
+        assert_eq!(connection.haptics_queue.len(), 1);
+    }
+
+    #[test]
+    fn profile_cues_are_one_or_two_pulses_and_yield_to_controls() {
+        let mut connection = connection();
+        connection.profile_haptics(false).unwrap();
+        assert_eq!(connection.haptics_queue.len(), 1);
+        assert_eq!(connection.haptics_queue[0].duration_ms, PROFILE_PULSE_MS);
+        assert_eq!(connection.haptics_queue[0].priority, HapticPriority::Profile);
+        connection.profile_haptics(true).unwrap();
+        assert_eq!(connection.haptics_queue.len(), 2);
+        connection.controls_haptics(true).unwrap();
+        assert_eq!(connection.haptics_queue.len(), 3);
+        assert_eq!(connection.haptics_queue[0].priority, HapticPriority::State);
     }
 }

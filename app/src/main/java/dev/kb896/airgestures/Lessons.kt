@@ -64,6 +64,8 @@ object Backup {
         val vibrate: Boolean,
         /** Null in a backup made before sequences: restoring it leaves the sequences as they are. */
         val sequences: Sequences.Library? = null,
+        /** Optional so older version-1 backups migrate to the enabled default. */
+        val bandVibration: Boolean = true,
     )
 
     fun write(settings: Settings): String {
@@ -78,6 +80,7 @@ object Backup {
             put("speak", settings.speak)
             put("vibrate", settings.vibrate)
             settings.sequences?.let { put("sequences", JSONObject(it.toJson())) }
+            put("bandVibration", settings.bandVibration)
         }.toString(2)
     }
 
@@ -93,6 +96,7 @@ object Backup {
             json.optBoolean("speak", false),
             json.optBoolean("vibrate", false),
             json.opt("sequences")?.let { Sequences.Library.fromJson(it.toString()) },
+            json.optBoolean("bandVibration", true),
         )
     }.getOrNull()
 }

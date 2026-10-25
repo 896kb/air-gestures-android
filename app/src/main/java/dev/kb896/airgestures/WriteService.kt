@@ -409,11 +409,9 @@ class WriteService : AccessibilityService() {
         }
     }
 
-    /** The phone's own short buzz: one when the pen goes down, two when it lifts. */
+    /** The Band cues once when the pen goes down and twice when it lifts, if feedback is enabled. */
     private fun buzz(down: Boolean) {
-        val vibrator = getSystemService(android.os.Vibrator::class.java) ?: return
-        val pattern = if (down) longArrayOf(0, 30) else longArrayOf(0, 20, 80, 20)
-        runCatching { vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1)) }
+        BandService.instance?.typingHaptics(down)
     }
 
     /** Delete [delete] characters before the cursor, then insert [insert] there. */

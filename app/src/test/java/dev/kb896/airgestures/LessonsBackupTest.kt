@@ -53,6 +53,11 @@ class LessonsBackupTest {
         assertNull(Backup.read(old)?.sequences)
     }
 
+    @Test fun `version one backups without Band vibration migrate to enabled`() {
+        val old = Backup.write(settings).replace(Regex(",\\s*\"bandVibration\":\\s*true"), "")
+        assertTrue(Backup.read(old)?.bandVibration == true)
+    }
+
     @Test fun `a broken, empty or newer backup is refused`() {
         assertNull(Backup.read("not json"))
         assertNull(Backup.read("""{"version":1,"profiles":[],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""))

@@ -97,4 +97,12 @@ class ProfileListTest {
         val list = ProfileList.migrated(mapOf(), "volume")
         assertEquals(list, list.picking("nope"))
     }
+
+    @Test fun `Bluetooth only setting survives profile serialization and defaults off`() {
+        val list = three().withMusicBluetoothOnly("p2", true)
+        val (profiles, apps) = list.toJson()
+        val restored = ProfileList.fromJson(profiles, apps, list.picked)
+        assertFalse(restored.profile("p1")!!.musicBluetoothOnly)
+        assertTrue(restored.profile("p2")!!.musicBluetoothOnly)
+    }
 }

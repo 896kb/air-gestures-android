@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.SystemClock
 import org.json.JSONObject
 import java.io.File
+import java.util.ArrayDeque
 import java.util.UUID
 import kotlin.concurrent.thread
 
@@ -52,6 +53,7 @@ class BandLink(
     private var socket: BluetoothSocket? = null
     private var handle = 0L
     private var lastStatus = ""
+    private val hapticCommands = ArrayDeque<PendingHaptic>()
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
     @Volatile private var pending = false
     @Volatile private var wanted = false
@@ -82,6 +84,16 @@ class BandLink(
     fun setPaused(paused: Boolean) = synchronized(lock) {
         if (handle != 0L) Bridge.setPaused(handle, paused, now())
         publishStatus()
+    }
+
+    fun setBandVibration(enabled: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.BandVibration(enabled)) }
+    fun controlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.Controls(paused)) }
+    fun syncControlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.SyncControls(paused)) }
+    fun profileHaptics(previous: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.Profile(previous)) }
+    fun volumeDetent() = synchronized(lock) { enqueueHaptics(HapticCommand.VolumeDetent) }
+
+    private fun enqueueHaptics(command: HapticCommand) {
+        if (handle != 0L) hapticCommands.addLast(PendingHaptic(generation, command))
     }
 
     fun setMapping(mapping: String) = synchronized(lock) {
@@ -201,6 +213,7 @@ class BandLink(
         linkUp = false
         live = false
         synchronized(lock) {
+            hapticCommands.clear()
             if (handle != 0L) Bridge.close(handle)
             handle = 0L
             lastStatus = ""
@@ -292,6 +305,8 @@ class BandLink(
         return try {
             synchronized(lock) {
                 handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping())
+                // Seed feedback on the new session before any connection handshake/status.
+                Bridge.setBandVibration(handle, prefs.bandVibration)
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")
@@ -330,9 +345,13 @@ class BandLink(
                 while (attempt == generation) {
                     SystemClock.sleep(50)
                     try {
-                        val out = synchronized(lock) { if (handle == 0L) null else Bridge.tick(handle, now()) }
-                        out?.let(write)
-                        drain()
+                        synchronized(lock) {
+                            if (attempt == generation && handle != 0L) {
+                                Bridge.tick(handle, now()).takeIf { it.isNotEmpty() }?.let(write)
+                                drain()
+                                flushHapticsLocked(write, attempt)
+                            }
+                        }
                     } catch (e: Exception) {
                         if (attempt == generation) log("link: ${e.message}")
                         break
@@ -343,11 +362,13 @@ class BandLink(
             while (attempt == generation) {
                 val count = input.read(buffer)
                 if (count < 0) break
-                val out = synchronized(lock) {
-                    if (handle == 0L) null else Bridge.feed(handle, buffer.copyOf(count), now())
+                synchronized(lock) {
+                    if (attempt == generation && handle != 0L) {
+                        Bridge.feed(handle, buffer.copyOf(count), now()).takeIf { it.isNotEmpty() }?.let(write)
+                        drain()
+                        flushHapticsLocked(write, attempt)
+                    }
                 }
-                out?.let(write)
-                drain()
             }
             if (attempt == generation) log("the band closed the input channel")
         } catch (e: Exception) {
@@ -384,6 +405,31 @@ class BandLink(
         val status = JSONObject(json)
         if (status.optBoolean("connected")) listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
         listener.onStatus(status)
+    }
+
+    /** JNI and writes share the active generation and writer under lock. */
+    private fun flushHapticsLocked(write: (ByteArray) -> Unit, attempt: Int) {
+        while (attempt == generation && handle != 0L && hapticCommands.isNotEmpty()) {
+            val pending = hapticCommands.removeFirst()
+            if (pending.generation != attempt) continue
+            val bytes = when (val command = pending.command) {
+                is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
+                is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
+                is HapticCommand.SyncControls -> Bridge.syncControlsHaptics(handle, command.paused)
+                is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
+                HapticCommand.VolumeDetent -> Bridge.volumeDetent(handle)
+            }
+            if (bytes.isNotEmpty()) write(bytes)
+        }
+    }
+
+    private data class PendingHaptic(val generation: Int, val command: HapticCommand)
+    private sealed interface HapticCommand {
+        data class BandVibration(val enabled: Boolean) : HapticCommand
+        data class Controls(val paused: Boolean) : HapticCommand
+        data class SyncControls(val paused: Boolean) : HapticCommand
+        data class Profile(val previous: Boolean) : HapticCommand
+        data object VolumeDetent : HapticCommand
     }
 
     private fun log(line: String) = listener.onLog(line)

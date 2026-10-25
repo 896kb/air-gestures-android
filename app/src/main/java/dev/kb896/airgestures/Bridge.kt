@@ -21,6 +21,11 @@ object Bridge {
     /** Status snapshot JSON: connected, paused, battery, charging, hand, dial, last_gesture, last_action, gestures. */
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
+    @JvmStatic external fun setBandVibration(handle: Long, enabled: Boolean): ByteArray
+    @JvmStatic external fun controlsHaptics(handle: Long, paused: Boolean): ByteArray
+    @JvmStatic external fun syncControlsHaptics(handle: Long, paused: Boolean): ByteArray
+    @JvmStatic external fun profileHaptics(handle: Long, previous: Boolean): ByteArray
+    @JvmStatic external fun volumeDetent(handle: Long): ByteArray
     @JvmStatic external fun setDial(handle: Long, dial: String)
     /** `gesture=action;…` (see Prefs.mapping). */
     @JvmStatic external fun setMapping(handle: Long, mapping: String)

@@ -45,6 +45,16 @@ class ProfileActivity : GestureScreen() {
         titleView?.text = profile.name
         gestures.removeAllViews()
         gestures.addView(profileRows(profileId))
+        gestures.addView(settingRow(
+            "Bluetooth music only",
+            "Playback and seek need connected Bluetooth audio; volume is unaffected",
+            pill(if (profile.musicBluetoothOnly) "On" else "Off") {
+                Profiles.update(applicationContext) {
+                    it.withMusicBluetoothOnly(profileId, !profile.musicBluetoothOnly)
+                }
+                render()
+            }.first,
+        ))
 
         apps.removeAllViews()
         apps.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {

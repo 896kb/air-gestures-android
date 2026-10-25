@@ -4,7 +4,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One gesture set: a name, an action id per gesture key, and what pinch and turn does. */
-data class Profile(val id: String, val name: String, val map: Map<String, String>, val dial: String)
+data class Profile(
+    val id: String, val name: String, val map: Map<String, String>, val dial: String,
+    val musicBluetoothOnly: Boolean = false,
+)
 
 /**
  * The profiles, the one the user picked, and the apps that have their own (package → profile
@@ -59,6 +62,9 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
 
     fun withDial(id: String, dial: String) = change(id) { it.copy(dial = dial) }
 
+    fun withMusicBluetoothOnly(id: String, enabled: Boolean) =
+        change(id) { it.copy(musicBluetoothOnly = enabled) }
+
     private fun change(id: String, how: (Profile) -> Profile) = copy(profiles = profiles.map { if (it.id == id) how(it) else it })
 
     /** The profiles and the apps, as the JSON the store keeps (the pick is stored on its own). */
@@ -70,6 +76,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                 put("name", profile.name)
                 put("map", JSONObject(profile.map))
                 put("dial", profile.dial)
+                put("musicBluetoothOnly", profile.musicBluetoothOnly)
             })
         }
         return list.toString() to JSONObject(apps).toString()
@@ -91,6 +98,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                     item.getString("name"),
                     map.keys().asSequence().associateWith { map.getString(it) },
                     item.getString("dial"),
+                    item.optBoolean("musicBluetoothOnly", false),
                 )
             }
             require(parsed.isNotEmpty()) { "no profiles" }

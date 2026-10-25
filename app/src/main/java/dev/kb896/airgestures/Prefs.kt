@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
 
+    /** Let app feedback use the Band's haptics (default on for new installs). */
+    var bandVibration: Boolean
+        get() = prefs.getBoolean("band.vibration", true)
+        set(value) = prefs.edit().putBoolean("band.vibration", value).apply()
+
     /** "left" or "right" once chosen in the app (the band is set to it on every connection), else "band". */
     var hand: String
         get() = prefs.getString("hand", "band") ?: "band"
