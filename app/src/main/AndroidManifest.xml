@@ -73,6 +73,8 @@
         <activity android:name=".DragsActivity" android:exported="false" />
         <activity android:name=".PalmCalibrationActivity" android:exported="false" />
         <activity android:name=".TeachDragsActivity" android:exported="false" />
+        <activity android:name=".DrawingsActivity" android:exported="false" />
+        <activity android:name=".TeachDrawingActivity" android:exported="false" />
         <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SequenceActivity" android:exported="false" />
 

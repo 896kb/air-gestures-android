@@ -15,6 +15,7 @@ class GesturesActivity : GestureScreen() {
     private lateinit var profiles: LinearLayout
     private lateinit var calls: LinearLayout
     private lateinit var sequences: LinearLayout
+    private lateinit var drawings: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +25,7 @@ class GesturesActivity : GestureScreen() {
         profiles = column(gap = 8f)
         calls = column()
         sequences = column(gap = 8f)
+        drawings = column()
         show(pageColumn().apply {
             addView(warningsCard)
             addView(card(null, column(gap = 4f).apply {
@@ -34,6 +36,7 @@ class GesturesActivity : GestureScreen() {
                 addView(band)
             }))
             addView(card("Profiles", profiles))
+            addView(card(null, drawings))
             addView(card("Sequences", sequences))
             addView(card("During calls", column(gap = 8f).apply {
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
@@ -124,6 +127,13 @@ class GesturesActivity : GestureScreen() {
                 render()
             }.first))
         }
+        drawings.removeAllViews()
+        val taught = Drawings.load(this).drawings.size
+        drawings.addView(navRow(R.drawable.ic_pencil, "Drawings", detail = when (taught) {
+            0 -> "None yet"
+            1 -> "1 drawing"
+            else -> "$taught drawings"
+        }, count = report.count(Builtin.DRAW)) { DrawingsActivity.open(this) })
         sequences.removeAllViews()
         val library = Profiles.sequences(this).sequences
         sequences.addView(column().apply {

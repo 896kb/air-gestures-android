@@ -70,10 +70,35 @@ import kotlin.concurrent.thread
  *
  *     ... --es pad Lightbulb
  *
+ * One try on the Teach a drawing screen in front, without a band: a circle, a zigzag, or a
+ * tiny one (`small`), as a draw session's strokes:
+ *
+ *     ... --es teach circle
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra("teach")?.let { shape ->
+            val screen = TeachDrawingActivity.listening ?: run {
+                Log.i("AirGestures", "debug teach: no Teach a drawing screen in front")
+                return
+            }
+            val points = when (shape) {
+                "zigzag" -> listOf(0.0 to 20.0, 20.0 to 20.0, 0.0 to 0.0, 20.0 to 0.0)
+                "small" -> listOf(0.0 to 0.0, 0.5 to 0.5, 1.0 to 0.0)
+                else -> (0..40).map { i -> val a = i / 40.0 * 2 * Math.PI; 10 * Math.cos(a) to 10 * Math.sin(a) }
+            }
+            val json = DrawingLibrary.tryJson(listOf(points)).toString()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                screen.started()
+                screen.pen(true)
+                for ((x, y) in points) screen.point(0, x.toFloat(), y.toFloat())
+                screen.pen(false)
+                screen.finished(json)
+            }
+            return
+        }
         intent.getStringExtra("pad")?.let { name ->
             val pad = TouchService.instance?.pad ?: run {
                 Log.i("AirGestures", "debug pad: the accessibility service is off")

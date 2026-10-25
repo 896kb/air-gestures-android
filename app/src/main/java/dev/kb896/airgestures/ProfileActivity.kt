@@ -15,6 +15,7 @@ class ProfileActivity : GestureScreen() {
     private lateinit var gestures: LinearLayout
     private lateinit var note: android.widget.TextView
     private lateinit var dials: LinearLayout
+    private lateinit var drawings: LinearLayout
     private lateinit var apps: LinearLayout
     private lateinit var actions: LinearLayout
 
@@ -24,6 +25,7 @@ class ProfileActivity : GestureScreen() {
         gestures = column()
         note = Cb.text(this, 13f, color = Cb.INK_500).apply { setLineSpacing(0f, 1.3f) }
         dials = column(gap = 4f)
+        drawings = column()
         apps = column(gap = 8f)
         actions = row(gap = 10f)
         show(pageColumn().apply {
@@ -32,6 +34,7 @@ class ProfileActivity : GestureScreen() {
                 addView(note)
             }))
             addView(card("Dials · pinch and turn", dials))
+            addView(card(null, drawings))
             addView(card("Apps", apps))
             addView(actions)
         }, title = Profiles.load(this).profile(profileId)?.name ?: "Profile")
@@ -81,6 +84,12 @@ class ProfileActivity : GestureScreen() {
                 DragsActivity.open(this, profileId, part)
             })
         }
+
+        drawings.removeAllViews()
+        val own = profile.drawings.keys.count { Drawings.load(this).get(it) != null }
+        drawings.addView(navRow(R.drawable.ic_pencil, "Drawings", detail = if (own == 0) "The shared ones" else "$own of its own") {
+            DrawingsActivity.open(this, profileId)
+        })
 
         apps.removeAllViews()
         apps.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {
