@@ -84,6 +84,7 @@ class MainActivity : Screen() {
         setupNav = FrameLayout(context)
         addView(setupNav)
         addView(navRow(R.drawable.ic_activity, "Activity") { open<ActivityLogActivity>() })
+        addView(navRow(R.drawable.ic_heart, "Credits") { open<CreditsActivity>() })
     })
 
     /** Setup's row, with how many steps are left. */
