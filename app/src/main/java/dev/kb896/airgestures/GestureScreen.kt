@@ -1,6 +1,31 @@
 package dev.kb896.airgestures
 
+import android.content.Context
 import android.content.Intent
+
+/** Actions in words, for screens and services alike (the draw pad names what a drawing ran). */
+object Labels {
+    /** An action id in words: Open <app>, Drawn swipe, Sequence: <name>, Wait 2 s… */
+    fun action(context: Context, id: String): String = when {
+        Sequences.waitMs(id) != null -> "Wait ${seconds(Sequences.waitMs(id)!!)}"
+        id.startsWith(Strokes.PATH) -> "Drawn swipe"
+        id.startsWith(Sequences.PREFIX) ->
+            Profiles.sequences(context).get(id.removePrefix(Sequences.PREFIX))?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
+        else -> when (val action = Action.of(id)) {
+            Action.OPEN_APP -> "Open ${appName(context, id.removePrefix(APP_PREFIX))}"
+            else -> action.label
+        }
+    }
+
+    /** An app's name, or its package if it's gone. */
+    fun appName(context: Context, pkg: String) = runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault(pkg)
+
+    /** 0.5 s, 2 s, 1.2 s. */
+    fun seconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
+}
 
 /**
  * What the gesture screens share: the rows and the pickers for an action, an app, a tap
@@ -18,24 +43,45 @@ abstract class GestureScreen : Screen() {
         else -> stepLabel(id)
     }
 
-    /** An action id in words: Open <app>, Drawn swipe, Sequence: <name>, Wait 2 s… */
-    fun stepLabel(id: String): String = when {
-        Sequences.waitMs(id) != null -> "Wait ${formatSeconds(Sequences.waitMs(id)!!)}"
-        id.startsWith(Strokes.PATH) -> "Drawn swipe"
-        id.startsWith(Sequences.PREFIX) ->
-            Profiles.sequences(this).get(id.removePrefix(Sequences.PREFIX))?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
-        else -> when (val action = Action.of(id)) {
-            Action.OPEN_APP -> "Open ${appName(id.removePrefix(APP_PREFIX))}"
-            else -> action.label
-        }
-    }
+    /** An action id in words (see [Labels.action]). */
+    fun stepLabel(id: String): String = Labels.action(this, id)
 
-    fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, info: (() -> Unit)? = null, onClick: (() -> Unit)?) =
+    /**
+     * A gesture's row: its icon and name, then on the right its [action] (a coral Paused chip
+     * before it when a band control holds it back), each tag under it (a palm override, "palm up ·
+     * Next track"; `true`: that one is paused), a [hint] ("when you let go"), the (i) and the chevron.
+     */
+    fun gestureRow(
+        iconRes: Int,
+        gesture: String,
+        action: String,
+        unset: Boolean,
+        paused: Boolean = false,
+        tags: List<Pair<String, Boolean>> = emptyList(),
+        hint: String? = null,
+        info: (() -> Unit)? = null,
+        onClick: () -> Unit,
+    ) =
         row(gap = 12f).apply {
             setPadding(0, dpi(8f), 0, dpi(8f))
             addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
             addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
-            addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
+            addView(column(gap = 3f).apply {
+                gravity = android.view.Gravity.END
+                addView(row(gap = 6f).apply {
+                    gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                    if (paused) addView(pausedChip())
+                    addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
+                })
+                for ((tag, tagPaused) in tags) {
+                    addView(row(gap = 6f).apply {
+                        gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                        if (tagPaused) addView(pausedChip().apply { textSize = 8f })
+                        addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = tag })
+                    })
+                }
+                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint })
+            })
             // (i): how this action is used (Send to automation's guide).
             if (info != null) {
                 addView(android.widget.FrameLayout(context).apply {
@@ -47,12 +93,10 @@ abstract class GestureScreen : Screen() {
                     setOnClickListener { info() }
                 })
             }
-            addView(icon(if (onClick != null) R.drawable.ic_chevron_right else R.drawable.ic_lock, 14f, Cb.INK_400))
-            if (onClick != null) {
-                isClickable = true
-                background = ripple()
-                setOnClickListener { onClick() }
-            }
+            addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))
+            isClickable = true
+            background = ripple()
+            setOnClickListener { onClick() }
         }
 
     /** The rows of [profile]'s gestures and its dial. */
@@ -62,13 +106,13 @@ abstract class GestureScreen : Screen() {
             val id = prefs.actionId(gesture, profile)
             val action = Action.of(id)
             val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
-            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE, guide) {
+            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE, info = guide) {
                 pick(gesture, profile)
             })
         }
         val dial = prefs.dial(profile)
         val dialGuide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
-        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, dialGuide) { pickDial(profile) })
+        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, info = dialGuide) { pickDial(profile) })
     }
 
     /** The During calls rows: every gesture, As usual unless set. */
@@ -209,9 +253,7 @@ abstract class GestureScreen : Screen() {
     }
 
     /** An app's name, or its package if it's gone. */
-    fun appName(pkg: String) = runCatching {
-        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-    }.getOrDefault(pkg)
+    fun appName(pkg: String) = Labels.appName(this, pkg)
 
     private fun pickDial(profile: String) {
         val current = Prefs(this).dial(profile)
@@ -223,7 +265,7 @@ abstract class GestureScreen : Screen() {
     }
 
     /** 0.5 s, 2 s, 1.2 s. */
-    fun formatSeconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
+    fun formatSeconds(ms: Long) = Labels.seconds(ms)
 
     /**
      * How Send to automation reaches Tasker, MacroDroid or Home Assistant: the broadcast (to

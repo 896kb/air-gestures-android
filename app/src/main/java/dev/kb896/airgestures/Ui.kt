@@ -124,13 +124,17 @@ abstract class Screen : Activity() {
         ColorStateList.valueOf(0x14111214), null, GradientDrawable().apply { setColor(-1); cornerRadius = dp(radius) },
     )
 
-    /** A row that opens another screen: icon, label, a quiet [detail] or a WARN [badge], chevron. */
-    fun navRow(iconRes: Int, label: String, badge: String? = null, detail: String? = null, onClick: () -> Unit) = row(gap = 12f).apply {
+    /**
+     * A row that opens another screen: icon, label, a quiet [detail] or a WARN [badge], the coral
+     * [count] of paused actions (when there are any), chevron.
+     */
+    fun navRow(iconRes: Int, label: String, badge: String? = null, detail: String? = null, count: Int = 0, onClick: () -> Unit) = row(gap = 12f).apply {
         setPadding(dpi(4f), dpi(12f), dpi(4f), dpi(12f))
         addView(icon(iconRes, 18f))
         addView(Cb.text(context, 15f, R.font.geist_medium, Cb.INK_900).apply { text = label }, weighted())
         if (detail != null) addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = detail })
         if (badge != null) addView(Cb.chip(context, Cb.Signal.WARN, badge))
+        if (count > 0) addView(Cb.count(context, count))
         addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))
         isClickable = true
         background = ripple()
@@ -143,6 +147,27 @@ abstract class Screen : Activity() {
         setPadding(dpi(16f), dpi(14f), dpi(16f), dpi(16f))
         if (title != null) addView(Cb.text(context, 17f, R.font.geist_semibold, Cb.INK_900, -.015f).apply { text = title })
         addView(content)
+    }
+
+    /** A coral PAUSED chip: an action a band control holds back. */
+    fun pausedChip() = Cb.chip(this, Cb.Signal.STOP, "Paused")
+
+    /** A coral WILL PAUSE chip: what moving a band control would hold back. */
+    fun willPauseChip() = Cb.chip(this, Cb.Signal.STOP, "Will pause")
+
+    /** A hairline card: [chip] and [text] in a row, then a [link] pill under it (mockup 6). */
+    fun banner(chip: View, text: String, link: String?, onLink: () -> Unit) = column(gap = 10f).apply {
+        background = Cb.hairlineCard(context)
+        setPadding(dpi(14f), dpi(12f), dpi(14f), dpi(12f))
+        addView(row(gap = 10f).apply {
+            gravity = Gravity.TOP
+            addView(chip)
+            addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
+                this.text = text
+                setLineSpacing(0f, 1.3f)
+            }, weighted())
+        })
+        if (link != null) addView(row().apply { addView(pill(link) { onLink() }.first) })
     }
 
     fun log(line: String) = BandService.state.update { copy(log = (log + line).takeLast(60)) }
@@ -251,11 +276,17 @@ abstract class Screen : Activity() {
         addView(control)
     }
 
-    /** One line in the picker: a Lucide icon (tinted) or an app's own icon (as is). */
-    class Option(val label: String, val selected: Boolean, val iconRes: Int = 0, val image: android.graphics.drawable.Drawable? = null)
+    /** One line in the picker: a Lucide icon (tinted) or an app's own icon (as is), and a quiet [detail] on the right. */
+    class Option(
+        val label: String,
+        val selected: Boolean,
+        val iconRes: Int = 0,
+        val image: android.graphics.drawable.Drawable? = null,
+        val detail: String? = null,
+    )
 
-    /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow). */
-    fun choose(title: String, options: List<Option>, heading: String = "Gesture", onChoice: (Int) -> Unit): android.app.Dialog {
+    /** The picker: a modal on the scrim (CargoBolt: 55% ink scrim, overlay shadow); [note] under the list. */
+    fun choose(title: String, options: List<Option>, heading: String = "Gesture", note: String? = null, onChoice: (Int) -> Unit): android.app.Dialog {
         val dialog = android.app.Dialog(this)
         val list = column(gap = 2f)
         val sheet = column(gap = 12f).apply {
@@ -280,6 +311,12 @@ abstract class Screen : Activity() {
                 setFadingEdgeLength(dpi(24f))
                 addView(list)
             })
+            if (note != null) {
+                addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
+                    text = note
+                    setLineSpacing(0f, 1.3f)
+                })
+            }
         }
         options.forEachIndexed { index, option ->
             val selected = option.selected
@@ -298,6 +335,7 @@ abstract class Screen : Activity() {
                     isSingleLine = true
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }, weighted())
+                if (option.detail != null) addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = option.detail })
                 if (selected) addView(icon(R.drawable.ic_check, 16f))
                 background = if (selected) GradientDrawable().apply {
                     cornerRadius = dp(10f)

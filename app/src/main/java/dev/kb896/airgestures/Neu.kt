@@ -115,6 +115,9 @@ object Cb {
             setColor(signal.fill)
         }
     }
+
+    /** The coral number of paused actions (mockup 1). */
+    fun count(context: Context, n: Int) = CountBadge(context, n)
 }
 
 /**
@@ -222,4 +225,36 @@ class NeuDrawable(
     override fun setColorFilter(colorFilter: ColorFilter?) = Unit
     @Deprecated("Deprecated in Java")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * The coral number of paused actions: just the number on a STOP plate, its digits centred on
+ * their own ink (Geist's digits sit high in the line box, so the font's metrics would put them
+ * off centre).
+ */
+class CountBadge(context: Context, count: Int) : android.view.View(context) {
+    private val text = count.toString()
+    private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Cb.font(context, R.font.geist_semibold)
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 11f, context.resources.displayMetrics)
+        color = Cb.Signal.STOP.label
+        fontFeatureSettings = "tnum"
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Cb.Signal.STOP.fill }
+    private val bounds = android.graphics.Rect().also { ink.getTextBounds(text, 0, text.length, it) }
+
+    init {
+        contentDescription = if (count == 1) "1 paused" else "$count paused"
+    }
+
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val size = Cb.dp(context, 20f).toInt()
+        setMeasuredDimension(maxOf(size, bounds.width() + Cb.dp(context, 12f).toInt()), size)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val r = height / 2f
+        canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), r, r, fill)
+        canvas.drawText(text, width / 2f - bounds.exactCenterX(), height / 2f - bounds.exactCenterY(), ink)
+    }
 }
