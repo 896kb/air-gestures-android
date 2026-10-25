@@ -115,15 +115,26 @@ abstract class GestureScreen : Screen() {
         addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, info = dialGuide) { pickDial(profile) })
     }
 
-    /** The During calls rows: every gesture, As usual unless set. */
-    fun callRows() = column(gap = 4f).apply {
+    /**
+     * The During calls rows: every gesture but the drags (as usual in a call), As usual unless
+     * set; one a band control holds back is Paused ([report]).
+     */
+    fun callRows(report: Report) = column(gap = 4f).apply {
         val prefs = Prefs(context)
-        for (gesture in Gesture.entries) {
+        for (gesture in Gesture.entries.filter { !it.drag }) {
             val id = prefs.callActionId(gesture)
             val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
             val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
-            addView(gestureRow(icon, gesture.label, label(id, calls = true), usual) { pick(gesture, null) })
+            val paused = report.paused(null, gesture, null) != null
+            addView(gestureRow(icon, gesture.label, label(id, calls = true), usual, paused = paused) { pick(gesture, null) })
         }
+    }
+
+    /** "Middle hold is Controls on/off; …": the gestures that are band controls now. */
+    fun bandNote(band: BandControls): String? {
+        val on = Builtin.entries.mapNotNull { b -> band[b]?.let { "${it.label} is ${b.label}" } }
+        if (on.isEmpty()) return null
+        return on.joinToString("; ", postfix = ".") + " Band controls work in every profile; what you set on those gestures here waits until they move."
     }
 
     /**

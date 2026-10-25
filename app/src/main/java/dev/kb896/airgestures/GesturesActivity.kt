@@ -4,20 +4,35 @@ import android.os.Bundle
 import android.widget.LinearLayout
 
 /**
- * The profiles (each its own gesture set, see [ProfileActivity]), how to switch between them,
- * and what the gestures do instead while the phone rings or a call is on (shared by all).
+ * What's worth a warning in the whole set, the band controls (above every profile, mockup 1),
+ * the profiles (each its own gesture set, see [ProfileActivity]) with the coral count of what
+ * the band controls pause there, the sequences, and During calls (its own screen, [CallsActivity]).
  */
 class GesturesActivity : GestureScreen() {
+    private lateinit var warnings: LinearLayout
+    private lateinit var warningsCard: LinearLayout
+    private lateinit var band: LinearLayout
     private lateinit var profiles: LinearLayout
     private lateinit var calls: LinearLayout
     private lateinit var sequences: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        warnings = column(gap = 8f)
+        warningsCard = card(null, warnings)
+        band = column()
         profiles = column(gap = 8f)
         calls = column()
         sequences = column(gap = 8f)
         show(pageColumn().apply {
+            addView(warningsCard)
+            addView(card(null, column(gap = 4f).apply {
+                addView(row(gap = 12f).apply {
+                    addView(Cb.text(context, 17f, R.font.geist_semibold, Cb.INK_900, -.015f).apply { text = "Band controls" }, weighted())
+                    addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = "All profiles" })
+                })
+                addView(band)
+            }))
             addView(card("Profiles", profiles))
             addView(card("Sequences", sequences))
             addView(card("During calls", column(gap = 8f).apply {
@@ -38,9 +53,20 @@ class GesturesActivity : GestureScreen() {
     override fun render() {
         val list = Profiles.load(this)
         val active = list.active(Profiles.foreground)
+        // Moving a band control and coming back re-renders (mockup 7: no toast).
+        val report = Report.of(this)
+        val controls = Profiles.band(this)
+        showWarnings(report)
+        band.removeAllViews()
+        for (builtin in Builtin.entries) {
+            val at = controls[builtin]
+            band.addView(navRow(builtin.icon, builtin.label, detail = at?.label ?: "Nothing", count = report.count(builtin)) {
+                BandControlActivity.open(this, builtin)
+            })
+        }
         profiles.removeAllViews()
         profiles.addView(column().apply {
-            for (profile in list.profiles) {
+            list.profiles.forEachIndexed { index, profile ->
                 val count = list.apps.values.count { it == profile.id }
                 val detail = listOfNotNull(
                     "In use".takeIf { profile.id == active.id && list.profiles.size > 1 },
@@ -50,14 +76,16 @@ class GesturesActivity : GestureScreen() {
                         else -> "$count apps"
                     },
                 ).joinToString(" · ").ifEmpty { null }
-                addView(navRow(R.drawable.ic_layers, profile.name, detail = detail) { ProfileActivity.open(context, profile.id) })
+                addView(navRow(R.drawable.ic_layers, profile.name, detail = detail, count = report.count(index)) {
+                    ProfileActivity.open(context, profile.id)
+                })
             }
         })
         profiles.addView(Cb.text(this, 13f, color = Cb.INK_500).apply {
             text = if (list.profiles.size > 1) {
-                "By default an index triple tap goes to the next profile and a middle triple tap to the previous; any gesture can, with Next or Previous profile. A tap waits a moment when its triple tap does something, to tell them apart."
+                "Next profile and Previous profile are band controls (above): by default an index and a middle triple tap. A tap waits a moment when its triple tap does something, to tell them apart."
             } else {
-                "Add a profile for another set of gestures; switch between them with a triple tap, or give apps their own."
+                "Add a profile for another set of gestures; switch with Next profile and Previous profile, or give apps their own."
             }
         })
         profiles.addView(row(gap = 10f).apply {
@@ -116,6 +144,36 @@ class GesturesActivity : GestureScreen() {
             }.first)
         })
         calls.removeAllViews()
-        calls.addView(callRows())
+        val prefs = Prefs(this)
+        val set = Gesture.entries.count { !it.drag && prefs.callActionId(it) != Mappings.AS_USUAL }
+        calls.addView(navRow(R.drawable.ic_phone, "During calls", detail = if (set > 0) "$set set" else "As usual", count = report.count(null as Int?)) {
+            open<CallsActivity>()
+        })
+    }
+
+    /** What band-core finds worth a warning in the whole set; only notes, nothing is blocked. */
+    private fun showWarnings(report: Report) {
+        val texts = report.warnings.mapNotNull { kind ->
+            when (kind) {
+                "no-controls" -> "No gesture turns the controls on and off. You can still do it from the app."
+                "no-way-out" -> "No gesture switches profiles. Use the app or the widget to switch."
+                "draw-on-tap" -> "Draw is on a single tap: while drawing, a short pinch is that tap, and it cancels the drawing."
+                else -> null
+            }
+        }
+        warnings.removeAllViews()
+        for (warning in texts) {
+            warnings.addView(row(gap = 12f).apply {
+                gravity = android.view.Gravity.TOP
+                addView(icon(R.drawable.ic_circle_alert, 16f, Cb.INK_500).apply {
+                    (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dpi(3f)
+                })
+                addView(Cb.text(context, 14f, color = Cb.INK_500).apply {
+                    text = warning
+                    setLineSpacing(0f, 1.3f)
+                }, weighted())
+            })
+        }
+        warningsCard.visibility = if (texts.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
     }
 }
