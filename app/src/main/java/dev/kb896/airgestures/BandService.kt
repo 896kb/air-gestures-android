@@ -446,7 +446,8 @@ class BandService : Service(), BandLink.Listener {
     /** The drawings changed: the band matches against the new ones. */
     fun drawingsChanged() {
         val library = Drawings.load(this)
-        Profiles.pruneDrawingActions(this, library.names.toSet())
+        // Never pruned from an unreadable file: its drawings are only in drawings.broken now.
+        if (Drawings.readable(this)) Profiles.pruneDrawingActions(this, library.names.toSet())
         link.setLibrary(library.toJson())
     }
 

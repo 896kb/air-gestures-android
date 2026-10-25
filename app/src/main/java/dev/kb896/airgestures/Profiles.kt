@@ -125,21 +125,21 @@ object Profiles {
      */
     fun updateDrawingActions(context: Context, change: (ProfileList, Map<String, String>) -> Pair<ProfileList, Map<String, String>>) =
         synchronized(this) {
-            val (list, shared) = change(load(context), sharedDrawings(context))
-            cached = list
-            val (profiles, apps) = list.toJson()
-            prefs(context).edit().putString(PROFILES, profiles).putString(APPS, apps).putString(PICKED, list.picked)
-                .putString(SHARED_DRAWINGS, JSONObject(shared).toString()).apply()
+            val before = load(context) to sharedDrawings(context)
+            val after = change(before.first, before.second)
+            if (after != before) writeDrawingActions(context, after.first, after.second)
         }
 
-    /** Actions only for drawings that exist ([names]): drawings.json is the source of truth. */
-    fun pruneDrawingActions(context: Context, names: Set<String>) {
-        val list = load(context)
-        val shared = sharedDrawings(context)
-        val prunedList = list.prunedDrawings(names)
-        val prunedShared = DrawingLibrary.pruned(shared, names)
-        if (prunedList != list || prunedShared != shared) updateDrawingActions(context) { _, _ -> prunedList to prunedShared }
+    private fun writeDrawingActions(context: Context, list: ProfileList, shared: Map<String, String>) {
+        cached = list
+        val (profiles, apps) = list.toJson()
+        prefs(context).edit().putString(PROFILES, profiles).putString(APPS, apps).putString(PICKED, list.picked)
+            .putString(SHARED_DRAWINGS, JSONObject(shared).toString()).apply()
     }
+
+    /** Actions only for drawings that exist ([names]): drawings.json is the source of truth. Worked out under the lock, on what's stored then. */
+    fun pruneDrawingActions(context: Context, names: Set<String>) =
+        updateDrawingActions(context) { list, shared -> list.prunedDrawings(names) to DrawingLibrary.pruned(shared, names) }
 
     /** Read, change and store under the store's lock, so two changes don't lose one. */
     fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) = synchronized(this) {

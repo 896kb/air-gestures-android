@@ -34,6 +34,7 @@ class DrawingsActivity : GestureScreen() {
         val shared = Profiles.sharedDrawings(this)
         val list = Profiles.load(this)
         body.removeAllViews()
+        Drawings.problem(this)?.let { body.addView(note(it).apply { setTextColor(Cb.INK_900) }) }
 
         val draw = band[Builtin.DRAW]
         body.addView(card(null, column(gap = 8f).apply {
@@ -44,7 +45,8 @@ class DrawingsActivity : GestureScreen() {
         }))
 
         body.addView(card("All profiles", column(gap = 8f).apply {
-            if (library.drawings.isEmpty()) addView(note("No drawings yet: teach one, then a drawing runs its action."))
+            // (While the file can't be read the note at the top says why there are none.)
+            if (library.drawings.isEmpty() && Drawings.readable(context)) addView(note("No drawings yet: teach one, then a drawing runs its action."))
             for (drawing in library.drawings) {
                 val action = shared[drawing.name].orEmpty()
                 // No shared action but some profiles' own: say where it does something.
@@ -151,7 +153,8 @@ class DrawingsActivity : GestureScreen() {
 
     /** A drawing and its actions, everywhere: the library first (the source of truth), then its actions. */
     private fun remove(name: String) {
-        Drawings.update(applicationContext) { it.without(name) }
+        // The file can't be read: nothing changes (the screen says why).
+        Drawings.update(applicationContext) { it.without(name) } ?: return
         Profiles.updateDrawingActions(applicationContext) { l, shared -> l.renamedDrawing(name, null) to (shared - name) }
     }
 
@@ -175,13 +178,17 @@ class DrawingsActivity : GestureScreen() {
         /**
          * [old] becomes [new] without losing its actions if it stops halfway: the actions are
          * copied to the new name, the library is written, then the old name's actions go.
+         * False (nothing changed) while the drawings file can't be read.
          */
-        fun renameDrawing(context: Context, old: String, new: String) {
+        fun renameDrawing(context: Context, old: String, new: String): Boolean {
+            if (!Drawings.readable(context)) return false
             Profiles.updateDrawingActions(context) { l, shared ->
                 l.renamedDrawing(new, null).copiedDrawing(old, new) to ((shared - new) + (shared[old]?.let { mapOf(new to it) } ?: emptyMap()))
             }
-            Drawings.update(context) { it.renamed(old, new) }
+            // Refused after all: the copies stay; the next good load prunes nothing that exists.
+            Drawings.update(context) { it.renamed(old, new) } ?: return false
             Profiles.updateDrawingActions(context) { l, shared -> l.renamedDrawing(old, null) to (shared - old) }
+            return true
         }
 
         /** A name on one line (the band's `@drawn` line carries it), trimmed. */

@@ -21,6 +21,8 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     private val teach = DrawTeach()
     private var editing: String? = null
     private var profileId: String? = null
+    /** Opened for this profile (its own drawing): saving for All profiles moves its own action to the shared one. */
+    private var forProfile: String? = null
     private var name = ""
     private var action = ""
     /** True: only in [profileId]'s own; false: all profiles. */
@@ -50,6 +52,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         editing = intent.getStringExtra(EXTRA_NAME)
         val list = Profiles.load(this)
         val extra = intent.getStringExtra(EXTRA_PROFILE)
+        forProfile = extra
         profileId = extra ?: list.picked
         own = extra != null
         name = editing.orEmpty()
@@ -125,12 +128,12 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         teach.add(tried)
         message = null
         if (!teach.full) {
-            main.postDelayed({ BandService.instance?.drawTry() }, NEXT_MS)
+            main.postDelayed({ service?.drawTry() }, NEXT_MS)
             return render()
         }
         message = teach.refused(Bridge.checkTries(teach.json())) ?: lookalike()
         alike = message == null
-        if (!teach.full) main.postDelayed({ BandService.instance?.drawTry() }, NEXT_MS)
+        if (!teach.full) main.postDelayed({ service?.drawTry() }, NEXT_MS)
         render()
     }
 
@@ -159,7 +162,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         alike = false
         message = null
         waiting = false
-        BandService.instance?.drawTry()
+        service?.drawTry()
         render()
     }
 
@@ -227,25 +230,39 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
                 alpha = if (ready) 1f else .4f
             })
             addView(pill("Start again") { startAgain() }.first)
-            if (waiting) addView(pill("Draw", R.drawable.ic_pencil) { waiting = false; message = null; BandService.instance?.drawTry(); render() }.first)
+            if (waiting) addView(pill("Draw", R.drawable.ic_pencil) { waiting = false; message = null; service?.drawTry(); render() }.first)
         })
     }
 
     private fun save() {
+        // The drawings file can't be read: nothing is written over it.
+        Drawings.problem(this)?.let {
+            message = it
+            return render()
+        }
         val clean = DrawingsActivity.cleanName(name)
         val old = editing
         when {
             // Taught again under another name: a rename first (its actions move safely), then the new tries.
-            old != null && old != clean -> DrawingsActivity.renameDrawing(applicationContext, old, clean)
+            old != null && old != clean -> if (!DrawingsActivity.renameDrawing(applicationContext, old, clean)) {
+                message = Drawings.problem(this)
+                return render()
+            }
             // A new drawing: whatever an old one of that name left behind goes.
             old == null -> Profiles.updateDrawingActions(applicationContext) { l, shared -> l.renamedDrawing(clean, null) to (shared - clean) }
         }
-        Drawings.update(applicationContext) { it.with(Drawing(clean, teach.tries.toList())) }
+        if (Drawings.update(applicationContext) { it.with(Drawing(clean, teach.tries.toList())) } == null) {
+            message = Drawings.problem(this)
+            return render()
+        }
         val where = profileId
+        val moved = forProfile
         Profiles.updateDrawingActions(applicationContext) { l, shared ->
             when {
-                // Only in one profile with no action: nothing to store (the shared one runs there).
-                own && where != null -> (if (action.isEmpty()) l else l.withDrawing(where, clean, action)) to shared
+                // Only in one profile: its own action, or none (Nothing: the shared one runs there).
+                own && where != null -> l.withDrawing(where, clean, action.ifEmpty { null }) to shared
+                // All profiles from a profile's own: the action becomes the shared one, the own entry goes.
+                moved != null -> l.withDrawing(moved, clean, null) to shared + (clean to action)
                 else -> l to shared + (clean to action)
             }
         }

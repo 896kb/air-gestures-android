@@ -205,7 +205,10 @@ class SetupActivity : Screen() {
     /** Replace the settings with a backup's, and give the band the new mapping. */
     private fun apply(settings: Backup.Settings) {
         val prefs = Prefs(this)
-        Profiles.update(applicationContext) { settings.profiles }
+        // The drawings first (their file is the source of truth), then the profiles and the shared
+        // drawings' actions in one edit, so the two never disagree.
+        settings.drawings?.let { restored -> Drawings.replace(applicationContext, restored) }
+        Profiles.updateDrawingActions(applicationContext) { _, shared -> settings.profiles to (settings.sharedDrawings ?: shared) }
         // Every gesture: the backup's call action, else its default (not what was set before).
         for ((key, id) in Backup.restoredCalls(settings.calls)) Gesture.of(key)?.let { prefs.setCallAction(it, id) }
         prefs.hand = settings.hand
@@ -213,8 +216,7 @@ class SetupActivity : Screen() {
         Profiles.setVibrate(this, settings.vibrate)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         Profiles.updateBand(applicationContext) { settings.band }
-        settings.sharedDrawings?.let { restored -> Profiles.updateSharedDrawings(applicationContext) { restored } }
-        settings.drawings?.let { restored -> Drawings.update(applicationContext) { restored } }
+        BandService.instance?.drawingsChanged()
         BandService.instance?.remap()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()

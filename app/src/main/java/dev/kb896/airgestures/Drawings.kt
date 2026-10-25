@@ -59,55 +59,117 @@ data class DrawingLibrary(val drawings: List<Drawing> = emptyList()) {
     }
 }
 
-/** Where the drawings live: the templates in a file (they can be large), the shared actions in [Profiles]. */
-object Drawings {
+/**
+ * The drawings file's state, free of Android so it's unit-tested. [read] gives the file's text
+ * (null: no file yet; an exception: unreadable), [write] stores it, [keepBroken] copies an
+ * unreadable file aside, [loaded] hears every good read. An unreadable file is never written
+ * over ([update] refuses, [problem] says why) and isn't cached: the next load tries it again.
+ */
+class DrawingStore(
+    private val read: () -> String?,
+    private val write: (String) -> Unit,
+    private val keepBroken: () -> Unit,
+    private val loaded: (DrawingLibrary) -> Unit = {},
+) {
     @Volatile
     private var cached: DrawingLibrary? = null
 
-    private fun file(context: Context) = AtomicFile(File(context.filesDir, "drawings.json"))
+    /** False while the file can't be read: nothing may write over it or prune actions from it. */
+    @Volatile
+    var readable = true
+        private set
 
-    fun load(context: Context): DrawingLibrary = cached ?: synchronized(this) { cached ?: read(context) }
+    /** What a screen shows while the file can't be read. */
+    val problem get() = if (readable) null else PROBLEM
 
-    /**
-     * The stored drawings (none before the first). An unreadable file is copied aside as
-     * drawings.broken (as profiles.broken) before anything can overwrite it, and isn't cached:
-     * the next load tries it again.
-     */
-    private fun read(context: Context): DrawingLibrary {
-        val file = file(context)
-        // readFully, not the base file's existence: AtomicFile also restores a write a crash cut short.
-        val text = try {
-            String(file.readFully())
-        } catch (_: java.io.FileNotFoundException) {
-            return DrawingLibrary().also { cached = it }
-        } catch (_: java.io.IOException) {
-            null
-        }
-        return runCatching { DrawingLibrary.fromJson(text!!) }.getOrElse {
-            android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
-            runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
+    fun load(): DrawingLibrary = cached ?: synchronized(this) { cached ?: fresh() }
+
+    private fun fresh(): DrawingLibrary {
+        val library = runCatching { read()?.let(DrawingLibrary::fromJson) ?: DrawingLibrary() }.getOrNull()
+        if (library == null) {
+            // Copied aside once, when it first fails.
+            if (readable) keepBroken()
+            readable = false
             return DrawingLibrary()
-        }.also {
+        }
+        readable = true
+        cached = library
+        loaded(library)
+        return library
+    }
+
+    /** The drawings changed and stored; null (nothing written) while the file can't be read. */
+    fun update(change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary? = synchronized(this) {
+        val now = load()
+        if (!readable) return null
+        change(now).also {
+            write(it.toJson())
             cached = it
-            // Actions only for drawings that exist (the library is the source of truth).
-            Profiles.pruneDrawingActions(context, it.names.toSet())
         }
     }
 
-    fun update(context: Context, change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary = synchronized(this) {
-        change(load(context)).also {
-            val file = file(context)
-            val out = file.startWrite()
-            try {
-                out.write(it.toJson().toByteArray())
-                file.finishWrite(out)
-            } catch (e: Exception) {
-                file.failWrite(out)
-                throw e
-            }
-            cached = it
-        }
+    /** All of them replaced on purpose (a backup's), even over an unreadable file (its copy is kept). */
+    fun replace(library: DrawingLibrary) = synchronized(this) {
+        write(library.toJson())
+        cached = library
+        readable = true
     }
+
+    companion object {
+        const val PROBLEM = "Your drawings file can't be read; it was kept as drawings.broken. Drawings can't be changed until it's fixed or a backup is restored."
+    }
+}
+
+/** Where the drawings live: the templates in a file (they can be large), the shared actions in [Profiles]. */
+object Drawings {
+    @Volatile
+    private var store: DrawingStore? = null
+
+    private fun store(context: Context): DrawingStore = store ?: synchronized(this) {
+        store ?: make(context.applicationContext).also { store = it }
+    }
+
+    private fun make(context: Context): DrawingStore {
+        val file = AtomicFile(File(context.filesDir, "drawings.json"))
+        return DrawingStore(
+            // readFully, not the base file's existence: AtomicFile also restores a write a crash cut short.
+            read = {
+                try {
+                    String(file.readFully())
+                } catch (_: java.io.FileNotFoundException) {
+                    null
+                }
+            },
+            write = { text ->
+                val out = file.startWrite()
+                try {
+                    out.write(text.toByteArray())
+                    file.finishWrite(out)
+                } catch (e: Exception) {
+                    file.failWrite(out)
+                    throw e
+                }
+            },
+            keepBroken = {
+                android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
+                runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
+            },
+            // Actions only for drawings that exist (the library is the source of truth).
+            loaded = { Profiles.pruneDrawingActions(context, it.names.toSet()) },
+        )
+    }
+
+    fun load(context: Context): DrawingLibrary = store(context).load()
+
+    /** False while drawings.json can't be read (see [DrawingStore]). */
+    fun readable(context: Context) = store(context).also { it.load() }.readable
+
+    fun problem(context: Context) = store(context).also { it.load() }.problem
+
+    /** Null (nothing written) while drawings.json can't be read. */
+    fun update(context: Context, change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary? = store(context).update(change)
+
+    fun replace(context: Context, library: DrawingLibrary) = store(context).replace(library)
 
     /** The action [name] runs in [profile]: its own, else the shared one ("" = none). */
     fun action(context: Context, profile: Profile, name: String) = DrawingLibrary.action(profile.drawings, Profiles.sharedDrawings(context), name)
