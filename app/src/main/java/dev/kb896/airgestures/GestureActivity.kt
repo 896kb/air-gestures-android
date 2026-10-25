@@ -124,6 +124,17 @@ class GestureActivity : GestureScreen() {
             addView(note("One position always keeps the normal action."))
         }))
 
+        // Calibration: the left wrist without one counts everything as palm down.
+        val prefs = Prefs(this)
+        if (prefs.handInUse() == "left" && Calibrations.get(this, prefs.bandAddress, "left").palm == null) {
+            body.addView(card(null, column(gap = 10f).apply {
+                addView(note("Your left wrist isn't calibrated: every gesture counts as palm down until you calibrate."))
+                addView(row().apply { addView(pill("Calibrate") { open<PalmCalibrationActivity>() }.first) })
+            }))
+        } else {
+            body.addView(navRow(R.drawable.ic_hand, "Palm positions feel off?", detail = "Calibrate") { open<PalmCalibrationActivity>() })
+        }
+
         // A hold that waits for the release (band-core's hold_waits).
         if (gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD) {
             val waits = report.holdWaits(index, gesture.part)
