@@ -197,8 +197,8 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPractice<'local>(
     unsafe { connection(handle) }.set_practice(practice != 0);
 }
 
-/// What's worth a warning in these profiles, one line each: `no-controls <index>`,
-/// `no-way-out <index>` (invalid JSON: `""`).
+/// What's worth a warning in these profiles, one word per line: `no-controls`, `no-way-out`,
+/// `draw-on-tap` (invalid JSON: `""`).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileWarnings<'local>(
     mut env: JNIEnv<'local>,

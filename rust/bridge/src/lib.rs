@@ -6,7 +6,7 @@
 //! Also the Meta sign-in and the ownership claim (`metaauth`, `meta`, `claim`),
 //! ported from the Linux app.
 
-use band_core::controls::{Controls, Output};
+use band_core::controls::{Controls, Finger, Output};
 use band_core::events::{Event, Hand};
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
@@ -30,6 +30,8 @@ const QUIET_QUERY: f64 = 2.0;
 pub struct Connection {
     session: BandSession,
     controls: Controls<String>,
+    /// The hand setting and both wrists' calibrations (see `profiles::Setup`).
+    setup: profiles::Setup,
     /// A hand the controls asked for without a clock (`set_profiles`): `tick` writes it.
     pending_hand: Option<Hand>,
     live: bool,
@@ -76,14 +78,15 @@ impl Connection {
             length => return Err(format!("owner.key must be 32 or 97 bytes, not {length}")),
         };
         let identity = EnrollmentIdentity::from_bytes(private, band).map_err(|e| e.to_string())?;
-        let (options, profiles) = profiles::parse(profiles)?;
-        let mut controls = Controls::new(options, profiles);
+        let (setup, profiles) = profiles::parse(profiles)?;
+        let mut controls = Controls::new(setup.options(None), profiles);
         if paused {
             controls.pause();
         }
         Ok(Self {
             session: BandSession::new(Some(identity), None, false).with_scheme_guess(scheme_guess),
             controls,
+            setup,
             pending_hand: None,
             live: false,
             last_read: 0.0,
@@ -148,8 +151,23 @@ impl Connection {
     }
 
     /// Action names to run since the last call ("media.next", "volume.up", …), and the
-    /// controls' events, starting with `@`: `@gesture <label>`, `@controls on|off`,
-    /// `@profile <index> <step>`, `@held <app>`, `@practiced <action>`.
+    /// controls' events, starting with `@` (see [`line`]):
+    ///
+    /// | Line | From |
+    /// |---|---|
+    /// | `@gesture <label>` | `Output::Gesture` |
+    /// | `@controls on` / `@controls off` | `Output::Controls` |
+    /// | `@profile <index> <step>` | `Output::Profile` |
+    /// | `@held <app>` | `Output::ProfileHeld` |
+    /// | `@practiced <action>` | `Output::Practiced` |
+    /// | `@draw-started` | `Output::DrawStarted` |
+    /// | `@pen down` / `@pen up` | `Output::Pen { down }`: down just before a stroke's first point, up when the pen lets go or its stroke drops |
+    /// | `@draw-point <stroke> <x> <y>` | `Output::DrawPoint` (degrees, 2 decimals, x right, y up); the first after `@pen down` starts its stroke, and a dropped stroke's number comes again (redraw it) |
+    /// | `@draw-finished <json>` | `Output::DrawFinished`: `[[[x,y],…],…]` (strokes) |
+    /// | `@drawn <name>` | `Output::Drawn` (the distance goes to the log) |
+    /// | `@not-drawn` | `Output::NotDrawn` |
+    /// | `@draw-cancelled` | `Output::DrawCancelled` |
+    /// | `@drag-sample <index\|middle> <x> <y> <z> <roll>` | `Output::DragSample`, plus `Controls::prototypes().palm_down_roll` (what `Prototypes::taught` needs) |
     pub fn take_actions(&mut self) -> Vec<String> {
         std::mem::take(&mut self.actions)
     }
@@ -170,12 +188,18 @@ impl Connection {
     /// New profiles, hand or call layer from the app (see `profiles::parse`). The app knows
     /// which profile it picked: a switch this causes isn't reported back.
     pub fn set_profiles(&mut self, json: &str) -> Result<(), String> {
-        let (options, profiles) = profiles::parse(json)?;
+        let (setup, profiles) = profiles::parse(json)?;
+        let options = setup.options(self.controls.status().hand);
+        self.setup = setup;
         let mut outputs = Vec::new();
-        // New options re-arm the dial and ask for the hand afresh: only when they changed
-        // (the app sends its profiles again on every foreground or call change).
-        if options != *self.controls.options() {
+        let current = self.controls.options();
+        if options.hand != current.hand {
+            // A new hand setting: asked for afresh (set_options also re-arms the dial). Not on
+            // every send: the app sends its profiles again on every foreground or call change.
             outputs.extend(self.controls.set_options(options));
+        } else if options.palm != current.palm || options.drags != current.drags {
+            // Only the calibration (calibrated or taught again): the hand and its request stay.
+            self.controls.set_calibration(options.palm, options.drags);
         }
         outputs.extend(self.controls.set_profiles(profiles));
         outputs.retain(|output| !matches!(output, Output::Profile { step: 0, .. }));
@@ -445,6 +469,15 @@ impl Connection {
             _ => {}
         }
         let outputs = self.controls.on_event(event, now);
+        // The band said which wrist: that wrist's calibration and taught drags, the hand
+        // state untouched (set_options would ask for the hand again).
+        if let Event::Handedness(hand) = event {
+            let options = self.setup.options(Some(*hand));
+            let current = self.controls.options();
+            if options.palm != current.palm || options.drags != current.drags {
+                self.controls.set_calibration(options.palm, options.drags);
+            }
+        }
         self.take(outputs, Some(now))
     }
 
@@ -458,24 +491,52 @@ impl Connection {
                     self.log.push(format!("action {action}"));
                     self.actions.push(action);
                 }
-                Output::Gesture(gesture) => {
-                    self.log.push(format!("gesture {}", gesture.label()));
-                    self.actions.push(format!("@gesture {}", gesture.label()));
-                }
-                Output::Controls { enabled } => {
-                    self.actions.push(format!("@controls {}", if enabled { "on" } else { "off" }));
-                }
-                Output::Profile { index, step } => self.actions.push(format!("@profile {index} {step}")),
-                Output::ProfileHeld { app } => self.actions.push(format!("@held {app}")),
-                Output::Practiced(action) => self.actions.push(format!("@practiced {action}")),
                 Output::SetHand(hand) => match now {
                     Some(now) => outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?),
                     None => self.pending_hand = Some(hand),
                 },
+                other => {
+                    match &other {
+                        Output::Gesture(gesture) => self.log.push(format!("gesture {}", gesture.label())),
+                        Output::Drawn { name, distance } => self.log.push(format!("drawn {name} ({distance:.2})")),
+                        _ => {}
+                    }
+                    let roll = self.controls.prototypes().palm_down_roll;
+                    self.actions.extend(line(&other, roll));
+                }
             }
         }
         Ok(outgoing)
     }
+}
+
+/// The `@` line the app follows for an output (`None`: `Run` and `SetHand`, which go as they
+/// are). `roll`: the prototypes' palm-down roll, which a drag sample was read in.
+pub fn line(output: &Output<String>, roll: f64) -> Option<String> {
+    Some(match output {
+        Output::Gesture(gesture) => format!("@gesture {}", gesture.label()),
+        Output::Controls { enabled } => format!("@controls {}", if *enabled { "on" } else { "off" }),
+        Output::Profile { index, step } => format!("@profile {index} {step}"),
+        Output::ProfileHeld { app } => format!("@held {app}"),
+        Output::Practiced(action) => format!("@practiced {action}"),
+        Output::DrawStarted => "@draw-started".into(),
+        Output::Pen { down } => format!("@pen {}", if *down { "down" } else { "up" }),
+        Output::DrawPoint { stroke, x, y } => format!("@draw-point {stroke} {x:.2} {y:.2}"),
+        Output::DrawFinished { strokes } => {
+            format!("@draw-finished {}", serde_json::to_string(strokes).unwrap_or_else(|_| "[]".into()))
+        }
+        Output::Drawn { name, .. } => format!("@drawn {name}"),
+        Output::NotDrawn => "@not-drawn".into(),
+        Output::DrawCancelled => "@draw-cancelled".into(),
+        Output::DragSample { finger, direction: [x, y, z] } => {
+            let finger = match finger {
+                Finger::Index => "index",
+                Finger::Middle => "middle",
+            };
+            format!("@drag-sample {finger} {x:.4} {y:.4} {z:.4} {roll:.2}")
+        }
+        Output::Run(_) | Output::SetHand(_) => return None,
+    })
 }
 
 /// The log line for symbols the band wrote: how many, and how many didn't go in.

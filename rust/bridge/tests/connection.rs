@@ -21,21 +21,21 @@ fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>,
     }
 }
 
-/// The app's default first profile (see Mapping.kt), these keys changed, and `extra`
-/// empty profiles after it.
+/// Today's band controls (Mapping.kt / BandControls.standard()).
+const STANDARD: &str = r#"{"controls":{"gesture":"middle_hold"},"next":{"gesture":"index_triple"},"previous":{"gesture":"middle_triple"}}"#;
+
+/// The app's default first profile (see Mapping.kt), these keys changed, and `extra` empty
+/// profiles after it, with the standard band controls.
 fn json(map: &[(&str, &str)], extra: usize) -> String {
-    json_hand("band", map, extra)
+    json_full("band", STANDARD, map, extra)
 }
 
-fn json_hand(hand: &str, map: &[(&str, &str)], extra: usize) -> String {
+fn json_full(hand: &str, band: &str, map: &[(&str, &str)], extra: usize) -> String {
     let mut gestures = serde_json::json!({
         "swipe_up": "media.previous",
         "swipe_down": "media.next",
         "index_tap": "media.play_pause",
         "middle_double": "volume.mute",
-        "middle_hold": "controls.toggle",
-        "index_triple": "profile.next",
-        "middle_triple": "profile.previous",
     });
     for (key, id) in map {
         gestures[*key] = serde_json::json!(id);
@@ -43,12 +43,13 @@ fn json_hand(hand: &str, map: &[(&str, &str)], extra: usize) -> String {
     let mut profiles = vec![serde_json::json!({
         "name": "Profile 1",
         "map": gestures,
-        "dial": {"up": "volume.up", "down": "volume.down"},
+        "index": {"dial": {"up": "volume.up", "down": "volume.down"}, "drags": "gestures"},
     })];
     for n in 0..extra {
-        profiles.push(serde_json::json!({"name": format!("Extra {n}"), "map": {}, "dial": null}));
+        profiles.push(serde_json::json!({"name": format!("Extra {n}")}));
     }
-    serde_json::json!({"hand": hand, "picked": 0, "apps": {}, "calls": {}, "profiles": profiles}).to_string()
+    let band: serde_json::Value = serde_json::from_str(band).unwrap();
+    serde_json::json!({"hand": hand, "picked": 0, "apps": {}, "band": band, "calls": {}, "profiles": profiles}).to_string()
 }
 
 fn connected(paused: bool) -> (Connection, Responder) {
@@ -136,16 +137,25 @@ fn a_malformed_owner_key_or_profiles_json_is_refused() {
 }
 
 #[test]
-fn remapped_gestures_run_their_new_actions_the_hold_too() {
+fn remapped_gestures_run_their_new_actions() {
     let (mut connection, mut band) = connected(false);
-    connection
-        .set_profiles(&json(&[("swipe_down", "volume.up"), ("swipe_left", "media.next"), ("middle_hold", "media.next")], 0))
-        .unwrap();
+    connection.set_profiles(&json(&[("swipe_down", "volume.up"), ("swipe_left", "media.next")], 0)).unwrap();
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
     assert_eq!(taken(&mut connection).0, vec!["volume.up".to_owned()]);
     gesture(&mut connection, &mut band, 8, THUMB, 0, 4.0);
     assert_eq!(taken(&mut connection).0, vec!["media.next".to_owned()]);
+}
+
+#[test]
+fn an_action_on_a_band_control_gesture_waits_until_the_band_control_moves() {
+    let (mut connection, mut band) = connected_with(false, &json(&[("middle_hold", "media.next")], 0));
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 3.0);
+    assert_eq!(taken(&mut connection), (vec![], vec!["@gesture middle hold".to_owned(), "@controls off".to_owned()]));
     gesture(&mut connection, &mut band, 0, MIDDLE, 3, 5.0);
+    assert!(taken(&mut connection).1.contains(&"@controls on".to_owned()));
+    let moved = r#"{"controls":{"gesture":"swipe_left"},"next":{"gesture":"index_triple"},"previous":{"gesture":"middle_triple"}}"#;
+    connection.set_profiles(&json_full("band", moved, &[("middle_hold", "media.next")], 0)).unwrap();
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 7.0);
     assert_eq!(taken(&mut connection).0, vec!["media.next".to_owned()]);
     assert!(connection.status_json().contains(r#""paused":false"#));
 }
@@ -161,7 +171,7 @@ fn an_unmapped_gesture_does_nothing() {
 #[test]
 fn a_band_on_the_other_wrist_is_set_to_the_chosen_hand_after_connecting() {
     // The simulated band starts as right-handed.
-    let (mut connection, mut band) = connected_with(false, &json_hand("left", &[], 0));
+    let (mut connection, mut band) = connected_with(false, &json_full("left", STANDARD, &[], 0));
     for step in 0..20 {
         let now = 2.0 + f64::from(step) * 0.05;
         let out = connection.tick(now).unwrap();
@@ -174,7 +184,7 @@ fn a_band_on_the_other_wrist_is_set_to_the_chosen_hand_after_connecting() {
 #[test]
 fn a_hand_chosen_while_connected_is_written_on_the_next_tick() {
     let (mut connection, mut band) = connected(false);
-    connection.set_profiles(&json_hand("left", &[], 0)).unwrap();
+    connection.set_profiles(&json_full("left", STANDARD, &[], 0)).unwrap();
     for step in 0..20 {
         let now = 2.0 + f64::from(step) * 0.05;
         let out = connection.tick(now).unwrap();
