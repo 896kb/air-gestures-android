@@ -20,8 +20,12 @@ import org.json.JSONObject
 class PalmCalibrationActivity : Screen() {
     private lateinit var content: LinearLayout
     private val main = Handler(Looper.getMainLooper())
-    private val sampler = PalmSampler()
+    private var sampler = PalmSampler()
     private var step = Palm.DOWN
+    /** The band and wrist this run measures (item: a change starts again). */
+    private var flow: Pair<String, String>? = null
+    /** The band's reading this tick (read once per tick). */
+    private var reading: JSONObject? = null
     private var down = DoubleArray(0)
     private var saved = false
     private var message: String? = null
@@ -59,12 +63,23 @@ class PalmCalibrationActivity : Screen() {
 
     override fun onPause() {
         main.removeCallbacks(ticker)
+        // Away from the screen isn't holding still: the current hold starts again.
+        sampler.restart()
         super.onPause()
     }
 
     private fun tick() {
+        reading = BandService.instance?.palmNow()
+        val address = address
+        val hand = hand
         if (address != null && hand != null && !saved) {
-            val reading = BandService.instance?.palmNow()
+            // Measured for one band and wrist: another one starts again.
+            val now = address to hand
+            if (flow != null && flow != now) {
+                restart()
+                message = "The band or the wrist changed: starting again."
+            }
+            flow = now
             val roll = reading?.takeUnless { it.isNull("roll") }?.optDouble("roll")
             sampler.add(roll, SystemClock.uptimeMillis())
             if (sampler.done) next()
@@ -72,11 +87,19 @@ class PalmCalibrationActivity : Screen() {
         render()
     }
 
+    /** A short buzz: a step is done. */
+    private fun buzz() {
+        val vibrator = getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
+        runCatching { vibrator.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE)) }
+    }
+
     private fun next() {
+        buzz()
         if (step == Palm.DOWN) {
             down = sampler.rolls
             step = Palm.UP
-            sampler.reset()
+            // Palm up counts only once the hand has turned well away from palm down.
+            sampler = PalmSampler(awayFrom = PalmSampler.mean(down))
             return
         }
         val result = JSONObject(Bridge.palmCalibration(down, sampler.rolls))
@@ -94,7 +117,7 @@ class PalmCalibrationActivity : Screen() {
                     else -> "The band sent no position. Is it connected?"
                 }
                 step = Palm.DOWN
-                sampler.reset()
+                sampler = PalmSampler()
             }
         }
     }
@@ -104,7 +127,8 @@ class PalmCalibrationActivity : Screen() {
         down = DoubleArray(0)
         saved = false
         message = null
-        sampler.reset()
+        flow = null
+        sampler = PalmSampler()
         render()
     }
 
@@ -119,6 +143,7 @@ class PalmCalibrationActivity : Screen() {
         Palm.entries.filter { it != Palm.SIDE }.forEachIndexed { i, palm ->
             states.getOrNull(i)?.text = when {
                 done(palm) -> "Done ✓"
+                palm == step && sampler.waiting -> "Turn your palm up"
                 palm == step -> if (sampler.progress > 0f) "holding…" else "Hold still"
                 else -> "Next"
             }
@@ -128,7 +153,7 @@ class PalmCalibrationActivity : Screen() {
 
     /** "Right now: Palm down · −141°", from the band as band-core reads it. */
     private fun rightNow(): String {
-        val reading = BandService.instance?.palmNow() ?: return "Right now: no reading (is the band connected?)"
+        val reading = reading ?: return "Right now: no reading (is the band connected?)"
         if (reading.isNull("roll")) return "Right now: no reading (is the band connected?)"
         val palm = Palm.of(reading.optString("palm"))?.label ?: "?"
         val roll = Math.round(reading.optDouble("roll")).toInt()

@@ -68,8 +68,15 @@ object Drawings {
      */
     private fun read(context: Context): DrawingLibrary {
         val file = file(context)
-        if (!file.baseFile.exists()) return DrawingLibrary().also { cached = it }
-        return runCatching { DrawingLibrary.fromJson(String(file.readFully())) }.getOrElse {
+        // readFully, not the base file's existence: AtomicFile also restores a write a crash cut short.
+        val text = try {
+            String(file.readFully())
+        } catch (_: java.io.FileNotFoundException) {
+            return DrawingLibrary().also { cached = it }
+        } catch (_: java.io.IOException) {
+            null
+        }
+        return runCatching { DrawingLibrary.fromJson(text!!) }.getOrElse {
             android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
             runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
             return DrawingLibrary()

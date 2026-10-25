@@ -71,6 +71,8 @@ abstract class GestureScreen : Screen() {
             addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
                 text = gesture
                 isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                maxWidth = resources.displayMetrics.widthPixels * 3 / 5
             })
             addView(column(gap = 3f).apply {
                 gravity = android.view.Gravity.END

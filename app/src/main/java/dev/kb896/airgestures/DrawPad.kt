@@ -55,13 +55,15 @@ class StrokesView(context: Context, private val ink: Int, private val widthDp: F
 /**
  * The draw pad (mockup 14): a dark card over the app in front while a draw session is open,
  * the strokes as the band draws them, a "Pen down" light, then what it was ("Lightbulb → Light
- * on/off") or "Not one of your drawings". Drawn by the accessibility service: it needs no other
- * permission, and only its close button takes touches.
+ * on/off") or "Not one of your drawings". Drawn by the accessibility service, so it needs no
+ * other permission. It never blocks the app in front: the card takes no touches at all, and
+ * its close button is a small window of its own over the card's corner.
  */
 class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
     private val windows = service.getSystemService(WindowManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private var card: View? = null
+    private var close: View? = null
     private lateinit var strokesView: StrokesView
     private lateinit var hint: TextView
     private lateinit var penDot: View
@@ -110,7 +112,8 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
     override fun cancelled() = hide()
 
     private fun finish(text: String) {
-        if (card == null) return
+        // The pad went (or never showed): say it anyway.
+        if (card == null) return android.widget.Toast.makeText(service, text, android.widget.Toast.LENGTH_SHORT).show()
         light(false)
         result.text = text
         main.removeCallbacks(hideNow)
@@ -130,8 +133,11 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
 
     fun hide() {
         main.removeCallbacks(hideNow)
-        card?.let { runCatching { windows.removeView(it) } }
+        for (view in listOfNotNull(card, close)) runCatching { windows.removeView(view) }
         card = null
+        close = null
+        strokes.clear()
+        fresh = false
     }
 
     private fun show() {
@@ -142,7 +148,7 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
                 cornerRadius = dp(20f)
                 setColor(Cb.INK_900)
             }
-            elevation = dp(24f)
+            // No elevation: a window clips its shadow (as SpotPicker found); the dark card stands out anyway.
             val pad = dp(16f).toInt()
             setPadding(pad, dp(12f).toInt(), pad, pad)
             addView(LinearLayout(service).apply {
@@ -154,18 +160,8 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
                 addView(penDot, LinearLayout.LayoutParams(dp(8f).toInt(), dp(8f).toInt()).apply { marginEnd = dp(6f).toInt() })
                 penText = Cb.text(service, 12f, R.font.geist_medium, Cb.INK_500).apply { text = "Pen down" }
                 addView(penText)
-                addView(FrameLayout(service).apply {
-                    addView(ImageView(service).apply {
-                        setImageResource(R.drawable.ic_x)
-                        imageTintList = ColorStateList.valueOf(Cb.INK_300)
-                    }, FrameLayout.LayoutParams(dp(18f).toInt(), dp(18f).toInt(), Gravity.CENTER))
-                    contentDescription = "Close"
-                    isClickable = true
-                    setOnClickListener {
-                        BandService.instance?.cancelDrawing()
-                        hide()
-                    }
-                }, LinearLayout.LayoutParams(dp(40f).toInt(), dp(40f).toInt()).apply { marginStart = dp(8f).toInt() })
+                // Room for the close button, which is its own window (the card takes no touches).
+                addView(View(service), LinearLayout.LayoutParams(dp(CLOSE_DP).toInt(), dp(CLOSE_DP).toInt()).apply { marginStart = dp(8f).toInt() })
             })
             addView(FrameLayout(service).apply {
                 strokesView = StrokesView(service, ink = Cb.PAGE)
@@ -180,19 +176,49 @@ class DrawPad(private val service: AccessibilityService) : BandService.Drawing {
             addView(result, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
         val params = WindowManager.LayoutParams(
-            dp(300f).toInt(),
-            dp(340f).toInt(),
+            dp(WIDTH_DP).toInt(),
+            dp(HEIGHT_DP).toInt(),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
             PixelFormat.TRANSLUCENT,
         ).apply { gravity = Gravity.CENTER }
         windows.addView(view, params)
         card = view
+        // The close button: a small window over the card's top-right corner, where the header leaves room.
+        val button = FrameLayout(service).apply {
+            addView(ImageView(service).apply {
+                setImageResource(R.drawable.ic_x)
+                imageTintList = ColorStateList.valueOf(Cb.INK_300)
+            }, FrameLayout.LayoutParams(dp(18f).toInt(), dp(18f).toInt(), Gravity.CENTER))
+            contentDescription = "Close"
+            isClickable = true
+            setOnClickListener {
+                BandService.instance?.cancelDrawing()
+                hide()
+            }
+        }
+        val size = dp(CLOSE_DP).toInt()
+        windows.addView(button, WindowManager.LayoutParams(
+            size,
+            size,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.CENTER
+            // From the screen's centre to the header's last slot: inside the 16 dp padding, 12 dp from the top.
+            x = dp(WIDTH_DP / 2 - 16f - CLOSE_DP / 2).toInt()
+            y = -dp(HEIGHT_DP / 2 - 12f - CLOSE_DP / 2).toInt()
+        })
+        close = button
     }
 
     companion object {
         /** How long a result stays before the pad goes. */
         private const val RESULT_MS = 1500L
+        private const val WIDTH_DP = 300f
+        private const val HEIGHT_DP = 340f
+        private const val CLOSE_DP = 40f
 
         /** "Lightbulb → Light on/off": the drawing and what it runs in the profile in force. */
         fun result(context: Context, name: String) =

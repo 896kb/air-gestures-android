@@ -1,6 +1,8 @@
 package dev.kb896.airgestures
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.LinearLayout
 import org.json.JSONObject
 
@@ -16,6 +18,20 @@ class TeachDragsActivity : Screen() {
     private var message: String? = null
     /** The wrist picked here, when the band hasn't said and the app is set to "band". */
     private var picked: String? = null
+    /** The band and wrist these samples are for: a change starts again. */
+    private var flow: Pair<String, String>? = null
+    /** The service teaching was turned on in: a new one (the link restarted) is asked again. */
+    private var service: BandService? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val watch = object : Runnable {
+        override fun run() {
+            if (BandService.instance !== service) {
+                startTeaching()
+                render()
+            }
+            main.postDelayed(this, WATCH_MS)
+        }
+    }
 
     private val prefs get() = Prefs(this)
     private val address get() = prefs.bandAddress
@@ -29,20 +45,38 @@ class TeachDragsActivity : Screen() {
 
     override fun onResume() {
         super.onResume()
-        // The listener runs on the main thread (BandService.onActions posts there).
-        BandService.instance?.startDragTeaching { _, direction, roll ->
-            if (address != null && hand != null && !saved) {
-                teach.sample(direction, roll)
-                teach.json()?.let(::check)
-                render()
-            }
-        }
+        startTeaching()
+        main.post(watch)
         render()
     }
 
     override fun onPause() {
-        BandService.instance?.endDragTeaching()
+        main.removeCallbacks(watch)
+        service?.endDragTeaching()
+        service = null
         super.onPause()
+    }
+
+    /** Teaching on in the service running now (none: it says so, and asks again when one starts). */
+    private fun startTeaching() {
+        service = BandService.instance
+        // The listener runs on the main thread (BandService.onActions posts there).
+        service?.startDragTeaching { _, direction, roll -> sampled(direction, roll) }
+    }
+
+    private fun sampled(direction: DoubleArray, roll: Double) {
+        val address = address ?: return
+        val hand = hand ?: return
+        if (saved) return
+        val now = address to hand
+        if (flow != null && flow != now) {
+            teach.reset()
+            message = "The band or the wrist changed: starting again."
+        }
+        flow = now
+        // Only a sample that filled a step can complete the set.
+        if (teach.sample(direction, roll)) teach.json()?.let(::check)
+        render()
     }
 
     private fun check(samples: String) {
@@ -76,6 +110,7 @@ class TeachDragsActivity : Screen() {
             return
         }
         content.addView(note("For this band on your $hand wrist. Pinch thumb and index or middle finger, do the move, let go: one pinch each, in order."))
+        if (service == null) content.addView(note("The band's service isn't running: teaching starts when it's back.").apply { setTextColor(Cb.INK_900) })
         val current = teach.current
         content.addView(card(null, column(gap = 4f).apply {
             for (step in DragTeach.Step.entries) {
@@ -116,11 +151,19 @@ class TeachDragsActivity : Screen() {
                 addView(pill("Use the measured ones") {
                     Calibrations.update(this@TeachDragsActivity, address, hand) { it.copy(drags = null) }
                     BandService.instance?.remap()
+                    // A fresh start: the next pinch mustn't save the old set again.
+                    teach.reset()
+                    flow = null
                     saved = false
+                    message = null
                     render()
                 }.first)
             }
         })
     }
 
+    companion object {
+        /** How often it checks the service is the one teaching. */
+        private const val WATCH_MS = 1000L
+    }
 }

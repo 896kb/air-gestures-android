@@ -56,4 +56,37 @@ class TeachTest {
         assertTrue(DrawTeach.nameFree("Zed", listOf("Zed"), own = "Zed"))
         assertFalse(DrawTeach.nameFree("  ", emptyList(), own = null))
     }
+
+    @Test fun `a gap between readings starts the hold again`() {
+        val s = PalmSampler()
+        for (t in 0..1500L step 50) s.add(-142.0, t)
+        assertTrue(s.progress > 0f)
+        // A stall (or the screen paused): 300 ms without a reading.
+        s.add(-142.0, 1800)
+        assertEquals(0f, s.progress)
+        for (t in 1850..4500L step 50) s.add(-142.0, t)
+        assertTrue(s.done)
+    }
+
+    @Test fun `palm up is sampled only once the hand has turned away from palm down`() {
+        val down = PalmSampler.mean(doubleArrayOf(-141.0, -143.0))
+        assertEquals(-142.0, down, 1e-9)
+        assertEquals(180.0, PalmSampler.mean(doubleArrayOf(179.0, -179.0)).let { Math.abs(it) }, 1e-9)
+        val up = PalmSampler(awayFrom = down)
+        for (t in 0..3000L step 50) up.add(-130.0, t)
+        assertEquals(0f, up.progress)
+        assertTrue(up.waiting)
+        for (t in 3050..6000L step 50) up.add(-12.0, t)
+        assertFalse(up.waiting)
+        assertTrue(up.done)
+    }
+
+    @Test fun `a drag sample says whether it filled a step, and reset clears them all`() {
+        val t = DragTeach()
+        repeat(7) { assertTrue(t.sample(doubleArrayOf(0.0, 1.0, it.toDouble()), -142.3)) }
+        assertFalse("all done: nothing filled", t.sample(doubleArrayOf(1.0, 0.0, 0.0), -142.3))
+        t.reset()
+        assertEquals(DragTeach.Step.TURN, t.current)
+        assertNull(t.json())
+    }
 }

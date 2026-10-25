@@ -6,13 +6,20 @@ import org.json.JSONObject
 /**
  * One palm position held still, for the calibration: rolls (degrees) come in at any rate;
  * once they've stayed within [STEADY] of each other for [SETTLE] ms, [HOLD] ms of them are
- * kept. A move past [STEADY], or no reading, starts again. band-core checks the result
+ * kept. A move past [STEADY], no reading, or readings more than [GAP] ms apart (a stall, the
+ * screen paused) starts again. With [awayFrom] (palm down's roll, for palm up), rolls within
+ * [AWAY] of it don't count: the hand hasn't turned yet. band-core checks the result
  * (PalmCalibration::from_rolls).
  */
-class PalmSampler {
+class PalmSampler(private val awayFrom: Double? = null) {
     private val recent = ArrayDeque<Pair<Long, Double>>()
     private val kept = mutableListOf<Double>()
     private var keptFrom: Long? = null
+    private var lastAt: Long? = null
+
+    /** The hand is still near [awayFrom]: nothing is sampled yet. */
+    var waiting = awayFrom != null
+        private set
 
     /** 0…1: how much of [HOLD] is kept. */
     var progress = 0f
@@ -22,7 +29,16 @@ class PalmSampler {
 
     fun add(roll: Double?, now: Long) {
         if (done) return
-        if (roll == null) return reset()
+        val gap = lastAt?.let { now - it > GAP } == true
+        lastAt = now
+        if (roll == null || gap) reset()
+        if (roll == null) return
+        if (awayFrom != null && angle(roll - awayFrom) < AWAY) {
+            reset()
+            waiting = true
+            return
+        }
+        waiting = false
         recent.addLast(now to roll)
         while (now - recent.first().first > SETTLE) recent.removeFirst()
         if (recent.any { angle(it.second - roll) > STEADY }) {
@@ -42,10 +58,28 @@ class PalmSampler {
         progress = 0f
     }
 
+    /** Back to the start, the gap forgotten too (the screen came back). */
+    fun restart() {
+        reset()
+        lastAt = null
+        waiting = awayFrom != null
+    }
+
     companion object {
         const val SETTLE = 500L
         const val HOLD = 2000L
         const val STEADY = 6.0
+        /** Readings further apart than this (ms) aren't one steady hold. */
+        const val GAP = 200L
+        /** Palm up counts once the roll is this far (degrees) from palm down. */
+        const val AWAY = 40.0
+
+        /** The circular mean of rolls (degrees), as band-core takes it. */
+        fun mean(rolls: DoubleArray): Double {
+            val s = rolls.sumOf { Math.sin(Math.toRadians(it)) }
+            val c = rolls.sumOf { Math.cos(Math.toRadians(it)) }
+            return Math.toDegrees(Math.atan2(s, c))
+        }
 
         /** How far apart two angles are (degrees), across ±180. */
         fun angle(difference: Double) = Math.abs(((difference % 360) + 540) % 360 - 180)
@@ -71,11 +105,18 @@ class DragTeach {
     val current get() = Step.entries.firstOrNull { samples[it.ordinal] == null }
     fun done(step: Step) = samples[step.ordinal] != null
 
-    /** A `@drag-sample`: its direction and the roll it was read in. */
-    fun sample(direction: DoubleArray, roll: Double) {
-        val step = current ?: return
+    /** A `@drag-sample`: its direction and the roll it was read in. False when every step had one already. */
+    fun sample(direction: DoubleArray, roll: Double): Boolean {
+        val step = current ?: return false
         samples[step.ordinal] = direction
         this.roll = roll
+        return true
+    }
+
+    /** Every step to do again. */
+    fun reset() {
+        samples.fill(null)
+        roll = null
     }
 
     fun redo(step: Step) {

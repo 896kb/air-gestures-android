@@ -135,6 +135,9 @@ abstract class Screen : Activity() {
         addView(Cb.text(context, 15f, R.font.geist_medium, Cb.INK_900).apply {
             text = label
             isSingleLine = true
+            // A label longer than this ends in "…" rather than pushing the detail off.
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = resources.displayMetrics.widthPixels * 3 / 5
         })
         addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
             text = detail.orEmpty()

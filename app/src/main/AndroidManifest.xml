@@ -71,10 +71,10 @@
         <activity android:name=".CallsActivity" android:exported="false" />
         <activity android:name=".GestureActivity" android:exported="false" />
         <activity android:name=".DragsActivity" android:exported="false" />
-        <activity android:name=".PalmCalibrationActivity" android:exported="false" />
-        <activity android:name=".TeachDragsActivity" android:exported="false" />
+        <activity android:name=".PalmCalibrationActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+        <activity android:name=".TeachDragsActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".DrawingsActivity" android:exported="false" />
-        <activity android:name=".TeachDrawingActivity" android:exported="false" />
+        <activity android:name=".TeachDrawingActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SequenceActivity" android:exported="false" />
 
