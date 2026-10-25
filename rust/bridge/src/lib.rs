@@ -328,22 +328,15 @@ impl Connection {
         }
     }
 
-    /// What the band wrote goes to the text field being typed in, if any.
+    /// What the band wrote goes to the text field being typed in, if any. The log says how
+    /// many symbols, never which: what's written can be a password.
     fn type_written(&mut self, now: f64) {
         let written = self.session.take_written();
         if let Some(field) = &mut self.field {
             let words = words::dictionary();
-            for symbol in &written {
-                let typed = field.take(symbol, words.as_deref(), now);
-                {
-                    self.log.push(format!(
-                        "handwriting: {} ({}, sure {:.1}){}",
-                        band_core::handwriting::symbol(symbol.index),
-                        symbol.index,
-                        symbol.margin,
-                        if typed { "" } else { " not typed" }
-                    ));
-                }
+            let untyped = written.iter().filter(|symbol| !field.take(symbol, words.as_deref(), now)).count();
+            if let Some(note) = written_note(written.len(), untyped) {
+                self.log.push(note);
             }
         }
     }
@@ -475,5 +468,27 @@ impl Connection {
             }
         }
         Ok(Vec::new())
+    }
+}
+
+/// The log line for symbols the band wrote: how many, and how many didn't go in.
+fn written_note(written: usize, untyped: usize) -> Option<String> {
+    let noun = if written == 1 { "symbol" } else { "symbols" };
+    match (written, untyped) {
+        (0, _) => None,
+        (_, 0) => Some(format!("handwriting: {written} {noun} typed")),
+        _ => Some(format!("handwriting: {written} {noun}, {untyped} not typed")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::written_note;
+
+    #[test]
+    fn the_handwriting_note_counts_letters_and_never_names_them() {
+        assert_eq!(written_note(0, 0), None);
+        assert_eq!(written_note(1, 0).as_deref(), Some("handwriting: 1 symbol typed"));
+        assert_eq!(written_note(3, 1).as_deref(), Some("handwriting: 3 symbols, 1 not typed"));
     }
 }

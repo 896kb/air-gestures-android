@@ -83,6 +83,8 @@ class WriteService : AccessibilityService() {
         val state = BandService.state.value
         if (state.phase != Phase.CONNECTED || state.otaBusy || service.bandWrites() != true) return
         val same = field?.let { it == node } == true
+        // Moving to another field: the menu or word choices shown in the last one go first.
+        if (!same) dropInline()
         field = node
         app = from
         lastWritten = SystemClock.uptimeMillis()
@@ -149,14 +151,21 @@ class WriteService : AccessibilityService() {
         service.setFieldTyping(true, look.text.substring(0, look.end))
     }
 
-    /** Back to gestures. */
-    private fun leave(why: String) {
+    /** Take the menu or word choices out of the current field, and close the popup. */
+    private fun dropInline() {
         menu = null
+        choosing = false
+        anchor = null
         field?.let { if (inline.isNotEmpty()) runCatching { setInline(it, "") } }
         inline = ""
+        popup.hide()
+    }
+
+    /** Back to gestures. */
+    private fun leave(why: String) {
+        dropInline()
         expected = null
         main.removeCallbacks(lookAgain)
-        popup.hide()
         if (field == null) return
         field = null
         app = null
