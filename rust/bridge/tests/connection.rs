@@ -239,3 +239,47 @@ fn without_the_probe_the_session_notes_stay_out_of_the_log() {
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
     assert!(!connection.take_log().iter().any(|line| line.starts_with("probe")));
 }
+
+#[test]
+fn the_app_opens_and_cancels_a_drawing_and_an_idle_one_ends_by_itself() {
+    let (mut connection, _band) = connected(false);
+    connection.start_drawing(3.0).unwrap();
+    assert_eq!(taken(&mut connection).1, vec!["@draw-started".to_owned()]);
+    connection.cancel_drawing().unwrap();
+    assert_eq!(taken(&mut connection).1, vec!["@draw-cancelled".to_owned()]);
+    connection.start_drawing(4.0).unwrap();
+    taken(&mut connection);
+    connection.tick(4.0 + band_core::controls::DRAW_IDLE).unwrap();
+    assert!(taken(&mut connection).1.contains(&"@draw-cancelled".to_owned()));
+}
+
+#[test]
+fn teaching_drags_cancels_an_open_drawing_and_opens_none() {
+    let (mut connection, _band) = connected(false);
+    connection.start_drawing(3.0).unwrap();
+    taken(&mut connection);
+    connection.set_drag_teaching(true).unwrap();
+    assert_eq!(taken(&mut connection).1, vec!["@draw-cancelled".to_owned()]);
+    connection.start_drawing(4.0).unwrap();
+    assert!(taken(&mut connection).1.is_empty(), "never while teaching drags");
+}
+
+#[test]
+fn a_bad_library_is_refused() {
+    let (mut connection, _band) = connected(false);
+    assert!(connection.set_library("[").is_err());
+    connection.set_library(r#"[{"name":"Circle","tries":[[[[0,0],[10,0],[10,10],[0,10],[0,0]]]]}]"#).unwrap();
+}
+
+#[test]
+fn the_palm_readout_follows_the_bands_orientation() {
+    let (mut connection, mut band) = connected(false);
+    assert_eq!(connection.palm_now(3.0), r#"{"palm":null,"roll":null}"#);
+    // Roll −11.3° (turned +11.3° about the band's y): palm up on the right hand's measured calibration.
+    let half = 11.3_f64.to_radians() / 2.0;
+    let bytes = band.orientation([half.cos() as f32, 0.0, half.sin() as f32, 0.0]).unwrap();
+    let reply = connection.feed(&bytes, 3.0).unwrap();
+    pump(&mut connection, &mut band, reply, 3.0);
+    assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-11.3}"#);
+    assert_eq!(connection.palm_now(4.0), r#"{"palm":null,"roll":null}"#, "stale");
+}

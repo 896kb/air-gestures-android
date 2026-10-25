@@ -197,6 +197,82 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPractice<'local>(
     unsafe { connection(handle) }.set_practice(practice != 0);
 }
 
+/// The drawings draw sessions match against, as JSON (see `teach::library`); bad JSON throws
+/// and keeps the ones before.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setLibrary<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    json: JString<'local>,
+) {
+    let result = get_string(&mut env, &json).and_then(|json| unsafe { connection(handle) }.set_library(&json));
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+/// Open a draw session from the app (`@draw-started`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_startDrawing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    if let Err(message) = unsafe { connection(handle) }.start_drawing(now) {
+        throw(&mut env, &message);
+    }
+}
+
+/// The pad's close button (`@draw-cancelled`; nothing with no session).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_cancelDrawing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    if let Err(message) = unsafe { connection(handle) }.cancel_drawing() {
+        throw(&mut env, &message);
+    }
+}
+
+/// Teaching drawings: sessions report their strokes and match nothing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setTeaching<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) {
+    unsafe { connection(handle) }.set_teaching(on != 0);
+}
+
+/// Teaching drags: pinches report `@drag-sample` and nothing acts; on cancels an open drawing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setDragTeaching<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) {
+    if let Err(message) = unsafe { connection(handle) }.set_drag_teaching(on != 0) {
+        throw(&mut env, &message);
+    }
+}
+
+/// The palm and roll right now, as JSON (see `Connection::palm_now`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_palmNow<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jstring {
+    let json = unsafe { connection(handle) }.palm_now(now);
+    string_out(&mut env, json)
+}
+
 /// What the screens show about a profiles JSON (see `report::report`); invalid JSON: `{}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileReport<'local>(

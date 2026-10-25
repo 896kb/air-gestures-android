@@ -18,6 +18,7 @@ pub mod firmware;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
+mod palmlive;
 pub mod profiles;
 pub mod report;
 pub mod status;
@@ -46,6 +47,8 @@ pub struct Connection {
     probing: bool,
     /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
     field: Option<fieldtext::FieldTyping>,
+    /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
+    roll: palmlive::LiveRoll,
 }
 
 #[derive(Serialize)]
@@ -64,6 +67,8 @@ struct Snapshot<'a> {
     ota_cancellable: bool,
     /// Each file of that update: `{"name", "size", "sent", "stage"}`.
     ota_items: Vec<serde_json::Value>,
+    /// A draw session is open (a reconnecting app closes a pad left open).
+    drawing: bool,
     #[serde(flatten)]
     status: &'a Status,
 }
@@ -98,6 +103,7 @@ impl Connection {
             log: Vec::new(),
             probing: false,
             field: None,
+            roll: palmlive::LiveRoll::default(),
         })
     }
 
@@ -226,6 +232,45 @@ impl Connection {
     /// Practice: gestures and what they'd run come as `@gesture` / `@practiced`, nothing runs.
     pub fn set_practice(&mut self, practice: bool) {
         self.controls.set_practice(practice);
+    }
+
+    /// The drawings (`[{"name", "tries"}]`, see `teach::library`) draw sessions match against.
+    /// Bad JSON is an error and keeps the ones before.
+    pub fn set_library(&mut self, json: &str) -> Result<(), String> {
+        self.controls.set_library(teach::library(json)?);
+        Ok(())
+    }
+
+    /// Open a draw session from the app (the teach screen): `@draw-started`.
+    pub fn start_drawing(&mut self, now: f64) -> Result<(), String> {
+        let outputs = self.controls.start_drawing(now);
+        self.take(outputs, None).map(drop)
+    }
+
+    /// The pad's close button: `@draw-cancelled` (nothing with no session).
+    pub fn cancel_drawing(&mut self) -> Result<(), String> {
+        let outputs = self.controls.cancel_drawing();
+        self.take(outputs, None).map(drop)
+    }
+
+    /// Teaching drawings: sessions report their strokes (`@draw-finished`) and match nothing.
+    pub fn set_teaching(&mut self, on: bool) {
+        self.controls.set_teaching(on);
+    }
+
+    /// Teaching drags: every pinch that moves reports `@drag-sample`; nothing acts. Turning it
+    /// on cancels an open draw session.
+    pub fn set_drag_teaching(&mut self, on: bool) -> Result<(), String> {
+        let outputs = self.controls.set_drag_teaching(on);
+        self.take(outputs, None).map(drop)
+    }
+
+    /// `{"palm": "down" | "sideways" | "up" | null, "roll": degrees (to 0.1) | null}` right
+    /// now: both null without a fresh orientation; the palm as band-core reads it
+    /// (`Controls::palm`: down for an uncalibrated left wrist).
+    pub fn palm_now(&self, now: f64) -> String {
+        let roll = self.roll.fresh(now);
+        serde_json::json!({"roll": roll, "palm": roll.map(|_| self.controls.palm(now).key())}).to_string()
     }
 
     /// Before the first `request`: also ask the band for these stream flags (comma-separated,
@@ -450,6 +495,7 @@ impl Connection {
                 .iter()
                 .map(|item| serde_json::json!({"name": item.name, "size": item.size, "sent": item.sent, "stage": item.stage}))
                 .collect(),
+            drawing: self.controls.drawing(),
             status: &status,
         })
         .expect("status serializes")
@@ -480,6 +526,7 @@ impl Connection {
                 self.controls.set_calibration(options.palm, options.drags);
             }
         }
+        self.roll.on_event(event, now);
         self.take(outputs, Some(now))
     }
 
