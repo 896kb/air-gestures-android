@@ -107,7 +107,7 @@ fn a_claim_saves_the_owner_key_and_the_key_connects_as_owner() {
     // The next connection (the service) authenticates with the saved key.
     let mut owned = Responder::new(SimMode::Enrolled, band_key);
     owned.set_owner(band.owner());
-    let mut connection = Connection::new(&key, 0, false, "", "").unwrap();
+    let mut connection = Connection::new(&key, 0, false, "{}").unwrap();
     let mut to_band = connection.request().unwrap();
     for _ in 0..64 {
         if to_band.is_empty() {

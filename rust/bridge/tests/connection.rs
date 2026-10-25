@@ -21,14 +21,43 @@ fn pump(connection: &mut Connection, band: &mut Responder, mut to_band: Vec<u8>,
     }
 }
 
-fn connected(paused: bool) -> (Connection, Responder) {
-    connected_with(paused, "")
+/// The app's default first profile (see Mapping.kt), these keys changed, and `extra`
+/// empty profiles after it.
+fn json(map: &[(&str, &str)], extra: usize) -> String {
+    json_hand("band", map, extra)
 }
 
-fn connected_with(paused: bool, mapping: &str) -> (Connection, Responder) {
+fn json_hand(hand: &str, map: &[(&str, &str)], extra: usize) -> String {
+    let mut gestures = serde_json::json!({
+        "swipe_up": "media.previous",
+        "swipe_down": "media.next",
+        "index_tap": "media.play_pause",
+        "middle_double": "volume.mute",
+        "middle_hold": "controls.toggle",
+        "index_triple": "profile.next",
+        "middle_triple": "profile.previous",
+    });
+    for (key, id) in map {
+        gestures[*key] = serde_json::json!(id);
+    }
+    let mut profiles = vec![serde_json::json!({
+        "name": "Profile 1",
+        "map": gestures,
+        "dial": {"up": "volume.up", "down": "volume.down"},
+    })];
+    for n in 0..extra {
+        profiles.push(serde_json::json!({"name": format!("Extra {n}"), "map": {}, "dial": null}));
+    }
+    serde_json::json!({"hand": hand, "picked": 0, "apps": {}, "calls": {}, "profiles": profiles}).to_string()
+}
+
+fn connected(paused: bool) -> (Connection, Responder) {
+    connected_with(paused, &json(&[], 0))
+}
+
+fn connected_with(paused: bool, profiles: &str) -> (Connection, Responder) {
     let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
-    let mut connection =
-        Connection::new(&identity.private_bytes(), 0, paused, "volume", mapping).unwrap();
+    let mut connection = Connection::new(&identity.private_bytes(), 0, paused, profiles).unwrap();
     // An enrolled band with no owner recorded adopts the first key that proves trust.
     let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
     let request = connection.request().unwrap();
@@ -51,56 +80,45 @@ fn gesture(
     pump(connection, band, reply, now);
 }
 
+/// The actions since the last call, split: what to run, and the `@` events.
+fn taken(connection: &mut Connection) -> (Vec<String>, Vec<String>) {
+    connection.take_actions().into_iter().partition(|line| !line.starts_with('@'))
+}
+
 #[test]
 fn a_swipe_down_plays_the_next_track() {
     let (mut connection, mut band) = connected(false);
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
-    assert_eq!(connection.take_actions(), vec!["media.next".to_owned()]);
-    assert!(
-        connection
-            .take_log()
-            .contains(&"gesture swipe down".to_owned())
-    );
+    assert_eq!(taken(&mut connection), (vec!["media.next".to_owned()], vec!["@gesture swipe down".to_owned()]));
+    assert!(connection.take_log().contains(&"gesture swipe down".to_owned()));
 }
 
 #[test]
 fn an_index_tap_plays_or_pauses_once_its_double_tap_window_passes() {
-    let (mut connection, mut band) = connected(false);
+    let (mut connection, mut band) = connected_with(false, &json(&[("index_double", "volume.mute")], 0));
     gesture(&mut connection, &mut band, 3, INDEX, 0, 3.0);
-    assert!(
-        connection.take_actions().is_empty(),
-        "held for a possible double tap"
-    );
+    assert!(taken(&mut connection).0.is_empty(), "held for a possible double tap");
     connection.tick(3.2).unwrap();
     assert!(connection.take_actions().is_empty());
     connection.tick(3.45).unwrap();
     assert_eq!(
-        connection.take_actions(),
-        vec!["media.play_pause".to_owned()]
+        taken(&mut connection),
+        (vec!["media.play_pause".to_owned()], vec!["@gesture index tap".to_owned()])
     );
-}
-
-#[test]
-fn an_index_double_tap_swaps_the_dial_to_brightness() {
-    let (mut connection, mut band) = connected(false);
-    gesture(&mut connection, &mut band, 4, INDEX, 0, 3.0);
-    assert_eq!(
-        connection.take_actions(),
-        vec!["dial.changed.brightness".to_owned()]
-    );
-    assert!(connection.status_json().contains(r#""dial":"brightness""#));
 }
 
 #[test]
 fn a_middle_hold_turns_the_controls_off_and_on() {
     let (mut connection, mut band) = connected(false);
     gesture(&mut connection, &mut band, 0, MIDDLE, 3, 3.0);
+    assert_eq!(taken(&mut connection).1, vec!["@gesture middle hold".to_owned(), "@controls off".to_owned()]);
     assert!(connection.status_json().contains(r#""paused":true"#));
     // Off: gestures do nothing…
     gesture(&mut connection, &mut band, 7, THUMB, 0, 5.0);
-    assert!(connection.take_actions().is_empty());
+    assert!(taken(&mut connection).0.is_empty());
     // …except the hold, which turns them back on.
     gesture(&mut connection, &mut band, 0, MIDDLE, 3, 7.0);
+    assert!(taken(&mut connection).1.contains(&"@controls on".to_owned()));
     assert!(connection.status_json().contains(r#""paused":false"#));
 }
 
@@ -111,56 +129,88 @@ fn quiet_links_send_keepalive_queries() {
 }
 
 #[test]
-fn a_malformed_owner_key_is_refused() {
-    assert!(Connection::new(&[0u8; 10], 0, false, "volume", "").is_err());
+fn a_malformed_owner_key_or_profiles_json_is_refused() {
+    assert!(Connection::new(&[0u8; 10], 0, false, "{}").is_err());
+    let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
+    assert!(Connection::new(&identity.private_bytes(), 0, false, "{").is_err());
 }
 
 #[test]
-fn a_remapped_swipe_runs_its_new_action_and_the_hold_stays_the_toggle() {
+fn remapped_gestures_run_their_new_actions_the_hold_too() {
     let (mut connection, mut band) = connected(false);
-    connection.set_mapping("swipe_down=volume.up;swipe_left=media.next;middle_hold=media.next");
+    connection
+        .set_profiles(&json(&[("swipe_down", "volume.up"), ("swipe_left", "media.next"), ("middle_hold", "media.next")], 0))
+        .unwrap();
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
-    assert_eq!(connection.take_actions(), vec!["volume.up".to_owned()]);
+    assert_eq!(taken(&mut connection).0, vec!["volume.up".to_owned()]);
     gesture(&mut connection, &mut band, 8, THUMB, 0, 4.0);
-    assert_eq!(connection.take_actions(), vec!["media.next".to_owned()]);
+    assert_eq!(taken(&mut connection).0, vec!["media.next".to_owned()]);
     gesture(&mut connection, &mut band, 0, MIDDLE, 3, 5.0);
-    assert!(connection.take_actions().is_empty());
-    assert!(connection.status_json().contains(r#""paused":true"#));
+    assert_eq!(taken(&mut connection).0, vec!["media.next".to_owned()]);
+    assert!(connection.status_json().contains(r#""paused":false"#));
 }
 
 #[test]
 fn an_unmapped_gesture_does_nothing() {
     let (mut connection, mut band) = connected(false);
-    connection.set_mapping("swipe_down=");
+    connection.set_profiles(&json(&[("swipe_down", "")], 0)).unwrap();
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
-    assert!(connection.take_actions().is_empty());
+    assert_eq!(taken(&mut connection), (vec![], vec!["@gesture swipe down".to_owned()]));
 }
 
 #[test]
 fn a_band_on_the_other_wrist_is_set_to_the_chosen_hand_after_connecting() {
     // The simulated band starts as right-handed.
-    let (mut connection, mut band) = connected_with(false, "hand=left");
+    let (mut connection, mut band) = connected_with(false, &json_hand("left", &[], 0));
     for step in 0..20 {
-        let out = connection.tick(2.0 + f64::from(step) * 0.05).unwrap();
-        pump(
-            &mut connection,
-            &mut band,
-            out,
-            2.0 + f64::from(step) * 0.05,
-        );
+        let now = 2.0 + f64::from(step) * 0.05;
+        let out = connection.tick(now).unwrap();
+        pump(&mut connection, &mut band, out, now);
     }
     assert_eq!(band.hand, 1, "the band stores left");
-    assert!(
-        connection.status_json().contains(r#""hand":"left""#),
-        "{}",
-        connection.status_json()
+    assert!(connection.status_json().contains(r#""hand":"left""#), "{}", connection.status_json());
+}
+
+#[test]
+fn a_hand_chosen_while_connected_is_written_on_the_next_tick() {
+    let (mut connection, mut band) = connected(false);
+    connection.set_profiles(&json_hand("left", &[], 0)).unwrap();
+    for step in 0..20 {
+        let now = 2.0 + f64::from(step) * 0.05;
+        let out = connection.tick(now).unwrap();
+        pump(&mut connection, &mut band, out, now);
+    }
+    assert_eq!(band.hand, 1, "the band stores left");
+}
+
+#[test]
+fn a_triple_tap_with_two_profiles_reports_the_switch() {
+    let (mut connection, mut band) = connected_with(false, &json(&[], 1));
+    for now in [3.0, 3.2, 3.4] {
+        gesture(&mut connection, &mut band, 3, INDEX, 0, now);
+    }
+    connection.tick(4.0).unwrap();
+    let (run, events) = taken(&mut connection);
+    assert!(run.is_empty(), "{run:?}");
+    assert_eq!(events, vec!["@gesture index triple tap".to_owned(), "@profile 1 1".to_owned()]);
+}
+
+#[test]
+fn practice_reports_what_would_run() {
+    let (mut connection, mut band) = connected(false);
+    connection.set_practice(true);
+    gesture(&mut connection, &mut band, 3, INDEX, 0, 3.0);
+    connection.tick(4.0).unwrap();
+    assert_eq!(
+        taken(&mut connection),
+        (vec![], vec!["@gesture index tap".to_owned(), "@practiced media.play_pause".to_owned()])
     );
 }
 
 #[test]
 fn the_stream_probe_logs_the_flags_and_every_gesture_in_full() {
     let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
-    let mut connection = Connection::new(&identity.private_bytes(), 0, false, "volume", "").unwrap();
+    let mut connection = Connection::new(&identity.private_bytes(), 0, false, &json(&[], 0)).unwrap();
     connection.set_probe("1, 4,7,x");
     let mut band = Responder::new(SimMode::Enrolled, SigningKey::random(&mut OsRng));
     let request = connection.request().unwrap();

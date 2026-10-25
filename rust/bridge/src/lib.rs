@@ -1,43 +1,37 @@
 //! The Android app's view of a band connection: bytes in, bytes out, plus
 //! action names to run and a status snapshot. Kotlin owns the Bluetooth socket
 //! and the clock; this owns the band-core session, the keepalive timing (as the
-//! desktop daemon's link loop does) and the gesture controller (copied from
-//! air-gestures: held taps, the double-tap wait, the toggle hold, the dial).
+//! desktop daemon's link loop does) and band-core's shared controls (taps, the
+//! hold, the dial, profiles, the lock), fed the app's profiles as JSON (`profiles`).
 //! Also the Meta sign-in and the ownership claim (`metaauth`, `meta`, `claim`),
 //! ported from the Linux app.
 
-use band_core::events::Event;
+use band_core::controls::{Controls, Output};
+use band_core::events::{Event, Hand};
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
 use serde::Serialize;
 
 pub mod claim;
-pub mod config;
-pub mod controller;
 pub mod fieldtext;
 pub mod firmware;
 mod jni_api;
 pub mod meta;
 pub mod metaauth;
+pub mod profiles;
 pub mod status;
 pub mod words;
 
-use config::{Config, DIAL_TOGGLE, DialTarget};
-use controller::{Command, Controller};
 use status::Status;
-
-fn config_with(mapping: &str) -> Config {
-    let mut config = Config::default();
-    config.apply_mapping(mapping);
-    config
-}
 
 /// Battery query period and the quiet time before a stream-state query.
 const BATTERY_EVERY: f64 = 5.0;
 const QUIET_QUERY: f64 = 2.0;
 pub struct Connection {
     session: BandSession,
-    controller: Controller,
+    controls: Controls<String>,
+    /// A hand the controls asked for without a clock (`set_profiles`): `tick` writes it.
+    pending_hand: Option<Hand>,
     live: bool,
     last_read: f64,
     last_query: f64,
@@ -72,32 +66,25 @@ struct Snapshot<'a> {
 
 impl Connection {
     /// `owner_key` is the desktop's `owner.key` (32 or 97 bytes); `scheme_guess`
-    /// its `band.json` value (0 for current firmware). `paused` and `dial` carry
-    /// the app's settings over from the previous connection.
-    pub fn new(
-        owner_key: &[u8],
-        scheme_guess: usize,
-        paused: bool,
-        dial: &str,
-        mapping: &str,
-    ) -> Result<Self, String> {
+    /// its `band.json` value (0 for current firmware). `paused` carries the app's
+    /// lock over from the previous connection; `profiles` is the app's profiles JSON
+    /// (see `profiles::parse`).
+    pub fn new(owner_key: &[u8], scheme_guess: usize, paused: bool, profiles: &str) -> Result<Self, String> {
         let (private, band) = match owner_key.len() {
             32 => (owner_key, None),
             97 => (&owner_key[..32], Some(&owner_key[32..])),
             length => return Err(format!("owner.key must be 32 or 97 bytes, not {length}")),
         };
         let identity = EnrollmentIdentity::from_bytes(private, band).map_err(|e| e.to_string())?;
-        let mut controller = Controller::new(config_with(mapping));
+        let (options, profiles) = profiles::parse(profiles)?;
+        let mut controls = Controls::new(options, profiles);
         if paused {
-            controller.pause();
-        }
-        // An empty `dial` keeps what the mapping chose.
-        if !dial.is_empty() {
-            controller.set_dial_target(DialTarget::from_name(dial));
+            controls.pause();
         }
         Ok(Self {
             session: BandSession::new(Some(identity), None, false).with_scheme_guess(scheme_guess),
-            controller,
+            controls,
+            pending_hand: None,
             live: false,
             last_read: 0.0,
             last_query: 0.0,
@@ -133,10 +120,10 @@ impl Connection {
             outgoing.extend(self.on_event(&event, now)?);
         }
         outgoing.extend(self.session.ota_tick(now).map_err(|e| e.to_string())?);
-        if self.controller.held_tap_due().is_some_and(|due| now >= due) {
-            for command in self.controller.fire_held_tap(now) {
-                outgoing.extend(self.apply(command, now)?);
-            }
+        let due = self.controls.poll(now);
+        outgoing.extend(self.take(due, Some(now))?);
+        if let Some(hand) = self.pending_hand.take() {
+            outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?);
         }
         if self.session.streams_enabled() && now >= self.next_battery {
             self.next_battery = now + BATTERY_EVERY;
@@ -160,7 +147,9 @@ impl Connection {
         Ok(outgoing)
     }
 
-    /// Action names to run since the last call ("media.next", "volume.up", …).
+    /// Action names to run since the last call ("media.next", "volume.up", …), and the
+    /// controls' events, starting with `@`: `@gesture <label>`, `@controls on|off`,
+    /// `@profile <index> <step>`, `@held <app>`, `@practiced <action>`.
     pub fn take_actions(&mut self) -> Vec<String> {
         std::mem::take(&mut self.actions)
     }
@@ -174,25 +163,43 @@ impl Connection {
     }
 
     pub fn set_paused(&mut self, paused: bool, now: f64) {
-        if paused {
-            self.controller.pause();
-        } else {
-            self.controller.resume(now);
-        }
+        // The app asked: it knows; nothing to report back.
+        let _ = if paused { self.controls.pause() } else { self.controls.resume(now) };
     }
 
-    /// Replace the gesture and dial mapping (see `Config::apply_mapping`).
-    pub fn set_mapping(&mut self, mapping: &str) {
-        let paused = self.controller.status().paused;
-        for command in self.controller.set_config(config_with(mapping)) {
-            if let Command::Run(action) = command {
-                self.actions.push(action);
-            }
+    /// New profiles, hand or call layer from the app (see `profiles::parse`). The app knows
+    /// which profile it picked: a switch this causes isn't reported back.
+    pub fn set_profiles(&mut self, json: &str) -> Result<(), String> {
+        let (options, profiles) = profiles::parse(json)?;
+        let mut outputs = Vec::new();
+        // New options re-arm the dial and ask for the hand afresh: only when they changed
+        // (the app sends its profiles again on every foreground or call change).
+        if options != *self.controls.options() {
+            outputs.extend(self.controls.set_options(options));
         }
-        // A new config resets the controller's pause state; keep the app's.
-        if paused {
-            self.controller.pause();
-        }
+        outputs.extend(self.controls.set_profiles(profiles));
+        outputs.retain(|output| !matches!(output, Output::Profile { step: 0, .. }));
+        self.take(outputs, None)?;
+        Ok(())
+    }
+
+    /// The app in front (`""`: none known); its own profile, if it has one, becomes active.
+    pub fn set_foreground(&mut self, app: &str) -> Result<(), String> {
+        let mut outputs = self.controls.set_foreground((!app.is_empty()).then(|| app.to_owned()));
+        // The app follows the foreground itself.
+        outputs.retain(|output| !matches!(output, Output::Profile { .. }));
+        self.take(outputs, None)?;
+        Ok(())
+    }
+
+    /// A call is ringing or running: the call layer goes on top of the active profile.
+    pub fn set_in_call(&mut self, in_call: bool) {
+        self.controls.set_in_call(in_call);
+    }
+
+    /// Practice: gestures and what they'd run come as `@gesture` / `@practiced`, nothing runs.
+    pub fn set_practice(&mut self, practice: bool) {
+        self.controls.set_practice(practice);
     }
 
     /// Before the first `request`: also ask the band for these stream flags (comma-separated,
@@ -390,13 +397,19 @@ impl Connection {
         )
     }
 
-    pub fn set_dial(&mut self, dial: &str) {
-        self.controller.set_dial_target(DialTarget::from_name(dial));
-    }
-
-    /// `{"connected":…, "paused":…, "battery":…, "charging":…, "hand":…, "dial":…,
-    /// "last_gesture":…, "last_action":…, "gestures":…}`.
+    /// `{"connected":…, "paused":…, "battery":…, "charging":…, "hand":…,
+    /// "last_gesture":…, "last_action":…, "gestures":…}` and the firmware update's state.
     pub fn status_json(&self) -> String {
+        let c = self.controls.status();
+        let status = Status {
+            paused: c.paused,
+            battery: c.battery,
+            charging: c.charging,
+            hand: c.hand.map(|h| format!("{h:?}").to_lowercase()),
+            last_gesture: c.last_gesture.map(str::to_owned),
+            last_action: c.last_action.clone(),
+            gestures: c.gestures,
+        };
         serde_json::to_string(&Snapshot {
             connected: self.live,
             firmware: self.session.device_info().map(|info| info.software.clone()).filter(|v| !v.is_empty()),
@@ -411,7 +424,7 @@ impl Connection {
                 .iter()
                 .map(|item| serde_json::json!({"name": item.name, "size": item.size, "sent": item.sent, "stage": item.stage}))
                 .collect(),
-            status: self.controller.status(),
+            status: &status,
         })
         .expect("status serializes")
     }
@@ -431,43 +444,37 @@ impl Connection {
             Event::Handedness(hand) => self.log.push(format!("hand {hand:?}").to_lowercase()),
             _ => {}
         }
-        let gestures = self.controller.status().gestures;
-        let mut outgoing = Vec::new();
-        for command in self.controller.on_event(event, now) {
-            outgoing.extend(self.apply(command, now)?);
-        }
-        let status = self.controller.status();
-        if status.gestures != gestures
-            && let Some(gesture) = &status.last_gesture
-        {
-            self.log.push(format!("gesture {gesture}"));
-        }
-        Ok(outgoing)
+        let outputs = self.controls.on_event(event, now);
+        self.take(outputs, Some(now))
     }
 
-    fn apply(&mut self, command: Command, now: f64) -> Result<Vec<u8>, String> {
-        match command {
-            Command::Run(action) if action == DIAL_TOGGLE => {
-                self.controller.cycle_dial();
-                self.log
-                    .push(format!("dial {}", self.controller.status().dial.name()));
-                self.actions.push(format!(
-                    "dial.changed.{}",
-                    self.controller.status().dial.name()
-                ));
-            }
-            Command::Run(action) => {
-                self.log.push(format!("action {action}"));
-                self.actions.push(action);
-            }
-            Command::SetHand(hand) => {
-                return self
-                    .session
-                    .set_handedness(hand, now)
-                    .map_err(|e| e.to_string());
+    /// What the controls asked for: actions and events for the app, hand writes for the band
+    /// (`now`: none, e.g. from `set_profiles`: the next `tick` writes it).
+    fn take(&mut self, outputs: Vec<Output<String>>, now: Option<f64>) -> Result<Vec<u8>, String> {
+        let mut outgoing = Vec::new();
+        for output in outputs {
+            match output {
+                Output::Run(action) => {
+                    self.log.push(format!("action {action}"));
+                    self.actions.push(action);
+                }
+                Output::Gesture(gesture) => {
+                    self.log.push(format!("gesture {}", gesture.label()));
+                    self.actions.push(format!("@gesture {}", gesture.label()));
+                }
+                Output::Controls { enabled } => {
+                    self.actions.push(format!("@controls {}", if enabled { "on" } else { "off" }));
+                }
+                Output::Profile { index, step } => self.actions.push(format!("@profile {index} {step}")),
+                Output::ProfileHeld { app } => self.actions.push(format!("@held {app}")),
+                Output::Practiced(action) => self.actions.push(format!("@practiced {action}")),
+                Output::SetHand(hand) => match now {
+                    Some(now) => outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?),
+                    None => self.pending_hand = Some(hand),
+                },
             }
         }
-        Ok(Vec::new())
+        Ok(outgoing)
     }
 }
 

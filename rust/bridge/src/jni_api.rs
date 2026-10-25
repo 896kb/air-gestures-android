@@ -37,32 +37,19 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_open<'local>(
     owner_key: JByteArray<'local>,
     scheme_guess: jint,
     paused: jboolean,
-    dial: JString<'local>,
-    mapping: JString<'local>,
+    profiles: JString<'local>,
 ) -> jlong {
-    let strings = env.get_string(&dial).map(String::from).and_then(|dial| {
-        env.get_string(&mapping)
-            .map(|mapping| (dial, String::from(mapping)))
-    });
-    let (dial, mapping) = match strings {
-        Ok(strings) => strings,
-        Err(error) => {
-            throw(&mut env, &error.to_string());
+    let profiles = match get_string(&mut env, &profiles) {
+        Ok(profiles) => profiles,
+        Err(message) => {
+            throw(&mut env, &message);
             return 0;
         }
     };
     let opened = env
         .convert_byte_array(&owner_key)
         .map_err(|e| e.to_string())
-        .and_then(|key| {
-            Connection::new(
-                &key,
-                scheme_guess.max(0) as usize,
-                paused != 0,
-                &dial,
-                &mapping,
-            )
-        });
+        .and_then(|key| Connection::new(&key, scheme_guess.max(0) as usize, paused != 0, &profiles));
     match opened {
         Ok(connection) => Box::into_raw(Box::new(connection)) as jlong,
         Err(message) => {
@@ -162,29 +149,68 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPaused<'local>(
     unsafe { connection(handle) }.set_paused(paused != 0, now);
 }
 
+/// New profiles, hand and call layer as JSON (see `profiles::parse`); bad JSON throws.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setDial<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProfiles<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
-    dial: JString<'local>,
+    json: JString<'local>,
 ) {
-    match env.get_string(&dial) {
-        Ok(dial) => unsafe { connection(handle) }.set_dial(&String::from(dial)),
-        Err(error) => throw(&mut env, &error.to_string()),
+    let result = get_string(&mut env, &json).and_then(|json| unsafe { connection(handle) }.set_profiles(&json));
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+/// The app in front (`""`: none known).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setForeground<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    app: JString<'local>,
+) {
+    let result = get_string(&mut env, &app).and_then(|app| unsafe { connection(handle) }.set_foreground(&app));
+    if let Err(message) = result {
+        throw(&mut env, &message);
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setMapping<'local>(
-    mut env: JNIEnv<'local>,
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setInCall<'local>(
+    _env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
-    mapping: JString<'local>,
+    in_call: jboolean,
 ) {
-    match env.get_string(&mapping) {
-        Ok(mapping) => unsafe { connection(handle) }.set_mapping(&String::from(mapping)),
-        Err(error) => throw(&mut env, &error.to_string()),
+    unsafe { connection(handle) }.set_in_call(in_call != 0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPractice<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    practice: jboolean,
+) {
+    unsafe { connection(handle) }.set_practice(practice != 0);
+}
+
+/// What's worth a warning in these profiles, one line each: `no-controls <index>`,
+/// `no-way-out <index>` (invalid JSON: `""`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileWarnings<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    json: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &json) {
+        Ok(json) => string_out(&mut env, crate::profiles::warnings(&json)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
     }
 }
 
