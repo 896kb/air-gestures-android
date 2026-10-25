@@ -3,7 +3,7 @@
 //! errors become IOException.
 
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JString};
 use jni::sys::{jboolean, jbyteArray, jdouble, jint, jlong, jstring};
 
 use crate::Connection;
@@ -226,6 +226,82 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_bandChoices<'local>(
         .and_then(|json| Ok((json, get_string(&mut env, &control)?, get_string(&mut env, &palm)?)));
     match strings {
         Ok((json, control, palm)) => string_out(&mut env, crate::report::band_choices(&json, &control, &palm)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+fn doubles(env: &mut JNIEnv, array: &JDoubleArray) -> Result<Vec<f64>, String> {
+    let length = env.get_array_length(array).map_err(|e| e.to_string())?;
+    let mut values = vec![0.0; length.max(0) as usize];
+    env.get_double_array_region(array, 0, &mut values).map_err(|e| e.to_string())?;
+    Ok(values)
+}
+
+/// A palm calibration from rolls held still palm down and palm up (see
+/// `teach::palm_calibration`): `{"down", "up"}` or `{"error"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_palmCalibration<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    down: JDoubleArray<'local>,
+    up: JDoubleArray<'local>,
+) -> jstring {
+    let rolls = doubles(&mut env, &down).and_then(|down| Ok((down, doubles(&mut env, &up)?)));
+    match rolls {
+        Ok((down, up)) => string_out(&mut env, crate::teach::palm_calibration(&down, &up)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Taught drags from their samples (see `teach::drag_prototypes`): the prototypes or `{"error"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_dragPrototypes<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    samples: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &samples) {
+        Ok(samples) => string_out(&mut env, crate::teach::drag_prototypes(&samples)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Whether these tries can teach a drawing (see `teach::check_tries`): `""` or why not.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_checkTries<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    tries: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &tries) {
+        Ok(tries) => string_out(&mut env, crate::teach::check_tries(&tries)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The drawing in the library these tries look like, or `""` (see `teach::looks_like`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_looksLike<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    library: JString<'local>,
+    tries: JString<'local>,
+) -> jstring {
+    let strings = get_string(&mut env, &library).and_then(|library| Ok((library, get_string(&mut env, &tries)?)));
+    match strings {
+        Ok((library, tries)) => string_out(&mut env, crate::teach::looks_like(&library, &tries)),
         Err(message) => {
             throw(&mut env, &message);
             std::ptr::null_mut()
