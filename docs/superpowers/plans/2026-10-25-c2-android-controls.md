@@ -6,8 +6,8 @@
 
 **Architecture:**
 - **band-core decides, the app shows.** The bridge parses one profiles JSON into `Profiles<String>` + per-hand `Options`, and answers the screens with static JNI calls that run band-core's own rules (`uses`, `paused`, `paused_sliders`, `invalid`, `warnings`, and "what would moving this band control pause"). Kotlin never re-implements those rules.
-- **New `@` lines** in the actions channel carry the draw session and drag teaching (`@draw-started`, `@draw-start`, `@draw-point`, `@draw-finished`, `@drawn`, `@not-drawn`, `@draw-cancelled`, `@drag-sample`), next to today's `@gesture`, `@controls`, `@profile`, `@held`, `@practiced`.
-- **Teaching helpers are static** (palm calibration from rolls, `Prototypes::taught`, `draw::check_tries`, `Library::looks_like`); the connection adds the draw session, teaching modes, the drawings library and a live roll/palm readout computed from orientation events.
+- **New `@` lines** in the actions channel carry the draw session and drag teaching (`@draw-started`, `@pen`, `@draw-point`, `@draw-finished`, `@drawn`, `@not-drawn`, `@draw-cancelled`, `@drag-sample`), next to today's `@gesture`, `@controls`, `@profile`, `@held`, `@practiced`.
+- **Teaching helpers are static** (palm calibration from rolls, `Prototypes::taught`, `draw::check_tries`, `Library::looks_like`); the connection adds the draw session, teaching modes, the drawings library and a live readout for the calibration screen (the roll from orientation events, the palm from `Controls::palm`).
 - **Kotlin keeps storage** (profiles, band controls, drawings, calibrations per band and wrist), the screens (built in code with the `Neu`/`Cb` helpers, as today) and the overlay pad (an accessibility overlay from `TouchService`).
 
 **Tech Stack:** Rust 2024 (JNI bridge, `jni` 0.21, serde_json), Kotlin (plain Android views, no AndroidX, JUnit 4 with `org.json`), band-core `controls` (local, unreleased).
@@ -50,21 +50,24 @@
 7. **Automation names:** an override sends `gesture=<key>` plus `palm=<down|sideways|up>`; the index dial keeps 0.7.7's `gesture=dial`, the middle dial is `middle_dial`, a slider `<finger>_<pair>` (`index_left_right`…), a drawing `gesture=drawing` + `name`.
 8. **Backup version 2** carries the band controls, drawings and their shared actions; calibrations aren't backed up (they belong to a band). Version 1 backups still restore (band controls standard, built-ins dropped).
 9. **Without the accessibility service** there is no pad: results show as toasts (and the two buzzes).
-10. **"Pen down"** is lit while points arrive (band-core reports no pen-up; see API gaps).
-11. **"When you let go"** comes from the bridge's `hold_waits`, a mirror of band-core's private fast-hold rule that ignores the palm and assumes the hand's drags are known.
+10. **"Pen down"** follows band-core's `Output::Pen` (`@pen down|up`).
+11. **"When you let go"** comes from band-core's `Profiles::hold_waits` per palm position: the hint shows when the hold waits in any position, naming the positions when it's not all three.
 12. **Warnings move to the Gestures screen** (they're for the whole set now); `Bridge.profileWarnings` and the per-profile warnings card go.
 13. **Teach your drags' turn** is "the way that turns the volume up" (band-core: a taught turn's + is the user's own).
-14. **A stroke's first point** is marked by the bridge (`@draw-start`): a `DrawPoint` produced by a gesture event is the pen's press.
+14. **After `@pen down` the next `@draw-point` starts its stroke**; a dropped stroke's number comes again, and the pad redraws it.
 15. **Calibration screens ask which wrist** when the hand is "band" and the band hasn't said yet.
 16. **Switching the hand asks to calibrate** whenever the new wrist has no palm calibration on this band (the right wrist's defaults still work if declined).
 
-## band-core API gaps (none blocks this plan; band-core is not changed)
+## band-core API for what were gaps (band-core `controls` `bf121bf`, under review: small changes possible)
 
-- The fast-hold rule (`Controls::moves_do_something`) is private: the bridge mirrors it in `report::hold_waits` for the "when you let go" hint. A public `Profiles::hold_waits(profile, finger, palm)` would remove the mirror.
-- No pen-up/pen-down output in a draw session: the pad's "Pen down" indicator is inferred from points arriving.
-- `Options` holds one hand's calibration and drags, and band-core doesn't switch them when the band reports another hand: the bridge calls `set_options` again on `Event::Handedness`.
-- No palm readout from `Controls`: the bridge recomputes roll and position from `Event::Orientation` with the public `pinch::roll_or` / `up_in_band` and `PalmCalibration::position`.
-- `on_disconnect` ends a draw session without an output (documented): the app closes the pad on disconnect.
+The first draft of this plan worked around four gaps; band-core now fills them, and this plan uses them (band-core is still not changed from here):
+- `Controls::set_calibration(palm, drags)` swaps the palm calibration and taught drags without touching the hand state (a runtime hand, its request and retry stay; nothing is written to the band). The bridge calls it when the band reports its hand, and when only the calibration changed in a new profiles JSON; `set_options` only when the hand setting changed.
+- `Controls::palm(now) -> Palm`: the palm position now, as the engine reads it (down when stale or uncalibrated). The calibration screen's "Right now" shows it, with the roll the bridge reads from orientation events (the samples the calibration needs).
+- `Output::Pen { down }`: the pad's "Pen down" light, as `@pen down|up` (down just before a stroke's first `DrawPoint`; up when the pen lets go or its stroke drops).
+- `Profiles::hold_waits(profile, finger, palm)`: the "when you let go" hint; the bridge reports it per palm position and doesn't copy the rule.
+- `Responder::gyro3` / `Responder::orientation` let the bridge's connection tests send motion and orientation.
+
+Still as documented: `on_disconnect` ends a draw session without an output, so the app closes the pad on disconnect.
 
 ---
 
@@ -97,7 +100,7 @@ Paths: Kotlin sources are under `app/src/main/java/dev/kb896/airgestures/`, Kotl
 - `src/profiles.rs` — rewritten: the new JSON → `Profiles<String>` and a per-hand `Setup` (`options`, `palm`, `hand_in_use`).
 - `src/report.rs` — new: `report(json)` (warnings, invalid, paused, paused_sliders, uses, hold_waits) and `band_choices(json, control, palm)`.
 - `src/teach.rs` — new: `palm_calibration`, `drag_prototypes`, `library`, `check_tries`, `looks_like`.
-- `src/palmlive.rs` — new: the roll and palm right now.
+- `src/palmlive.rs` — new: the band's roll right now (the palm comes from `Controls::palm`).
 - `src/lib.rs` — `Connection`: `Setup`, options on handedness, `line()` for every `@` line, draw/teach calls, `palm_now`.
 - `src/jni_api.rs` — new natives; `profileWarnings` goes.
 - Tests: `tests/profiles.rs` (rewritten), `tests/lines.rs`, `tests/report.rs`, `tests/teach.rs` (new), `tests/connection.rs` (its JSON helper and two tests change, three tests added).
@@ -163,8 +166,8 @@ Existing: `@gesture <label>`, `@controls on|off`, `@profile <index> <step>`, `@h
 | Line | From |
 |---|---|
 | `@draw-started` | `Output::DrawStarted` |
-| `@draw-start <stroke> <x> <y>` | `Output::DrawPoint` made by a press (the stroke's first point; a dropped stroke's number comes again: redraw it) |
-| `@draw-point <stroke> <x> <y>` | `Output::DrawPoint` from motion (degrees, 2 decimals, x right, y up) |
+| `@pen down` / `@pen up` | `Output::Pen { down }`: down just before a stroke's first point, up when the pen lets go or its stroke drops |
+| `@draw-point <stroke> <x> <y>` | `Output::DrawPoint` (degrees, 2 decimals, x right, y up); the first after `@pen down` starts its stroke, and a dropped stroke's number comes again (redraw it) |
 | `@draw-finished <json>` | `Output::DrawFinished`: `[[[x,y],…],…]` (strokes) |
 | `@drawn <name>` | `Output::Drawn` (the distance goes to the log) |
 | `@not-drawn` | `Output::NotDrawn` |
@@ -187,7 +190,8 @@ git status -s                                  # empty
 git branch --show-current                      # controls
 git -C rust/band-core fetch -q ~/Projects/band-core controls
 git -C rust/band-core checkout -q FETCH_HEAD
-git -C rust/band-core log --oneline -1         # 351d89b controls: teaching drags drops … (or later)
+git -C rust/band-core log --oneline -1         # bf121bf controls: pen state for the pad; hold_waits for the UI (or later: under review;
+                                               # if it moved, check set_calibration, palm, Output::Pen, hold_waits still read as used here)
 (cd rust && cargo build -p bridge 2>&1 | grep -E "^error" | head)   # errors in profiles.rs / lib.rs: expected
 ```
 
@@ -195,7 +199,7 @@ git -C rust/band-core log --oneline -1         # 351d89b controls: teaching drag
 
 ```rust
 use airgestures_bridge::profiles::parse;
-use band_core::controls::{BandControl, Binding, CallBinding, Dial, DragMode, Gesture, HandSetting, Palm, PalmCalibration, PalmSet, Palms};
+use band_core::controls::{BandControl, Binding, CallBinding, Dial, DragMode, Gesture, HandSetting, Palm, PalmSet, Palms};
 use band_core::events::Hand;
 
 const FULL: &str = r#"{"hand":"left","picked":1,"apps":{"vlc":0},
@@ -264,9 +268,6 @@ fn the_options_follow_the_hand_in_use() {
     let (band, _) = parse(r#"{"hand":"band","calibration":{"right":{"palm":{"down":-150.0,"up":-20.0}}}}"#).unwrap();
     assert_eq!(band.options(None).palm, None, "no hand known yet");
     assert_eq!(band.options(Some(Hand::Right)).palm.map(|c| c.down_roll), Some(-150.0));
-    // What band-core reads the palm with: the right hand's measured one, none for the left.
-    assert_eq!(band.palm(None), Some(PalmCalibration::right_hand()));
-    assert_eq!(band.palm(Some(Hand::Left)), None);
 }
 
 #[test]
@@ -457,12 +458,6 @@ impl Setup {
         };
         Options { hand: self.hand, palm: calibration.palm, drags: calibration.drags, ..Options::default() }
     }
-
-    /// The calibration band-core reads the palm with: the wrist's own, else the right hand's
-    /// measured one; none for an uncalibrated left wrist (always palm down).
-    pub fn palm(&self, band: Option<Hand>) -> Option<PalmCalibration> {
-        self.options(band).palm.or_else(|| (self.hand_in_use(band) != Some(Hand::Left)).then(PalmCalibration::right_hand))
-    }
 }
 
 pub fn parse(json: &str) -> Result<(Setup, Profiles<String>), String> {
@@ -583,7 +578,7 @@ use band_core::controls::{Finger, Gesture, Output};
 
 #[test]
 fn the_controls_outputs_become_at_lines() {
-    let l = |output: Output<String>| line(&output, false, -142.3);
+    let l = |output: Output<String>| line(&output, -142.3);
     assert_eq!(l(Output::Gesture(Gesture::IndexHold)).as_deref(), Some("@gesture index hold"));
     assert_eq!(l(Output::Controls { enabled: false }).as_deref(), Some("@controls off"));
     assert_eq!(l(Output::Profile { index: 1, step: -1 }).as_deref(), Some("@profile 1 -1"));
@@ -591,11 +586,8 @@ fn the_controls_outputs_become_at_lines() {
     assert_eq!(l(Output::Practiced("media.next".into())).as_deref(), Some("@practiced media.next"));
     assert_eq!(l(Output::DrawStarted).as_deref(), Some("@draw-started"));
     assert_eq!(l(Output::DrawPoint { stroke: 0, x: 1.0, y: -2.5 }).as_deref(), Some("@draw-point 0 1.00 -2.50"));
-    assert_eq!(
-        line(&Output::DrawPoint { stroke: 1, x: 0.0, y: 0.0 }, true, 0.0).as_deref(),
-        Some("@draw-start 1 0.00 0.00"),
-        "a press's point starts its stroke"
-    );
+    assert_eq!(l(Output::Pen { down: true }).as_deref(), Some("@pen down"));
+    assert_eq!(l(Output::Pen { down: false }).as_deref(), Some("@pen up"));
     assert_eq!(
         l(Output::DrawFinished { strokes: vec![vec![[0.0, 0.0], [1.5, 2.0]]] }).as_deref(),
         Some("@draw-finished [[[0.0,0.0],[1.5,2.0]]]")
@@ -620,33 +612,37 @@ fn the_controls_outputs_become_at_lines() {
            let options = setup.options(self.controls.status().hand);
            self.setup = setup;
            let mut outputs = Vec::new();
-           // New options re-arm the dial and ask for the hand afresh: only when they changed
-           // (the app sends its profiles again on every foreground or call change).
-           if options != *self.controls.options() {
+           let current = self.controls.options();
+           if options.hand != current.hand {
+               // A new hand setting: asked for afresh (set_options also re-arms the dial). Not on
+               // every send: the app sends its profiles again on every foreground or call change.
                outputs.extend(self.controls.set_options(options));
+           } else if options.palm != current.palm || options.drags != current.drags {
+               // Only the calibration (calibrated or taught again): the hand and its request stay.
+               self.controls.set_calibration(options.palm, options.drags);
            }
            outputs.extend(self.controls.set_profiles(profiles));
            outputs.retain(|output| !matches!(output, Output::Profile { step: 0, .. }));
-           self.take(outputs, None, false)?;
+           self.take(outputs, None)?;
            Ok(())
        }
    ```
-3. `on_event`, after `let mut outputs = self.controls.on_event(event, now);`:
+3. `on_event`, after `let outputs = self.controls.on_event(event, now);` (no `mut`: `set_calibration` returns nothing):
    ```rust
-           // The band said which wrist: with the hand set to "band", that wrist's calibration.
+           // The band said which wrist: that wrist's calibration and taught drags, the hand
+           // state untouched (set_options would ask for the hand again).
            if let Event::Handedness(hand) = event {
                let options = self.setup.options(Some(*hand));
-               if options != *self.controls.options() {
-                   outputs.extend(self.controls.set_options(options));
+               let current = self.controls.options();
+               if options.palm != current.palm || options.drags != current.drags {
+                   self.controls.set_calibration(options.palm, options.drags);
                }
            }
-           // A draw session's point made by a gesture event is the pen's press.
-           let press = matches!(event, Event::Gesture(_));
-           self.take(outputs, Some(now), press)
+           self.take(outputs, Some(now))
    ```
-4. `take` gains `press: bool` (every caller passes `false` except `on_event`), and every output other than `Run` and `SetHand` goes through `line()`:
+4. In `take`, every output other than `Run` and `SetHand` goes through `line()`:
    ```rust
-       fn take(&mut self, outputs: Vec<Output<String>>, now: Option<f64>, press: bool) -> Result<Vec<u8>, String> {
+       fn take(&mut self, outputs: Vec<Output<String>>, now: Option<f64>) -> Result<Vec<u8>, String> {
            let mut outgoing = Vec::new();
            for output in outputs {
                match output {
@@ -665,7 +661,7 @@ fn the_controls_outputs_become_at_lines() {
                            _ => {}
                        }
                        let roll = self.controls.prototypes().palm_down_roll;
-                       self.actions.extend(line(&other, press, roll));
+                       self.actions.extend(line(&other, roll));
                    }
                }
            }
@@ -675,9 +671,8 @@ fn the_controls_outputs_become_at_lines() {
 5. Add, after `impl Connection`:
    ```rust
    /// The `@` line the app follows for an output (`None`: `Run` and `SetHand`, which go as they
-   /// are). `press`: the output came from a gesture event, so a `DrawPoint` starts its stroke.
-   /// `roll`: the prototypes' palm-down roll, which a drag sample was read in.
-   pub fn line(output: &Output<String>, press: bool, roll: f64) -> Option<String> {
+   /// are). `roll`: the prototypes' palm-down roll, which a drag sample was read in.
+   pub fn line(output: &Output<String>, roll: f64) -> Option<String> {
        Some(match output {
            Output::Gesture(gesture) => format!("@gesture {}", gesture.label()),
            Output::Controls { enabled } => format!("@controls {}", if *enabled { "on" } else { "off" }),
@@ -685,9 +680,8 @@ fn the_controls_outputs_become_at_lines() {
            Output::ProfileHeld { app } => format!("@held {app}"),
            Output::Practiced(action) => format!("@practiced {action}"),
            Output::DrawStarted => "@draw-started".into(),
-           Output::DrawPoint { stroke, x, y } => {
-               format!("@draw-{} {stroke} {x:.2} {y:.2}", if press { "start" } else { "point" })
-           }
+           Output::Pen { down } => format!("@pen {}", if *down { "down" } else { "up" }),
+           Output::DrawPoint { stroke, x, y } => format!("@draw-point {stroke} {x:.2} {y:.2}"),
            Output::DrawFinished { strokes } => {
                format!("@draw-finished {}", serde_json::to_string(strokes).unwrap_or_else(|_| "[]".into()))
            }
@@ -826,8 +820,11 @@ fn the_report_lists_what_band_controls_pause_by_place_and_position() {
                 "positions":["down","sideways","up"]}])
     );
     assert_eq!(r["uses"]["index_double"], json!([{"place":0,"palm":null},{"place":"calls","palm":null}]));
-    // Per profile, [index, middle]: a dial, or a drag that does something (a band control on one counts).
-    assert_eq!(r["hold_waits"], json!([[false, true], [true, true]]));
+    // Per profile and finger, where the hold waits: a dial, or a drag that does something there
+    // (Previous on a middle drag, with two profiles, in every position). band-core's rule: if it
+    // answers otherwise, it's right and this expectation is wrong.
+    let all = json!(["down", "sideways", "up"]);
+    assert_eq!(r["hold_waits"], json!([{"index": [], "middle": all}, {"index": all, "middle": all}]));
 }
 
 #[test]
@@ -881,8 +878,8 @@ Run: `(cd rust && cargo test -p bridge --test report 2>&1 | grep -E "^error" | h
 //! use the JSON's keys.
 
 use band_core::controls::{
-    BandControl, BandControls, Builtin, DragMode, Drag, Finger, Gesture, Invalid, Palm, PalmSet, Palms, Paused,
-    PausedSlider, Place, Profiles, Warning,
+    BandControl, BandControls, Builtin, Finger, Gesture, Invalid, Palm, PalmSet, Palms, Paused, PausedSlider, Place,
+    Profiles, Warning,
 };
 use serde_json::{Map, Value, json};
 
@@ -934,28 +931,6 @@ fn slider_json(s: &PausedSlider) -> Value {
     })
 }
 
-/// Whether this finger's hold waits for the release in this profile: it has a dial, or one of
-/// its drags does something (a band control on it; in gestures mode an action in the profile or
-/// the call layer; in sliders mode its pair's slider). band-core keeps this rule private
-/// (`Controls::moves_do_something`); this mirror ignores the palm and assumes the hand's drags
-/// are known (taught, or the right hand's). Only for the "when you let go" hint.
-fn hold_waits(profiles: &Profiles<String>, index: usize, finger: Finger) -> bool {
-    let profile = &profiles.list[index];
-    let setup = profile.finger(finger);
-    setup.dial.is_some()
-        || Drag::ALL.into_iter().any(|drag| {
-            let gesture = Gesture::drag(finger, drag);
-            Palm::ALL.into_iter().any(|palm| profiles.band.on(gesture, palm).is_some())
-                || match &setup.drags {
-                    DragMode::Gestures => {
-                        profile.gestures.get(&gesture).is_some_and(|b| b.normal.is_some() || b.overrides.values().any(Option::is_some))
-                            || profiles.calls.get(&gesture).is_some_and(|c| c.binding().is_some())
-                    }
-                    DragMode::Sliders(sliders) => sliders[drag.pair()].is_some(),
-                }
-        })
-}
-
 fn report_of(profiles: &Profiles<String>) -> Value {
     let warnings: Vec<&str> = profiles
         .warnings()
@@ -983,8 +958,12 @@ fn report_of(profiles: &Profiles<String>) -> Value {
             uses.insert(gesture.key().into(), Value::Array(list));
         }
     }
+    // Where each finger's hold waits for the release (band-core's `Profiles::hold_waits`).
     let holds: Vec<Value> = (0..profiles.list.len())
-        .map(|i| json!([hold_waits(profiles, i, Finger::Index), hold_waits(profiles, i, Finger::Middle)]))
+        .map(|i| {
+            let waits = |finger: Finger| palms(Palm::ALL.into_iter().filter(|&palm| profiles.hold_waits(i, finger, palm)).collect());
+            json!({"index": waits(Finger::Index), "middle": waits(Finger::Middle)})
+        })
         .collect();
     json!({
         "warnings": warnings,
@@ -1054,7 +1033,7 @@ pub fn band_choices(json: &str, control: &str, palm: &str) -> String {
 }
 ```
 
-Check the B row of `hold_waits` in the test: B has an index dial (true) and a middle slider, with Previous on its middle drag left (true). A: no index dial, no index drags (false); middle: Previous on a middle drag (true).
+`hold_waits` in the test: B has an index dial (all positions) and Previous on its middle drag left (all); A has no index dial or drags (none) and the same middle (all).
 
 - [ ] **Step 3: JNI** — in `jni_api.rs`, replace `profileWarnings` with:
 
@@ -1311,7 +1290,7 @@ Claude-Session: https://claude.ai/code/session_01MLDqGPYx8bTGKJcVLgoyzo"
 **Files:**
 - Create: `rust/bridge/src/palmlive.rs`
 - Modify: `rust/bridge/src/lib.rs`, `rust/bridge/src/jni_api.rs`
-- Test: `rust/bridge/tests/connection.rs` (3 tests), `palmlive.rs` unit tests
+- Test: `rust/bridge/tests/connection.rs` (4 tests), `palmlive.rs` unit tests
 
 - [ ] **Step 1: Failing tests** — append to `tests/connection.rs`:
 
@@ -1341,11 +1320,23 @@ fn teaching_drags_cancels_an_open_drawing_and_opens_none() {
 }
 
 #[test]
-fn a_bad_library_is_refused_and_the_palm_readout_starts_empty() {
+fn a_bad_library_is_refused() {
     let (mut connection, _band) = connected(false);
     assert!(connection.set_library("[").is_err());
     connection.set_library(r#"[{"name":"Circle","tries":[[[[0,0],[10,0],[10,10],[0,10],[0,0]]]]}]"#).unwrap();
+}
+
+#[test]
+fn the_palm_readout_follows_the_bands_orientation() {
+    let (mut connection, mut band) = connected(false);
     assert_eq!(connection.palm_now(3.0), r#"{"palm":null,"roll":null}"#);
+    // Roll −11.3° (turned +11.3° about the band's y): palm up on the right hand's measured calibration.
+    let half = 11.3_f64.to_radians() / 2.0;
+    let bytes = band.orientation([half.cos() as f32, 0.0, half.sin() as f32, 0.0]).unwrap();
+    let reply = connection.feed(&bytes, 3.0).unwrap();
+    pump(&mut connection, &mut band, reply, 3.0);
+    assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-11.3}"#);
+    assert_eq!(connection.palm_now(4.0), r#"{"palm":null,"roll":null}"#, "stale");
 }
 ```
 
@@ -1354,46 +1345,34 @@ And `palmlive.rs` gets (Step 2) its own tests.
 - [ ] **Step 2: `rust/bridge/src/palmlive.rs`**
 
 ```rust
-//! The band's roll and palm position right now, for the calibration screen: from its
-//! orientation samples, read as band-core reads them (`pinch::roll_or`, `up_in_band`,
-//! `PalmCalibration::position`), which keeps that reading private.
+//! The band's roll right now, for the calibration screen (its samples are what
+//! `PalmCalibration::from_rolls` takes): from orientation events, read as band-core reads
+//! them (`pinch::roll_or`, `up_in_band`). The palm position itself is `Controls::palm`.
 
 use band_core::controls::pinch::{roll_or, up_in_band};
-use band_core::controls::{Palm, PalmCalibration};
 use band_core::events::Event;
 
 /// A sample older than this isn't "right now" (band-core's `ORIENTATION_STALE`).
 const FRESH: f64 = 0.5;
 
 #[derive(Debug, Default)]
-pub struct PalmLive {
+pub struct LiveRoll {
     /// The last readable roll (degrees) and when it came.
-    roll: Option<(f64, f64)>,
-    /// Its position, with hysteresis (`None` without a calibration).
-    palm: Option<Palm>,
+    last: Option<(f64, f64)>,
 }
 
-impl PalmLive {
-    /// An event from the band; `calibration`: the one in use (`Setup::palm`).
-    pub fn on_event(&mut self, event: &Event, now: f64, calibration: Option<PalmCalibration>) {
+impl LiveRoll {
+    pub fn on_event(&mut self, event: &Event, now: f64) {
         let Event::Orientation(q) = event else { return };
         let roll = roll_or(up_in_band(*q), f64::NAN);
-        if !roll.is_finite() {
-            return;
+        if roll.is_finite() {
+            self.last = Some((roll, now));
         }
-        self.roll = Some((roll, now));
-        self.palm = calibration.map(|c| c.position(roll, self.palm.unwrap_or(Palm::Down)));
     }
 
-    /// `{"palm": "down" | "sideways" | "up" | null, "roll": degrees (to 0.1) | null}`: both null
-    /// without a fresh sample, the palm also without a calibration.
-    pub fn json(&self, now: f64) -> String {
-        let fresh = self.roll.filter(|(_, at)| now - at < FRESH);
-        serde_json::json!({
-            "roll": fresh.map(|(roll, _)| (roll * 10.0).round() / 10.0),
-            "palm": fresh.and(self.palm).map(Palm::key),
-        })
-        .to_string()
+    /// The roll (to 0.1°) when the last readable sample is fresh.
+    pub fn fresh(&self, now: f64) -> Option<f64> {
+        self.last.filter(|(_, at)| now - at < FRESH).map(|(roll, _)| (roll * 10.0).round() / 10.0)
     }
 }
 
@@ -1408,25 +1387,22 @@ mod tests {
     }
 
     #[test]
-    fn it_reads_the_roll_and_the_palm_with_hysteresis_and_goes_stale() {
-        let mut live = PalmLive::default();
-        let c = Some(PalmCalibration::right_hand());
-        live.on_event(&rolled(-142.3), 1.0, c);
-        assert_eq!(live.json(1.1), r#"{"palm":"down","roll":-142.3}"#);
-        live.on_event(&rolled(-105.0), 1.2, c);
-        assert!(live.json(1.2).contains(r#""palm":"down""#), "near the boundary it stays");
-        live.on_event(&rolled(-11.3), 1.3, c);
-        assert!(live.json(1.3).contains(r#""palm":"up""#));
-        assert_eq!(live.json(2.0), r#"{"palm":null,"roll":null}"#, "stale");
-        live.on_event(&rolled(-50.0), 2.1, None);
-        assert_eq!(live.json(2.1), r#"{"palm":null,"roll":-50.0}"#, "no calibration, no palm");
+    fn it_reads_the_roll_and_goes_stale() {
+        let mut live = LiveRoll::default();
+        assert_eq!(live.fresh(0.0), None);
+        live.on_event(&rolled(-142.3), 1.0);
+        assert_eq!(live.fresh(1.1), Some(-142.3));
+        // Forearm straight down: no roll to read, the last one stays.
+        live.on_event(&Event::Orientation([0.7071, 0.7071, 0.0, 0.0]), 1.2);
+        assert_eq!(live.fresh(1.3), Some(-142.3));
+        assert_eq!(live.fresh(1.6), None, "stale");
     }
 }
 ```
 
 - [ ] **Step 3: `Connection`** (in `lib.rs`; `mod palmlive;`):
-1. Field `palm: palmlive::PalmLive` (`Default` in `new`).
-2. In `on_event`, before `take`: `self.palm.on_event(event, now, self.setup.palm(self.controls.status().hand));`
+1. Field `roll: palmlive::LiveRoll` (`Default` in `new`).
+2. In `on_event`, before `take`: `self.roll.on_event(event, now);`
 3. New methods:
    ```rust
        /// The drawings (`[{"name", "tries"}]`, see `teach::library`) draw sessions match against.
@@ -1439,13 +1415,13 @@ mod tests {
        /// Open a draw session from the app (the teach screen): `@draw-started`.
        pub fn start_drawing(&mut self, now: f64) -> Result<(), String> {
            let outputs = self.controls.start_drawing(now);
-           self.take(outputs, None, false).map(drop)
+           self.take(outputs, None).map(drop)
        }
 
        /// The pad's close button: `@draw-cancelled` (nothing with no session).
        pub fn cancel_drawing(&mut self) -> Result<(), String> {
            let outputs = self.controls.cancel_drawing();
-           self.take(outputs, None, false).map(drop)
+           self.take(outputs, None).map(drop)
        }
 
        /// Teaching drawings: sessions report their strokes (`@draw-finished`) and match nothing.
@@ -1457,12 +1433,15 @@ mod tests {
        /// on cancels an open draw session.
        pub fn set_drag_teaching(&mut self, on: bool) -> Result<(), String> {
            let outputs = self.controls.set_drag_teaching(on);
-           self.take(outputs, None, false).map(drop)
+           self.take(outputs, None).map(drop)
        }
 
-       /// The band's roll and palm right now (see `palmlive::PalmLive::json`).
+       /// `{"palm": "down" | "sideways" | "up" | null, "roll": degrees (to 0.1) | null}` right
+       /// now: both null without a fresh orientation; the palm as band-core reads it
+       /// (`Controls::palm`: down for an uncalibrated left wrist).
        pub fn palm_now(&self, now: f64) -> String {
-           self.palm.json(now)
+           let roll = self.roll.fresh(now);
+           serde_json::json!({"roll": roll, "palm": roll.map(|_| self.controls.palm(now).key())}).to_string()
        }
    ```
 4. `status_json`: add `"drawing": self.controls.drawing()` next to the update fields of `Snapshot` (a `drawing: bool` field), so a reconnecting app can close a pad left open.
@@ -2342,7 +2321,7 @@ class ReportTest {
                   {"control":"next","gesture":"index_triple","place":0,"palm":"up","positions":["up"]},
                   {"control":"next","gesture":"index_double","place":"calls","palm":null,"positions":["up"]}],
         "paused_sliders":[{"control":"previous","gesture":"middle_drag_left","profile":1,"finger":"middle","pair":0,"positions":["down"]}],
-        "uses":{},"hold_waits":[[false,true],[true,true]]}""")
+        "uses":{},"hold_waits":[{"index":[],"middle":["down","sideways","up"]},{"index":["down","sideways","up"],"middle":["up"]}]}""")
 
     @Test fun `counts by band control and by place`() {
         assertEquals(1, report.count(Builtin.CONTROLS))
@@ -2357,8 +2336,9 @@ class ReportTest {
         assertEquals(setOf(Palm.UP), report.paused(0, Gesture.INDEX_TRIPLE, Palm.UP)!!.positions)
         assertNull(report.paused(0, Gesture.INDEX_TRIPLE, null))
         assertEquals(Builtin.PREVIOUS, report.pausedSlider(1, Part.MIDDLE, 0)!!.control)
-        assertFalse(report.holdWaits(0, Part.INDEX))
-        assertTrue(report.holdWaits(1, Part.INDEX))
+        assertTrue(report.holdWaits(0, Part.INDEX).isEmpty())
+        assertEquals(Palm.entries.toSet(), report.holdWaits(1, Part.INDEX))
+        assertEquals(setOf(Palm.UP), report.holdWaits(1, Part.MIDDLE))
         assertEquals(listOf("no-way-out"), report.warnings)
         assertEquals(listOf("band next"), report.invalid)
         assertEquals(0, Report("not json").count(Builtin.CONTROLS))
@@ -2479,8 +2459,9 @@ class Report(json: String) {
     fun count(place: Int?) = paused.count { it.place == place } + if (place == null) 0 else pausedSliders.count { it.profile == place }
     fun paused(place: Int?, gesture: Gesture, palm: Palm?) = paused.firstOrNull { it.place == place && it.gesture == gesture && it.palm == palm }
     fun pausedSlider(profile: Int, part: Part, pair: Int) = pausedSliders.firstOrNull { it.profile == profile && it.part == part && it.pair == pair }
-    /** [part]'s hold acts when you let go in profile [profile] (its dial, or a drag that does something). */
-    fun holdWaits(profile: Int, part: Part) = holds?.optJSONArray(profile)?.optBoolean(if (part == Part.MIDDLE) 1 else 0) == true
+    /** Where [part]'s hold acts when you let go in profile [profile] (band-core's `Profiles::hold_waits`): the palm positions. */
+    fun holdWaits(profile: Int, part: Part): Set<Palm> =
+        palms(holds?.optJSONObject(profile)?.optJSONArray(if (part == Part.MIDDLE) "middle" else "index"))
 
     companion object {
         /** For the stored settings, from band-core. */
@@ -2699,8 +2680,9 @@ class DrawTeach {
     /** A draw session's listener: a teach screen while one is open, else the pad over the app in front (or toasts). */
     interface Drawing {
         fun started() {}
-        /** [start]: the stroke's first point (a dropped stroke's number comes again: draw it afresh). */
-        fun point(stroke: Int, x: Float, y: Float, start: Boolean) {}
+        /** The pen went down (the next point starts its stroke; a dropped stroke's number comes again: draw it afresh) or up. */
+        fun pen(down: Boolean) {}
+        fun point(stroke: Int, x: Float, y: Float) {}
         /** The session's strokes (DrawingLibrary.strokes reads them). */
         fun finished(strokes: String) {}
         fun drawn(name: String) {}
@@ -2730,8 +2712,9 @@ class DrawTeach {
 
 ```kotlin
                 "draw-started" -> pad.started()
-                "draw-start", "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
-                    pad.point(s.toInt(), x.toFloat(), y.toFloat(), start = kind == "draw-start")
+                "pen" -> pad.pen(rest == "down")
+                "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
+                    pad.point(s.toInt(), x.toFloat(), y.toFloat())
                 }
                 "draw-finished" -> pad.finished(rest)
                 "drawn" -> pad.drawn(rest)
@@ -3037,7 +3020,12 @@ Claude-Session: https://claude.ai/code/session_01MLDqGPYx8bTGKJcVLgoyzo"
             profile.palm[gesture.key]?.get(palm.key)?.let { "${palm.label} · ${label(it, calls = false)}" to (report.paused(index, gesture, palm) != null) }
         }
         val hold = gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD
-        val hint = if (hold && report.holdWaits(index, gesture.part)) "when you let go" else null
+        val waits = if (hold) report.holdWaits(index, gesture.part) else emptySet()
+        val hint = when {
+            waits.isEmpty() -> null
+            waits.size == Palm.entries.size -> "when you let go"
+            else -> "when you let go · " + Palm.entries.filter { it in waits }.joinToString(" or ") { it.label.lowercase() }
+        }
         val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
         return gestureRow(action.icon, gesture.short, label(id, calls = false), action == Action.NONE,
             paused = report.paused(index, gesture, null) != null, tags = tags, hint = hint, info = guide) {
@@ -3087,7 +3075,7 @@ Claude-Session: https://claude.ai/code/session_01MLDqGPYx8bTGKJcVLgoyzo"
 3. **Normal action card**: one `gestureRow` (the action, its Paused chip) → `pickAction(gesture.label, normalId) { id -> BandService.setAction(applicationContext, profileId, gesture, id); render() }`. Any action can be picked, paused or not (mockup 6).
 4. **"Palm overrides · up to 2" card**: a row per override (position, action label, Paused chip if paused, a "Remove" pill → `withoutOverride`), then "Add an override" (pill; hidden at two) → `choose("Palm position", <positions without an override>)` → `pickAction` → `withOverride`. Under it: "One position always keeps the normal action." Each change: `Profiles.update` + `BandService.instance?.remap()` + `render()`.
 5. **Calibration line**: added in Task 14 (it opens the calibration screen).
-6. **Hold hint**: for a hold whose `report.holdWaits(index, part)`: "Acts when you let go: this finger's dial or drags do something too."
+6. **Hold hint**: for a hold whose `report.holdWaits(index, part)` isn't empty (naming the positions when not all three): "Acts when you let go: this finger's dial or drags do something too."
 
 - [ ] **Step 2: Wire it** — `profileRow` (Task 11) opens `GestureActivity.open(context, profileId, gesture)` instead of the picker (the Drags screen's rows do the same in Task 13). Register the activity.
 
@@ -3326,7 +3314,8 @@ class StrokesView(context: Context, private val ink: Int, private val widthDp: F
 - [ ] **Step 2: `DrawPad`** — `class DrawPad(private val service: AccessibilityService) : BandService.Drawing`, built like `ChoicePopup` (a `TYPE_ACCESSIBILITY_OVERLAY` window, `FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCH_MODAL`, centred, 300 × 340 dp):
   - **View**: a dark card (`INK_900`, 20 dp corners, elevation 24 dp): a header row (`Cb.label` "DRAW" in `INK_300`, a "Pen down" indicator — an 8 dp dot `Signal.LIVE.fill` + 12sp text, dimmed to `INK_500` when the pen is up — and a close button `ic_x` tinted `INK_300` → `BandService.instance?.cancelDrawing()`), the `StrokesView(ink = Cb.PAGE)` filling the middle (hint "Pinch and draw" in `INK_500` while empty), and a result line (15sp `geist_medium`, `PAGE`).
   - `started()`: clear, show.
-  - `point(stroke, x, y, start)`: `start` and `stroke < strokes.size` → replace that stroke with `[(x, y)]` (a dropped stroke drawn afresh); `stroke == strokes.size` → a new stroke; else append. `lastPoint = uptimeMillis()`; the indicator is "down" while `uptimeMillis() - lastPoint < 200` (a 100 ms refresh while shown; judgement 10).
+  - `pen(down)`: the indicator (lit / dimmed); `down` also marks that the next point starts a stroke (judgements 10, 14).
+  - `point(stroke, x, y)`: the first point after `pen(true)` replaces stroke `stroke` with `[(x, y)]` when it exists (a dropped stroke drawn afresh), or starts it; any other point is appended to stroke `stroke`.
   - `finished(_)`: keep the strokes; wait for the result.
   - `drawn(name)`: result `DrawPad.result(service, name)`, hide after 1500 ms.
   - `notDrawn()`: "Not one of your drawings", hide after 1500 ms (BandService buzzes twice).
@@ -3357,7 +3346,7 @@ Claude-Session: https://claude.ai/code/session_01MLDqGPYx8bTGKJcVLgoyzo"
 4. Pills: "Teach a drawing" (→ `TeachDrawingActivity.open(this, null, null)`) and, in a profile's card, "Teach one for <Profile>" (→ `open(this, null, profileId)`).
 
 - [ ] **Step 2: `TeachDrawingActivity`** (extends `GestureScreen` for `pickAction`; extras `"name"` = teaching an existing drawing again, `"profile"` = Where defaults to that profile):
-1. **Tries**: three square tiles in a row (hairline, 96 dp). Done tries show their `StrokesView`; the current one draws live from `point(...)` (same replace rule as the pad); the next ones show "Try 2" / "Try 3" (12sp `INK_400`).
+1. **Tries**: three square tiles in a row (hairline, 96 dp). Done tries show their `StrokesView`; the current one draws live from `pen(...)` / `point(...)` (the pad's rule); the next ones show "Try 2" / "Try 3" (12sp `INK_400`).
 2. Under them: the message line (refusals) or, once three are alike and don't look like another, an **Alike** chip (`Cb.chip(context, Cb.Signal.LIVE, "Alike")`).
 3. **Name** row → `ask("Name", name, "Save")`; **Action** row → `pickAction`; **Where**: `segmented("All profiles", "Only in <profile>")` (the extra's profile, else the picked one).
 4. **Save** pill, enabled after the third alike try with a free name (`DrawTeach.nameFree(name, library.names, own = extra name)`) → `Drawings.update { it.with(Drawing(name, teach.tries)) }`, then either `Profiles.updateSharedDrawings { it + (name to action) }` or `Profiles.update { it.withDrawing(profileId, name, action) }`, then `drawingsChanged()` + `remap()` + finish.
@@ -3480,7 +3469,7 @@ adb -s f940914b exec-out screencap -d "$D" -p > /tmp/claude-1000/c2-shot.png   #
 5. **Holds and dials (9, 11):** index hold says "when you let go" (index dial = volume) and acts on release; set a middle dial: the note shows and the middle hold (the lock) now acts on release; set it back to Nothing: the lock is fast again.
 6. **Drags (13b):** index drags as gestures: drag right with an action runs it, with the palm down and up; middle drags as sliders: left/right moves the volume; a band control on a middle drag shows that slider as paused.
 7. **Teach your drags:** all seven steps save; a repeated direction is refused naming the two drags.
-8. **Draw (14, 15, 16):** put Draw on swipe down; teach "Lightbulb" (three tries, Alike, Save for All profiles with Flashlight on or off); a swipe down opens the pad over another app, strokes show live with Pen down; the lightbulb shows "Lightbulb → Flashlight on or off" and toggles the light; a scribble shows "Not one of your drawings" with two buzzes; the close button cancels. Pen grip on a table works too. A profile's own action for Lightbulb replaces the shared one there ("replaces shared" tag).
+8. **Draw (14, 15, 16):** put Draw on swipe down; teach "Lightbulb" (three tries, Alike, Save for All profiles with Flashlight on or off); a swipe down opens the pad over another app, strokes show live, Pen down lights while pinching and goes off on letting go; the lightbulb shows "Lightbulb → Flashlight on or off" and toggles the light; a scribble shows "Not one of your drawings" with two buzzes; the close button cancels. Pen grip on a table works too. A profile's own action for Lightbulb replaces the shared one there ("replaces shared" tag).
 9. **Calls:** during a call the band controls still work; Paused chips show on the During calls screen.
 10. **Left wrist:** switch to the left wrist: the app asks to calibrate; until then palm overrides don't apply (every gesture counts as palm down).
 11. **Practice and text fields:** lessons include the index hold when it's bound; handwriting in a text field still edits, and no band control acts there.
