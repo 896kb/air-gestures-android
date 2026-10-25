@@ -10,14 +10,14 @@ class LessonsBackupTest {
     private val defaults = Gesture.entries.associate { it.key to it.default.id }
 
     @Test fun `one profile and a working dial leave out the triple taps`() {
-        val steps = Lessons.steps(profiles = 1, dial = true, map = defaults)
+        val steps = Lessons.steps(profiles = 1, dial = true, map = defaults, band = BandControls.standard())
         assertEquals(10, steps.size)
         assertTrue(steps.any { it.done == Lessons.Done.Dial })
         assertFalse(steps.any { it.gesture == Gesture.INDEX_TRIPLE || it.gesture == Gesture.MIDDLE_TRIPLE })
     }
 
     @Test fun `two profiles add the triple taps and a dial set to nothing is left out`() {
-        val steps = Lessons.steps(profiles = 2, dial = false, map = defaults)
+        val steps = Lessons.steps(profiles = 2, dial = false, map = defaults, band = BandControls.standard())
         assertEquals(11, steps.size)
         assertFalse(steps.any { it.done == Lessons.Done.Dial })
         assertEquals(
@@ -27,19 +27,23 @@ class LessonsBackupTest {
     }
 
     @Test fun `a triple tap is practised only where it does something`() {
-        val one = Lessons.steps(1, true, defaults + ("index_triple" to "media.next")).map { it.gesture }
+        val none = BandControls()
+        val one = Lessons.steps(1, true, defaults + ("index_triple" to "media.next"), none).map { it.gesture }
         assertTrue(Gesture.INDEX_TRIPLE in one)
         assertFalse(Gesture.MIDDLE_TRIPLE in one)
-        val two = Lessons.steps(2, true, defaults + ("middle_triple" to "")).map { it.gesture }
-        assertTrue(Gesture.INDEX_TRIPLE in two)
-        assertFalse(Gesture.MIDDLE_TRIPLE in two)
+        // Next profile on it with one profile can't act, and the profile's action is paused.
+        val paused = Lessons.steps(1, true, defaults + ("index_triple" to "media.next"), BandControls.standard()).map { it.gesture }
+        assertFalse(Gesture.INDEX_TRIPLE in paused)
+        val two = Lessons.steps(2, true, defaults, BandControls.standard()).map { it.gesture }
+        assertTrue(Gesture.INDEX_TRIPLE in two && Gesture.MIDDLE_TRIPLE in two)
+        assertTrue(Gesture.INDEX_HOLD in Lessons.steps(1, true, defaults + ("index_hold" to "media.next"), none).map { it.gesture })
     }
 
     @Test fun `a lesson step matches its gesture's label only, the hold on the middle hold`() {
-        val step = Lessons.steps(1, true, defaults).first { it.title.startsWith("Double-tap your index") }
+        val step = Lessons.steps(1, true, defaults, BandControls.standard()).first { it.title.startsWith("Double-tap your index") }
         assertTrue(step.done.matches(gesture = "index double tap"))
         assertFalse(step.done.matches(gesture = "index tap"))
-        val hold = Lessons.steps(1, true, defaults).first { it.done == Lessons.Done.Hold }
+        val hold = Lessons.steps(1, true, defaults, BandControls.standard()).first { it.done == Lessons.Done.Hold }
         assertTrue(hold.done.matches(gesture = "middle hold"))
         assertFalse(hold.done.matches(action = "controls.toggle"))
     }

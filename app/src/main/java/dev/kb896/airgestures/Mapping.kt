@@ -7,11 +7,6 @@ const val APP_PREFIX = "app:"
 enum class Action(val id: String, val label: String, val icon: Int) {
     NONE("", "Nothing", R.drawable.ic_minus),
 
-    /** Built into the band layer (band-core): any gesture can have them. First in the picker, after Nothing. */
-    CONTROLS("controls.toggle", "Controls on/off", R.drawable.ic_power),
-    NEXT_PROFILE("profile.next", "Next profile", R.drawable.ic_layers),
-    PREVIOUS_PROFILE("profile.previous", "Previous profile", R.drawable.ic_layers),
-
     PLAY_PAUSE("media.play_pause", "Play or pause", R.drawable.ic_play),
     NEXT("media.next", "Next track", R.drawable.ic_skip_forward),
     PREVIOUS("media.previous", "Previous track", R.drawable.ic_skip_back),
@@ -57,9 +52,6 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     /** Whether it belongs to the During calls picker only. */
     val callOnly get() = this == ANSWER || this == END_CALL
 
-    /** Done by the band's layer itself (band-core), so only a gesture can run it. */
-    val builtin get() = this == CONTROLS || this == NEXT_PROFILE || this == PREVIOUS_PROFILE
-
     companion object {
         fun of(id: String) = when {
             id.startsWith(APP_PREFIX) -> OPEN_APP
@@ -71,23 +63,57 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     }
 }
 
+/** Which part of the hand makes a gesture: the profile screen's groups. */
+enum class Part(val label: String) { THUMB("Thumb"), INDEX("Index"), MIDDLE("Middle") }
+
 /**
- * The mappable gestures, with the defaults mirroring the desktop layout, and what each
- * does during a call by default. In the order the screens list them: the swipes, each
- * finger's taps (single, double, triple), then the hold.
+ * The gestures band-core reads (its keys; its labels, which the lessons match lowercased),
+ * with the defaults mirroring the desktop layout and what each does during a call by
+ * default. [short]: the name within its [part]'s group. The triples and holds default to
+ * nothing: the band controls sit on them (see [BandControls.standard]).
  */
-enum class Gesture(val key: String, val label: String, val default: Action, val callDefault: String = Mappings.AS_USUAL) {
-    SWIPE_UP("swipe_up", "Swipe up", Action.PREVIOUS),
-    SWIPE_DOWN("swipe_down", "Swipe down", Action.NEXT),
-    SWIPE_LEFT("swipe_left", "Swipe left", Action.NONE),
-    SWIPE_RIGHT("swipe_right", "Swipe right", Action.NONE),
-    INDEX_TAP("index_tap", "Index tap", Action.PLAY_PAUSE),
-    INDEX_DOUBLE("index_double", "Index double tap", Action.NONE, Action.ANSWER.id),
-    INDEX_TRIPLE("index_triple", "Index triple tap", Action.NEXT_PROFILE),
-    MIDDLE_TAP("middle_tap", "Middle tap", Action.NONE),
-    MIDDLE_DOUBLE("middle_double", "Middle double tap", Action.MUTE, Action.END_CALL.id),
-    MIDDLE_TRIPLE("middle_triple", "Middle triple tap", Action.PREVIOUS_PROFILE),
-    MIDDLE_HOLD("middle_hold", "Middle hold", Action.CONTROLS),
+enum class Gesture(
+    val key: String,
+    val label: String,
+    val short: String,
+    val part: Part,
+    val default: Action = Action.NONE,
+    val callDefault: String = Mappings.AS_USUAL,
+) {
+    SWIPE_UP("swipe_up", "Swipe up", "Swipe up", Part.THUMB, Action.PREVIOUS),
+    SWIPE_DOWN("swipe_down", "Swipe down", "Swipe down", Part.THUMB, Action.NEXT),
+    SWIPE_LEFT("swipe_left", "Swipe left", "Swipe left", Part.THUMB),
+    SWIPE_RIGHT("swipe_right", "Swipe right", "Swipe right", Part.THUMB),
+    INDEX_TAP("index_tap", "Index tap", "Tap", Part.INDEX, Action.PLAY_PAUSE),
+    INDEX_DOUBLE("index_double", "Index double tap", "Double tap", Part.INDEX, Action.NONE, Action.ANSWER.id),
+    INDEX_TRIPLE("index_triple", "Index triple tap", "Triple tap", Part.INDEX),
+    INDEX_HOLD("index_hold", "Index hold", "Hold", Part.INDEX),
+    MIDDLE_TAP("middle_tap", "Middle tap", "Tap", Part.MIDDLE),
+    MIDDLE_DOUBLE("middle_double", "Middle double tap", "Double tap", Part.MIDDLE, Action.MUTE, Action.END_CALL.id),
+    MIDDLE_TRIPLE("middle_triple", "Middle triple tap", "Triple tap", Part.MIDDLE),
+    MIDDLE_HOLD("middle_hold", "Middle hold", "Hold", Part.MIDDLE),
+    INDEX_DRAG_LEFT("index_drag_left", "Index drag left", "Drag left", Part.INDEX),
+    INDEX_DRAG_RIGHT("index_drag_right", "Index drag right", "Drag right", Part.INDEX),
+    INDEX_DRAG_TOWARD("index_drag_toward", "Index drag toward", "Drag toward", Part.INDEX),
+    INDEX_DRAG_AWAY("index_drag_away", "Index drag away", "Drag away", Part.INDEX),
+    INDEX_DRAG_UP("index_drag_up", "Index drag up", "Drag up", Part.INDEX),
+    INDEX_DRAG_DOWN("index_drag_down", "Index drag down", "Drag down", Part.INDEX),
+    MIDDLE_DRAG_LEFT("middle_drag_left", "Middle drag left", "Drag left", Part.MIDDLE),
+    MIDDLE_DRAG_RIGHT("middle_drag_right", "Middle drag right", "Drag right", Part.MIDDLE),
+    MIDDLE_DRAG_TOWARD("middle_drag_toward", "Middle drag toward", "Drag toward", Part.MIDDLE),
+    MIDDLE_DRAG_AWAY("middle_drag_away", "Middle drag away", "Drag away", Part.MIDDLE),
+    MIDDLE_DRAG_UP("middle_drag_up", "Middle drag up", "Drag up", Part.MIDDLE),
+    MIDDLE_DRAG_DOWN("middle_drag_down", "Middle drag down", "Drag down", Part.MIDDLE);
+
+    /** A pinch-and-move drag: on the Drags screen, not in the profile's groups. */
+    val drag get() = "_drag_" in key
+
+    companion object {
+        fun of(key: String?) = entries.firstOrNull { it.key == key }
+
+        /** A finger's six drags, in band-core's order (left, right, toward, away, up, down). */
+        fun drags(part: Part) = entries.filter { it.drag && it.part == part }
+    }
 }
 
 /** What pinch and turn does: one action per step each way. */

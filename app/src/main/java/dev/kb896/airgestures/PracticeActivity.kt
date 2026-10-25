@@ -36,6 +36,7 @@ class PracticeActivity : Screen() {
             Profiles.load(this).profiles.size,
             dial = DialChoice.of(active.dial) != DialChoice.NONE,
             map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
+            band = BandControls.standard(),
         )
         count = Cb.label(this, "")
         title = Cb.text(this, 24f, R.font.geist_semibold, Cb.INK_900, -.02f)
@@ -128,16 +129,21 @@ class PracticeActivity : Screen() {
         val profile = list.active(Profiles.foreground)
         return when (step.done) {
             is Lessons.Done.Gesture, Lessons.Done.Hold -> {
-                val id = Prefs(this).actionId(step.gesture ?: return "", profile.id)
-                when (val action = Action.of(id)) {
-                    Action.OPEN_APP -> "Open an app (${profile.name})"
+                val gesture = step.gesture ?: return ""
+                // The band controls come first (lessons are palm down).
+                when (val builtin = BandControls.standard().on(gesture, Palm.DOWN)) {
+                    Builtin.CONTROLS -> "turn the controls off (band control)"
+                    Builtin.DRAW -> "open the drawing pad (band control)"
                     // The band's own switch: where it would go (an app's own profile stays).
-                    Action.NEXT_PROFILE, Action.PREVIOUS_PROFILE -> if (list.locked(Profiles.foreground)) {
-                        "nothing here (${profile.name} is this app's own)"
+                    Builtin.NEXT, Builtin.PREVIOUS -> if (list.locked(Profiles.foreground) || list.profiles.size < 2) {
+                        "nothing here"
                     } else {
-                        "switch to ${list.step(if (action == Action.NEXT_PROFILE) 1 else -1).active(null).name}"
+                        "switch to ${list.step(if (builtin == Builtin.NEXT) 1 else -1).active(null).name}"
                     }
-                    else -> "${action.label} (${profile.name})"
+                    null -> when (val action = Action.of(Prefs(this).actionId(gesture, profile.id))) {
+                        Action.OPEN_APP -> "Open an app (${profile.name})"
+                        else -> "${action.label} (${profile.name})"
+                    }
                 }
             }
             Lessons.Done.Dial -> "${DialChoice.of(profile.dial).label} (${profile.name})"

@@ -3,8 +3,34 @@ package dev.kb896.airgestures
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One gesture set: a name, an action id per gesture key, and what pinch and turn does. */
-data class Profile(val id: String, val name: String, val map: Map<String, String>, val dial: String)
+/** A finger's six drags: gestures (their actions in [Profile.map]), or three sliders. */
+data class Drags(
+    val sliders: Boolean = false,
+    /** Left/right, toward/away, up/down: a [DialChoice] key each (kept in gestures mode). */
+    val targets: List<String> = List(3) { DialChoice.NONE.key },
+)
+
+/**
+ * One gesture set: a name, an action id per gesture key, palm overrides, both fingers' dials
+ * and drags, and its own drawings' actions.
+ */
+data class Profile(
+    val id: String,
+    val name: String,
+    val map: Map<String, String>,
+    /** The index finger's pinch and turn (a [DialChoice] key; the name 0.7.7 stored it under). */
+    val dial: String,
+    /** Gesture key → palm key → action id ("" = nothing there); at most [ProfileList.MAX_OVERRIDES] each. */
+    val palm: Map<String, Map<String, String>> = emptyMap(),
+    val middleDial: String = DialChoice.NONE.key,
+    val indexDrags: Drags = Drags(),
+    val middleDrags: Drags = Drags(),
+    /** Drawing name → this profile's own action (wins over the shared one). */
+    val drawings: Map<String, String> = emptyMap(),
+) {
+    fun dialOf(part: Part) = if (part == Part.MIDDLE) middleDial else dial
+    fun drags(part: Part) = if (part == Part.MIDDLE) middleDrags else indexDrags
+}
 
 /**
  * The profiles, the one the user picked, and the apps that have their own (package → profile
@@ -59,6 +85,40 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
 
     fun withDial(id: String, dial: String) = change(id) { it.copy(dial = dial) }
 
+    /** [palm] runs [action] on [gesture] instead of the normal one ("" = nothing); a third is refused. */
+    fun withOverride(id: String, gesture: String, palm: Palm, action: String) = change(id) {
+        val own = it.palm[gesture].orEmpty()
+        if (palm.key !in own && own.size >= MAX_OVERRIDES) it else it.copy(palm = it.palm + (gesture to own + (palm.key to action)))
+    }
+
+    fun withoutOverride(id: String, gesture: String, palm: Palm) = change(id) {
+        val own = it.palm[gesture].orEmpty() - palm.key
+        it.copy(palm = if (own.isEmpty()) it.palm - gesture else it.palm + (gesture to own))
+    }
+
+    fun withMiddleDial(id: String, dial: String) = change(id) { it.copy(middleDial = dial) }
+
+    fun withDrags(id: String, part: Part, drags: Drags) =
+        change(id) { if (part == Part.MIDDLE) it.copy(middleDrags = drags) else it.copy(indexDrags = drags) }
+
+    /** This profile's own action for a drawing (null: none of its own, the shared one applies). */
+    fun withDrawing(id: String, name: String, action: String?) =
+        change(id) { it.copy(drawings = if (action == null) it.drawings - name else it.drawings + (name to action)) }
+
+    /** A drawing renamed, or gone (null), in every profile. */
+    fun renamedDrawing(old: String, new: String?) = copy(profiles = profiles.map { p ->
+        val action = p.drawings[old] ?: return@map p
+        p.copy(drawings = (p.drawings - old) + (if (new == null) emptyMap() else mapOf(new to action)))
+    })
+
+    /** The first controls dev build's built-in action ids out of every profile (their gestures go back to their defaults). */
+    fun withoutBuiltins() = copy(profiles = profiles.map { p ->
+        p.copy(
+            map = p.map.filterValues { it !in BUILTIN_IDS },
+            palm = p.palm.mapValues { (_, own) -> own.filterValues { it !in BUILTIN_IDS } }.filterValues { it.isNotEmpty() },
+        )
+    })
+
     private fun change(id: String, how: (Profile) -> Profile) = copy(profiles = profiles.map { if (it.id == id) how(it) else it })
 
     /** The profiles and the apps, as the JSON the store keeps (the pick is stored on its own). */
@@ -70,12 +130,34 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                 put("name", profile.name)
                 put("map", JSONObject(profile.map))
                 put("dial", profile.dial)
+                put("palm", JSONObject(profile.palm.mapValues { JSONObject(it.value) }))
+                put("middle_dial", profile.middleDial)
+                put("drags", JSONObject().put("index", drags(profile.indexDrags)).put("middle", drags(profile.middleDrags)))
+                put("drawings", JSONObject(profile.drawings))
             })
         }
         return list.toString() to JSONObject(apps).toString()
     }
 
     companion object {
+        const val MAX_OVERRIDES = 2
+
+        /** The first controls dev build's built-in actions (band controls now). */
+        val BUILTIN_IDS = setOf("controls.toggle", "profile.next", "profile.previous")
+
+        /** The During calls gestures that held a built-in action (they go back to their defaults). */
+        fun builtinCalls(calls: Map<String, String>) = calls.filterValues { it in BUILTIN_IDS }.keys
+
+        private fun drags(d: Drags) = JSONObject().put("sliders", d.sliders).put("targets", JSONArray(d.targets))
+
+        private fun drags(o: JSONObject?): Drags {
+            o ?: return Drags()
+            val targets = o.optJSONArray("targets")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+            return Drags(o.optBoolean("sliders", false), targets?.takeIf { it.size == 3 } ?: Drags().targets)
+        }
+
+        private fun strings(o: JSONObject?) = o?.keys()?.asSequence()?.associateWith { o.getString(it) }.orEmpty()
+
         /** Before profiles: the one mapping there was becomes Profile 1. */
         fun migrated(map: Map<String, String>, dial: String) =
             ProfileList(listOf(Profile("p1", "Profile 1", map, dial)), "p1", emptyMap())
@@ -86,11 +168,18 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
             val parsed = (0 until list.length()).map { i ->
                 val item = list.getJSONObject(i)
                 val map = item.getJSONObject("map")
+                val palm = item.optJSONObject("palm")
+                val drags = item.optJSONObject("drags")
                 Profile(
                     item.getString("id"),
                     item.getString("name"),
                     map.keys().asSequence().associateWith { map.getString(it) },
                     item.getString("dial"),
+                    palm = palm?.keys()?.asSequence()?.associateWith { strings(palm.getJSONObject(it)) }.orEmpty(),
+                    middleDial = item.optString("middle_dial", DialChoice.NONE.key),
+                    indexDrags = drags(drags?.optJSONObject("index")),
+                    middleDrags = drags(drags?.optJSONObject("middle")),
+                    drawings = strings(item.optJSONObject("drawings")),
                 )
             }
             require(parsed.isNotEmpty()) { "no profiles" }

@@ -97,4 +97,37 @@ class ProfileListTest {
         val list = ProfileList.migrated(mapOf(), "volume")
         assertEquals(list, list.picking("nope"))
     }
+
+    @Test fun `palm overrides, at most two, removing the last drops the gesture`() {
+        var list = three()
+        list = list.withOverride("p1", "index_tap", Palm.UP, "media.next").withOverride("p1", "index_tap", Palm.SIDE, "")
+        assertEquals(mapOf("up" to "media.next", "sideways" to ""), list.profile("p1")!!.palm["index_tap"])
+        assertEquals(list, list.withOverride("p1", "index_tap", Palm.DOWN, "x"))
+        list = list.withoutOverride("p1", "index_tap", Palm.UP).withoutOverride("p1", "index_tap", Palm.SIDE)
+        assertFalse("index_tap" in list.profile("p1")!!.palm)
+    }
+
+    @Test fun `the dev build's built-in actions leave every profile`() {
+        val list = ProfileList(
+            listOf(Profile("p1", "A", mapOf("middle_hold" to "controls.toggle", "swipe_left" to "profile.next", "index_tap" to "media.next"), "volume",
+                palm = mapOf("index_tap" to mapOf("up" to "profile.previous")))),
+            "p1", emptyMap(),
+        ).withoutBuiltins()
+        assertEquals(mapOf("index_tap" to "media.next"), list.profile("p1")!!.map)
+        assertTrue(list.profile("p1")!!.palm.isEmpty())
+        assertEquals(setOf("index_double"), ProfileList.builtinCalls(mapOf("index_double" to "controls.toggle", "middle_double" to "-")))
+    }
+
+    @Test fun `the new profile fields round-trip and 0_7_7's profiles read with their defaults`() {
+        val made = Profile("p1", "A", mapOf("swipe_up" to "media.next"), "seek",
+            palm = mapOf("index_tap" to mapOf("up" to "media.next")), middleDial = "brightness",
+            middleDrags = Drags(sliders = true, targets = listOf("volume", "none", "none")), drawings = mapOf("Bulb" to "torch.toggle"))
+        val list = ProfileList(listOf(made), "p1", emptyMap())
+        val (profiles, apps) = list.toJson()
+        assertEquals(list, ProfileList.fromJson(profiles, apps, "p1"))
+        val old = ProfileList.fromJson("""[{"id":"p1","name":"A","map":{},"dial":"volume"}]""", "{}", "p1").profile("p1")!!
+        assertEquals("none", old.middleDial)
+        assertEquals(Drags(), old.indexDrags)
+        assertTrue(old.palm.isEmpty() && old.drawings.isEmpty())
+    }
 }

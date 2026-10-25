@@ -30,14 +30,17 @@ object Lessons {
 
     /**
      * The lessons for [profiles] profiles whose active one has [map] (gesture key → action id,
-     * every key resolved); pinch and turn only when its [dial] does something. A triple tap only
-     * when it does something there (a profile switch needs 2+ profiles): the band otherwise
-     * doesn't wait for it, and three taps are three taps.
+     * every key resolved) and the [band] controls; pinch and turn only when its [dial] does
+     * something. A triple tap or the index hold only when it does something there (a profile
+     * switch needs 2+ profiles), as band-core decides whether its taps wait: the band otherwise
+     * doesn't wait for it, and three taps are three taps. Lessons are palm down.
      */
-    fun steps(profiles: Int, dial: Boolean, map: Map<String, String>): List<Step> = buildList {
-        fun triples(gesture: Gesture): Boolean {
-            val id = map[gesture.key] ?: gesture.default.id
-            return id.isNotEmpty() && (profiles >= 2 || (id != Action.NEXT_PROFILE.id && id != Action.PREVIOUS_PROFILE.id))
+    fun steps(profiles: Int, dial: Boolean, map: Map<String, String>, band: BandControls): List<Step> = buildList {
+        fun does(gesture: Gesture): Boolean = when (band.on(gesture, Palm.DOWN)) {
+            Builtin.CONTROLS, Builtin.DRAW -> true
+            Builtin.NEXT, Builtin.PREVIOUS -> profiles >= 2
+            // An action of the profile's own; one paused by a band control doesn't run.
+            null -> (map[gesture.key] ?: gesture.default.id).isNotEmpty()
         }
         add(tap(Gesture.SWIPE_UP, "Swipe up", "Slide your thumb up along the side of your index finger."))
         add(tap(Gesture.SWIPE_DOWN, "Swipe down", "Slide your thumb down along the side of your index finger."))
@@ -51,15 +54,25 @@ object Lessons {
         add(
             Step(
                 "Hold your middle finger",
-                "Keep your thumb on your middle finger for a second. It runs what the middle hold is set to (by default the controls on/off).",
+                "Keep your thumb on your middle finger for a second. It runs what the middle hold does (by default the controls on/off, a band control).",
                 Done.Hold,
                 Gesture.MIDDLE_HOLD,
             ),
         )
-        if (triples(Gesture.INDEX_TRIPLE)) {
+        if (does(Gesture.INDEX_HOLD)) {
+            add(
+                Step(
+                    "Hold your index finger",
+                    "Keep your thumb on your index finger for a second, without moving your wrist.",
+                    Done.Gesture("index hold"),
+                    Gesture.INDEX_HOLD,
+                ),
+            )
+        }
+        if (does(Gesture.INDEX_TRIPLE)) {
             add(tap(Gesture.INDEX_TRIPLE, "Triple-tap your index finger", "Three quick taps of your thumb on your index finger."))
         }
-        if (triples(Gesture.MIDDLE_TRIPLE)) {
+        if (does(Gesture.MIDDLE_TRIPLE)) {
             add(tap(Gesture.MIDDLE_TRIPLE, "Triple-tap your middle finger", "Three quick taps of your thumb on your middle finger."))
         }
     }

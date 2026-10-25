@@ -98,13 +98,13 @@ abstract class GestureScreen : Screen() {
 
     /**
      * The action picker: [calls] adds As usual, Nothing and the call actions; [inSequence] leaves
-     * out what a sequence can't hold (another sequence, automation, nothing, the band's built-ins). Actions that need
+     * out what a sequence can't hold (another sequence, automation, nothing). Actions that need
      * more (an app, a spot, a swipe, a sequence) ask for it before [onChosen] gets the id.
      */
     fun pickAction(title: String, current: String, calls: Boolean = false, inSequence: Boolean = false, onChosen: (String) -> Unit) {
         val actions = Action.entries.filter { action ->
             when {
-                inSequence -> action != Action.NONE && !action.callOnly && !action.builtin && action != Action.SEQUENCE && action != Action.AUTOMATION
+                inSequence -> action != Action.NONE && !action.callOnly && action != Action.SEQUENCE && action != Action.AUTOMATION
                 calls -> action != Action.NONE
                 else -> !action.callOnly
             }

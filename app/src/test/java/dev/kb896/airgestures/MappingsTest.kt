@@ -10,7 +10,7 @@ class MappingsTest {
     private val list = ProfileList(
         listOf(
             Profile("p1", "Music", mapOf("swipe_up" to "media.previous", "index_double" to "", "middle_tap" to "automation"), "volume"),
-            Profile("p2", "Reading", mapOf("swipe_up" to "nav.next", "middle_hold" to "profile.next"), "none"),
+            Profile("p2", "Reading", mapOf("swipe_up" to "nav.next", "middle_hold" to "media.next"), "none"),
             Profile("p3", "Lights", emptyMap(), "automation"),
         ),
         picked = "p2",
@@ -22,16 +22,16 @@ class MappingsTest {
     private fun json() = org.json.JSONObject(Mappings.profilesJson(list, calls, dials, "left"))
     private fun map(profile: Int) = json().getJSONArray("profiles").getJSONObject(profile).getJSONObject("map")
 
-    @Test fun `every profile gets every gesture, defaults for keys it never stored, built-ins included`() {
+    @Test fun `every profile gets every gesture, defaults for keys it never stored`() {
         val first = map(0)
         assertEquals(Gesture.entries.map { it.key }.toSet(), first.keys().asSequence().toSet())
         assertEquals("media.previous", first.getString("swipe_up"))
         assertEquals("", first.getString("index_double"))
         assertEquals("media.next", first.getString("swipe_down"))
-        assertEquals("controls.toggle", first.getString("middle_hold"))
-        assertEquals("profile.next", first.getString("index_triple"))
-        assertEquals("profile.previous", first.getString("middle_triple"))
-        assertEquals("profile.next", map(1).getString("middle_hold"))
+        assertEquals("", first.getString("middle_hold"))
+        assertEquals("", first.getString("index_triple"))
+        assertEquals("", first.getString("middle_triple"))
+        assertEquals("media.next", map(1).getString("middle_hold"))
         assertEquals("Reading", json().getJSONArray("profiles").getJSONObject(1).getString("name"))
     }
 
