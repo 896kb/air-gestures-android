@@ -108,34 +108,72 @@ abstract class GestureScreen : Screen() {
         setPadding(dpi(7f), dpi(3f), dpi(7f), dpi(3f))
     }
 
-    /** The rows of [profile]'s gestures and its dial. */
-    fun profileRows(profile: String) = column(gap = 4f).apply {
-        val prefs = Prefs(context)
-        for (gesture in Gesture.entries) {
-            val id = prefs.actionId(gesture, profile)
-            val action = Action.of(id)
-            val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
-            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE, info = guide) {
-                pick(gesture, profile)
+    /**
+     * A profile's gestures in groups (mockup 9): Thumb (the swipes), Index and Middle (tap, double
+     * and triple tap, hold); the drags are on their own screen. Paused chips and palm tags from [report].
+     */
+    fun profileRows(profileId: String, report: Report) = column(gap = 14f).apply {
+        val list = Profiles.load(context)
+        val index = list.profiles.indexOfFirst { it.id == profileId }
+        val profile = list.profiles.getOrNull(index) ?: return@apply
+        for (part in Part.entries) {
+            addView(Cb.label(context, part.label))
+            addView(column(gap = 4f).apply {
+                for (gesture in Gesture.entries.filter { it.part == part && !it.drag }) addView(profileRow(profile, index, gesture, report))
             })
         }
-        val dial = prefs.dial(profile)
-        val dialGuide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
-        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, info = dialGuide) { pickDial(profile) })
     }
 
     /**
-     * The During calls rows: every gesture but the drags (as usual in a call), As usual unless
-     * set; one a band control holds back is Paused ([report]).
+     * One gesture of [profile] (the [index]-th): its normal action (Paused when a band control
+     * holds it), each palm override as a tag, and for a hold "when you let go" where it waits.
      */
-    fun callRows(report: Report) = column(gap = 4f).apply {
+    fun profileRow(profile: Profile, index: Int, gesture: Gesture, report: Report): android.view.View {
+        val id = profile.map[gesture.key] ?: gesture.default.id
+        val action = Action.of(id)
+        val tags = Palm.entries.mapNotNull { palm ->
+            profile.palm[gesture.key]?.get(palm.key)?.let { "${palm.label} · ${label(it, calls = false)}" to (report.paused(index, gesture, palm) != null) }
+        }
+        val hold = gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD
+        val waits = if (hold) report.holdWaits(index, gesture.part) else emptySet()
+        val letGo = when {
+            waits.isEmpty() -> null
+            waits.size == Palm.entries.size -> "when you let go"
+            else -> "when you let go · " + Palm.entries.filter { it in waits }.joinToString(" or ") { it.label.lowercase() }
+        }
+        val paused = report.paused(index, gesture, null)
+        val hint = listOfNotNull(pausedWhere(paused), letGo).joinToString(" · ").ifEmpty { null }
+        val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
+        return gestureRow(action.icon, gesture.short, label(id, calls = false), action == Action.NONE,
+            paused = paused != null, tags = tags, hint = hint, info = guide) {
+            // Task 12 opens the gesture editor here instead.
+            pick(gesture, profile.id)
+        }
+    }
+
+    /** Paused only in some positions (a band control limited to the palm up): "paused palm up". */
+    fun pausedWhere(paused: Report.Paused?): String? = paused?.positions?.takeIf { it.size < Palm.entries.size }
+        ?.let { p -> "paused " + Palm.entries.filter { it in p }.joinToString(" or ") { it.label.lowercase() } }
+
+    /**
+     * The During calls rows, grouped as a profile's: every gesture but the drags (as usual in a
+     * call), As usual unless set; one a band control holds back is Paused ([report]).
+     */
+    fun callRows(report: Report) = column(gap = 14f).apply {
         val prefs = Prefs(context)
-        for (gesture in Gesture.entries.filter { !it.drag }) {
-            val id = prefs.callActionId(gesture)
-            val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
-            val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
-            val paused = report.paused(null, gesture, null) != null
-            addView(gestureRow(icon, gesture.label, label(id, calls = true), usual, paused = paused) { pick(gesture, null) })
+        for (part in Part.entries) {
+            addView(Cb.label(context, part.label))
+            addView(column(gap = 4f).apply {
+                for (gesture in Gesture.entries.filter { it.part == part && !it.drag }) {
+                    val id = prefs.callActionId(gesture)
+                    val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
+                    val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
+                    val paused = report.paused(null, gesture, null)
+                    addView(gestureRow(icon, gesture.short, label(id, calls = true), usual, paused = paused != null, hint = pausedWhere(paused)) {
+                        pick(gesture, null)
+                    })
+                }
+            })
         }
     }
 
@@ -275,12 +313,20 @@ abstract class GestureScreen : Screen() {
     /** An app's name, or its package if it's gone. */
     fun appName(pkg: String) = Labels.appName(this, pkg)
 
-    private fun pickDial(profile: String) {
-        val current = Prefs(this).dial(profile)
-        choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == current, it.icon) }) { index ->
-            BandService.setDial(applicationContext, profile, DialChoice.entries[index])
+    /** What [part]'s pinch and turn does in [profile]. */
+    fun pickDial(profile: String, part: Part) {
+        val current = DialChoice.of(Profiles.load(this).profile(profile)?.dialOf(part))
+        val title = if (part == Part.MIDDLE) "Middle dial" else "Index dial"
+        choose(title, DialChoice.entries.map { Option(it.label, it == current, it.icon) }) { index ->
+            val choice = DialChoice.entries[index]
+            if (part == Part.MIDDLE) {
+                Profiles.update(applicationContext) { it.withMiddleDial(profile, choice.key) }
+                BandService.instance?.remap()
+            } else {
+                BandService.setDial(applicationContext, profile, choice)
+            }
             render()
-            if (DialChoice.entries[index] == DialChoice.AUTOMATION) automationGuide(firstTime = true)
+            if (choice == DialChoice.AUTOMATION) automationGuide(firstTime = true)
         }
     }
 
