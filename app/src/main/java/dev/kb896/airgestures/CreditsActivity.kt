@@ -19,13 +19,13 @@ class CreditsActivity : Screen() {
             "MarginalHacks.com", "https://marginalhacks.com",
         ),
         Person(
-            R.drawable.credits_eight, "Made by", "Radu", "The app, its band protocol core and the Linux daemon.",
-            "896.ro", "https://896.ro",
+            R.drawable.credits_iinsaane, "Band vibration implementation", "Tudor Palasan (iinsaane)",
+            "",
+            "iinsaane.com", "https://iinsaane.com",
         ),
         Person(
-            R.drawable.credits_iinsaane, "Band vibration and Bluetooth music controls", "Tudor Palasan (iinsaane)",
-            "Band vibration feedback, volume detents, per-profile Bluetooth music controls and reconnect stability.",
-            "iinsaane.com", "https://iinsaane.com",
+            R.drawable.credits_eight, "Made by", "Radu", "The app, its band protocol core and the Linux daemon.",
+            "896.ro", "https://896.ro",
         ),
     )
 
@@ -45,7 +45,7 @@ class CreditsActivity : Screen() {
                             addView(Cb.text(context, 17f, R.font.geist_semibold, Cb.INK_900, -.015f).apply { text = person.name })
                         }, weighted())
                     })
-                    addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
+                    if (person.work.isNotEmpty()) addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
                         text = person.work
                         setLineSpacing(0f, 1.3f)
                     })

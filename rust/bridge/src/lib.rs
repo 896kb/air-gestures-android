@@ -39,8 +39,8 @@ const QUIET_QUERY: f64 = 2.0;
 const OFF_PULSE_MS: u64 = 80;
 const ON_PULSE_MS: u64 = 300;
 const PROFILE_PULSE_MS: u64 = 40;
-const VOLUME_PULSE_MS: u64 = 18;
-const VOLUME_DETENT_INTERVAL: f64 = 0.100;
+const DETENT_PULSE_MS: u64 = 18;
+const DETENT_INTERVAL: f64 = 0.100;
 const DOUBLE_GAP: f64 = 0.100;
 pub struct Connection {
     session: BandSession,
@@ -60,7 +60,8 @@ pub struct Connection {
     haptics_flight: Option<HapticFlight>,
     haptics_next_at: f64,
     last_clock: f64,
-    last_volume_detent: f64,
+    last_step_detent: f64,
+    last_notification: f64,
     /// The stream probe is on: the session's notes go to the log.
     probing: bool,
     /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
@@ -80,7 +81,7 @@ pub struct Connection {
 #[derive(Debug, Clone, Copy)]
 struct HapticStep { command: HapticsCommand, wait_after: f64, duration_ms: u64, priority: HapticPriority }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HapticPriority { State, Profile, Detent }
+enum HapticPriority { State, Profile, Detent, Notification }
 #[derive(Debug, Clone, Copy)]
 struct HapticFlight { sequence: u32, sent_at: f64, duration_ms: u64, wait_after: f64, acknowledged: bool, priority: HapticPriority }
 
@@ -140,7 +141,8 @@ impl Connection {
             haptics_flight: None,
             haptics_next_at: 0.0,
             last_clock: 0.0,
-            last_volume_detent: f64::NEG_INFINITY,
+            last_step_detent: f64::NEG_INFINITY,
+            last_notification: f64::NEG_INFINITY,
             probing: false,
             field: None,
             field_ended: false,
@@ -250,18 +252,30 @@ impl Connection {
         self.pump_haptics(self.last_clock)
     }
 
-    /// A successful phone-volume detent, dropped while another cue is active and rate limited.
-    pub fn volume_detent(&mut self) -> Result<Vec<u8>, String> {
+    /// A successful band step, dropped while another cue or request is active and rate limited.
+    pub fn step_detent(&mut self) -> Result<Vec<u8>, String> {
         let now = self.last_clock;
-        if !self.band_vibration || !self.live || !self.session.streams_enabled()
+        if !self.band_vibration || !self.live || !self.session.haptics_ready()
             || self.haptics_flight.is_some() || !self.haptics_queue.is_empty()
-            || now - self.last_volume_detent < VOLUME_DETENT_INTERVAL
+            || now - self.last_step_detent < DETENT_INTERVAL
         { return Ok(Vec::new()); }
-        self.last_volume_detent = now;
+        self.last_step_detent = now;
         self.haptics_queue.push_back(HapticStep {
-            command: HapticsCommand::Vibrate { duration_ms: VOLUME_PULSE_MS, amplitude: 128 },
-            wait_after: 0.0, duration_ms: VOLUME_PULSE_MS, priority: HapticPriority::Detent,
+            command: HapticsCommand::Vibrate { duration_ms: DETENT_PULSE_MS, amplitude: 128 },
+            wait_after: 0.0, duration_ms: DETENT_PULSE_MS, priority: HapticPriority::Detent,
         });
+        self.pump_haptics(now)
+    }
+
+    /// One short, strong notification cue. Never queue a burst of delayed alerts.
+    pub fn notification_haptics(&mut self) -> Result<Vec<u8>, String> {
+        let now = self.last_clock;
+        if !self.band_vibration || !self.live || !self.session.haptics_ready()
+            || self.haptics_flight.is_some() || !self.haptics_queue.is_empty()
+            || now - self.last_notification < 1.0
+        { return Ok(Vec::new()); }
+        self.last_notification = now;
+        self.push_vibration(OFF_PULSE_MS, 0.0, HapticPriority::Notification);
         self.pump_haptics(now)
     }
 
@@ -283,6 +297,12 @@ impl Connection {
 
     fn pump_haptics(&mut self, now: f64) -> Result<Vec<u8>, String> {
         self.retire_completed_haptics(now);
+        if self.session.ota_progress().1 {
+            self.haptics_queue.clear();
+            self.push_pattern(if self.band_vibration && !self.controls.status().paused { 1 } else { 2 });
+            return Ok(Vec::new());
+        }
+        if !self.session.haptics_ready() { return Ok(Vec::new()); }
         if self.haptics_flight.is_some() || !self.live || now < self.haptics_next_at
             || !self.session.streams_enabled() || self.haptics_queue.is_empty()
         { return Ok(Vec::new()); }
@@ -474,6 +494,10 @@ impl Connection {
     /// Returns the first bytes to write; progress goes to the log.
     pub fn ota_start(&mut self, mode: &str, dir: &str, now: f64) -> Result<Vec<u8>, String> {
         use band_core::ota::{OtaMode, OtaPlan};
+        self.retire_completed_haptics(now);
+        if self.haptics_flight.is_some() {
+            return Err("Wait for Band feedback to finish before starting an update.".into());
+        }
         let mode = match mode {
             "key" => OtaMode::Key,
             "send" => OtaMode::Send,
@@ -894,7 +918,9 @@ fn written_note(written: usize, untyped: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Connection, written_note};
+    use super::{Connection, HapticPriority, written_note};
+    use band_core::session::BandSession;
+    use band_core::proto::{field_bytes, field_int};
     use crate::DOUBLE_GAP;
     use band_core::haptics::HapticsCommand;
     use band_core::identity::EnrollmentIdentity;
@@ -904,6 +930,52 @@ mod tests {
     fn connection() -> Connection {
         let identity = EnrollmentIdentity::new(SigningKey::random(&mut OsRng), None);
         Connection::new(&identity.private_bytes(), 0, false, "{}").unwrap()
+    }
+
+    fn live_connection() -> Connection {
+        let mut connection = connection();
+        connection.session = BandSession::new(None, None, false);
+        let (mut band, _) = band_core::sim::SimBand::connect(&mut connection.session).unwrap();
+        band.complete_legacy_setup(&mut connection.session).unwrap();
+        band.hand_reply(&mut connection.session, 1, Some(0), 1, 6, 1.0).unwrap();
+        let flags = [field_int(3, 1), field_int(6, 1), field_int(8, 1)].concat();
+        let enabled = [field_int(1, 3), field_int(2, 1), field_bytes(5, &flags)].concat();
+        band.send(&mut connection.session, 0x02000315, &enabled, 1.0).unwrap();
+        connection.session.tick(106.0);
+        connection.live = true;
+        connection.last_clock = 106.0;
+        assert!(connection.session.haptics_ready());
+        connection
+    }
+
+    #[test]
+    fn notifications_are_short_and_never_queue_a_burst() {
+        let mut connection = live_connection();
+        assert!(!connection.notification_haptics().unwrap().is_empty());
+        let flight = connection.haptics_flight.unwrap();
+        assert_eq!(flight.duration_ms, 80);
+        assert_eq!(flight.priority, HapticPriority::Notification);
+        assert!(connection.notification_haptics().unwrap().is_empty());
+        assert!(connection.haptics_queue.is_empty());
+    }
+
+    #[test]
+    fn optional_feedback_is_dropped_during_updates_and_when_disabled() {
+        let mut connection = live_connection();
+        connection.session.ota_start(band_core::ota::OtaPlan {
+            version: 0, firmware: Vec::new(), firmware_md5: [0; 16], model: None, kek: None,
+            mode: band_core::ota::OtaMode::Cancel, resume: false,
+        }, 106.0).unwrap();
+        assert!(connection.notification_haptics().unwrap().is_empty());
+        assert!(connection.step_detent().unwrap().is_empty());
+        connection.controls_haptics(true).unwrap();
+        assert!(connection.haptics_queue.iter().all(|step| matches!(step.command, HapticsCommand::Perform { .. })));
+
+        let mut connection = live_connection();
+        connection.band_vibration = false;
+        assert!(connection.notification_haptics().unwrap().is_empty());
+        assert!(connection.step_detent().unwrap().is_empty());
+        assert!(connection.haptics_queue.is_empty());
     }
 
     #[test]

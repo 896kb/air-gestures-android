@@ -83,6 +83,16 @@ class SetupActivity : Screen() {
                 renderBandVibration()
             }.first,
         ))
+        val notifications = Prefs(this).notificationVibration
+        bandVibration.addView(settingRow(
+            "Notification vibration",
+            "One short buzz for new phone notifications; needs notification access",
+            pill(if (notifications) "On" else "Off") {
+                Prefs(this).notificationVibration = !Prefs(this).notificationVibration
+                renderBandVibration()
+                render()
+            }.first,
+        ))
     }
 
     private fun stepRow(step: Step) = row(gap = 12f).apply {
@@ -222,6 +232,7 @@ class SetupActivity : Screen() {
             drawingsReteach = Drawings.toReteach(this),
             devices = Profiles.devices(this),
             bandVibration = prefs.bandVibration,
+            notificationVibration = prefs.notificationVibration,
         )
     }
 
@@ -241,6 +252,7 @@ class SetupActivity : Screen() {
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
         prefs.bandVibration = settings.bandVibration
+        prefs.notificationVibration = settings.notificationVibration
         BandService.instance?.setBandVibration(settings.bandVibration)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         settings.devices?.let { restored -> Profiles.updateDevices(applicationContext) { restored } }

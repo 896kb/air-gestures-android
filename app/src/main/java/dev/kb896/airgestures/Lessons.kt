@@ -115,11 +115,11 @@ object Lessons {
  * The settings backup file: everything but the owner key (that has its own export) and the
  * calibrations (they belong to a band). Version 2 adds the band controls and the drawings,
  * version 3 the Home devices (an app without them refuses it: their gestures would read as
- * Nothing there), and version 4 the Band vibration preference. Older backups restore with
- * Band vibration on, matching the default for new installs.
+ * Nothing there). Vibration preferences are optional fields: older backups restore with
+ * Band vibration on and notification vibration off, matching new installs.
  */
 object Backup {
-    const val VERSION = 4
+    const val VERSION = 3
 
     data class Settings(
         val profiles: ProfileList,
@@ -141,8 +141,9 @@ object Backup {
         val drawingsReteach: Set<String> = emptySet(),
         /** Null in a backup made before Home devices: restoring it leaves them as they are. */
         val devices: HomeDevices? = null,
-        /** Added in version 4; older backups restore with Band vibration enabled. */
+        /** Optional in version 3; absent means Band vibration enabled. */
         val bandVibration: Boolean = true,
+        val notificationVibration: Boolean = false,
     )
 
     /** Every gesture's call action after a restore: the backup's, else its default (a 0.7.7 backup lacks the newer gestures). */
@@ -169,10 +170,11 @@ object Backup {
             }
             settings.devices?.let { put("devices", JSONArray(it.toJson())) }
             put("band_vibration", settings.bandVibration)
+            put("notification_vibration", settings.notificationVibration)
         }.toString(2)
     }
 
-    /** The settings in [text], or null for anything that isn't a whole backup of version 1 to 4. */
+    /** The settings in [text], or null for anything that isn't a whole backup of version 1 to 3. */
     fun read(text: String): Settings? = runCatching {
         val json = JSONObject(text)
         val version = json.getInt("version")
@@ -198,6 +200,7 @@ object Backup {
                 .orEmpty(),
             devices = json.optJSONArray("devices")?.let { HomeDevices.fromJson(it.toString()) },
             bandVibration = json.optBoolean("band_vibration", true),
+            notificationVibration = json.optBoolean("notification_vibration", false),
         )
     }.getOrNull()
 }

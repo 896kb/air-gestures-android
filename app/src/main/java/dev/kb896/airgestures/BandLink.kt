@@ -49,7 +49,7 @@ class BandLink(
     private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
     private var gatt: BluetoothGatt? = null
-    private var socket: BluetoothSocket? = null
+    @Volatile private var socket: BluetoothSocket? = null
     private var handle = 0L
     private var lastStatus = ""
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
@@ -88,12 +88,16 @@ class BandLink(
     fun controlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.Controls(paused)) }
     fun syncControlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.SyncControls(paused)) }
     fun profileHaptics(previous: Boolean = false) = synchronized(lock) { enqueueHaptics(HapticCommand.Profile(previous)) }
-    fun volumeDetent() = synchronized(lock) { enqueueHaptics(HapticCommand.VolumeDetent) }
+    fun stepDetent() = synchronized(lock) { enqueueHaptics(HapticCommand.StepDetent(now())) }
+    fun notificationHaptics() = synchronized(lock) { enqueueHaptics(HapticCommand.Notification(now())) }
 
     private val hapticCommands = java.util.ArrayDeque<HapticCommand>()
 
     private fun enqueueHaptics(command: HapticCommand) {
-        if (handle != 0L) hapticCommands.addLast(command)
+        if (handle == 0L) return
+        if (command is HapticCommand.StepDetent && hapticCommands.any { it is HapticCommand.StepDetent }) return
+        if (command is HapticCommand.Notification && hapticCommands.any { it is HapticCommand.Notification }) return
+        hapticCommands.addLast(command)
     }
 
     /** New profiles, hand or call layer (Prefs.profilesJson); the next connection reads them anyway. */
@@ -230,9 +234,11 @@ class BandLink(
     /** Ask the bridge for bytes and write them to the band, here; failures go to the log after [what]. */
     private fun send(what: String, request: (Long) -> ByteArray) {
         try {
-            val out = synchronized(lock) { if (handle == 0L) null else request(handle) }
-            val stream = socket?.outputStream
-            if (out == null || stream == null) log("$what: not connected") else synchronized(stream) { stream.write(out) }
+            val channel = socket
+            val stream = channel?.outputStream
+            if (stream == null) log("$what: not connected") else writeBandBytes(lock, stream) {
+                if (handle == 0L || socket !== channel) byteArrayOf() else request(handle)
+            }
             drain()
         } catch (e: Exception) {
             log("$what: ${e.message}")
@@ -412,19 +418,18 @@ class BandLink(
         socket = channel
         val input = channel.inputStream
         val output = channel.outputStream
-        val write = { bytes: ByteArray -> if (bytes.isNotEmpty()) synchronized(output) { output.write(bytes) } }
+        val write = { build: () -> ByteArray ->
+            writeBandBytes(lock, output) {
+                if (attempt == generation && handle != 0L) build() else byteArrayOf()
+            }
+        }
         try {
-            write(synchronized(lock) { Bridge.request(handle) })
+            write { Bridge.request(handle) }
             thread(name = "band-tick") {
                 while (attempt == generation) {
                     SystemClock.sleep(50)
                     try {
-                        synchronized(lock) {
-                            if (attempt == generation && handle != 0L) {
-                                Bridge.tick(handle, now()).let(write)
-                                flushHapticsLocked(write, attempt)
-                            }
-                        }
+                        write { Bridge.tick(handle, now()) + flushHapticsLocked() }
                         drain()
                     } catch (e: Exception) {
                         if (attempt == generation) log("link: ${e.message}")
@@ -436,12 +441,7 @@ class BandLink(
             while (attempt == generation) {
                 val count = input.read(buffer)
                 if (count < 0) break
-                synchronized(lock) {
-                    if (attempt == generation && handle != 0L) {
-                        Bridge.feed(handle, buffer.copyOf(count), now()).let(write)
-                        flushHapticsLocked(write, attempt)
-                    }
-                }
+                write { Bridge.feed(handle, buffer.copyOf(count), now()) + flushHapticsLocked() }
                 drain()
             }
             if (attempt == generation) log("the band closed the input channel")
@@ -470,18 +470,21 @@ class BandLink(
         synchronized(lock) { publishStatus() }
     }
 
-    /** Execute queued haptic requests in the same order as band writes. Caller holds [lock]. */
-    private fun flushHapticsLocked(write: (ByteArray) -> Unit, attempt: Int) {
-        while (attempt == generation && handle != 0L && hapticCommands.isNotEmpty()) {
+    /** Build queued haptic requests; the caller writes them after releasing [lock]. */
+    private fun flushHapticsLocked(): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        while (hapticCommands.isNotEmpty()) {
             val bytes = when (val command = hapticCommands.removeFirst()) {
                 is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
                 is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
                 is HapticCommand.SyncControls -> Bridge.syncControlsHaptics(handle, command.paused)
                 is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
-                HapticCommand.VolumeDetent -> Bridge.volumeDetent(handle)
+                is HapticCommand.StepDetent -> if (now() - command.at <= 0.2) Bridge.stepDetent(handle) else byteArrayOf()
+                is HapticCommand.Notification -> if (now() - command.at <= 1.0) Bridge.notificationHaptics(handle) else byteArrayOf()
             }
-            write(bytes)
+            output.write(bytes)
         }
+        return output.toByteArray()
     }
 
     private sealed interface HapticCommand {
@@ -489,7 +492,8 @@ class BandLink(
         data class Controls(val paused: Boolean) : HapticCommand
         data class SyncControls(val paused: Boolean) : HapticCommand
         data class Profile(val previous: Boolean) : HapticCommand
-        data object VolumeDetent : HapticCommand
+        data class StepDetent(val at: Double) : HapticCommand
+        data class Notification(val at: Double) : HapticCommand
     }
 
     /** Call with `lock` held. */

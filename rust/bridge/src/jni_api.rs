@@ -169,12 +169,21 @@ haptics_method!(Java_dev_kb896_airgestures_Bridge_syncControlsHaptics, sync_cont
 haptics_method!(Java_dev_kb896_airgestures_Bridge_profileHaptics, profile_haptics, jboolean, |value| value != 0);
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_volumeDetent<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_stepDetent<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
 ) -> jbyteArray {
-    bytes_out(&mut env, unsafe { connection(handle) }.volume_detent())
+    bytes_out(&mut env, unsafe { connection(handle) }.step_detent())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_notificationHaptics<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    bytes_out(&mut env, unsafe { connection(handle) }.notification_haptics())
 }
 
 /// New profiles, hand and call layer as JSON (see `profiles::parse`); bad JSON throws.

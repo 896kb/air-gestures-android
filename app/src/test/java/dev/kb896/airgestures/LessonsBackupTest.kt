@@ -81,14 +81,23 @@ class LessonsBackupTest {
         val old = org.json.JSONObject(Backup.write(settings)).apply {
             put("version", 3)
             remove("band_vibration")
+            remove("notification_vibration")
         }.toString()
         assertTrue(Backup.read(old)?.bandVibration == true)
+        assertFalse(Backup.read(old)!!.notificationVibration)
+    }
+
+    @Test fun `vibration preferences stay optional in version 3`() {
+        val custom = settings.copy(bandVibration = false, notificationVibration = true)
+        val text = Backup.write(custom)
+        assertEquals(3, org.json.JSONObject(text).getInt("version"))
+        assertEquals(custom, Backup.read(text))
     }
 
     @Test fun `a broken, empty or newer backup is refused`() {
         assertNull(Backup.read("not json"))
         assertNull(Backup.read("""{"version":1,"profiles":[],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""))
-        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*4"), "\"version\": 5")))
+        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*3"), "\"version\": 4")))
     }
 
     @Test fun `a version 1 backup restores with today's band controls and no built-in actions`() {
@@ -157,9 +166,9 @@ class LessonsBackupTest {
         assertNull(Backup.read(old)!!.devices)
     }
 
-    @Test fun `a backup with home devices is version 4, and version 2 still reads`() {
+    @Test fun `a backup with home devices is version 3, and version 2 still reads`() {
         // Their automation@<id> would read as Volume and Nothing there.
-        assertEquals(4, org.json.JSONObject(Backup.write(settings)).getInt("version"))
+        assertEquals(3, org.json.JSONObject(Backup.write(settings)).getInt("version"))
         val v2 = org.json.JSONObject(Backup.write(settings)).apply { put("version", 2); remove("devices") }.toString()
         assertEquals(settings.copy(devices = null), Backup.read(v2))
     }

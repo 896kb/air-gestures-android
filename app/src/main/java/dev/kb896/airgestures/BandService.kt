@@ -28,7 +28,7 @@ class BandService : Service(), BandLink.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        actions = Actions(this, ::onLog, ::volumeDetent)
+        actions = Actions(this, ::onLog, ::stepDetent)
         link = BandLink(this, this)
         // Unlocking the phone: the band is likely near and about to be used.
         registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
@@ -109,8 +109,14 @@ class BandService : Service(), BandLink.Listener {
         if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous = !down)
     }
 
-    private fun volumeDetent() {
-        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.volumeDetent()
+    private fun stepDetent() {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.stepDetent()
+    }
+
+    fun notificationHaptics() = main.post {
+        if (prefs.bandVibration && prefs.notificationVibration && state.value.phase == Phase.CONNECTED && !state.value.otaBusy) {
+            link.notificationHaptics()
+        }
     }
 
     fun feedbackHaptics(previous: Boolean = false) {
@@ -334,7 +340,7 @@ class BandService : Service(), BandLink.Listener {
         for (line in actions) {
             if (!line.startsWith("@")) {
                 // In a lesson nothing runs (the bridge sends `@practiced` instead).
-                if (practice == null) this.actions.run(line)?.let(::onLog)
+                if (practice == null) this.actions.run(line, fromBand = true)?.let(::onLog)
                 continue
             }
             val kind = line.removePrefix("@").substringBefore(' ')
