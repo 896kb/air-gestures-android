@@ -12,7 +12,7 @@ object Labels {
         id.startsWith(Sequences.PREFIX) -> sequence(Profiles.sequences(context), id)
         else -> when (val action = Action.of(id)) {
             Action.OPEN_APP -> "Open ${appName(context, id.removePrefix(APP_PREFIX))}"
-            Action.AUTOMATION -> action.label + device(context, id)
+            Action.AUTOMATION -> automation(Profiles.devices(context), id)
             else -> action.label
         }
     }
@@ -21,12 +21,15 @@ object Labels {
     fun sequence(library: Sequences.Library, id: String) =
         library.get(Sequences.started(id).first)?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
 
+    /** A stored Send to automation in words: Send to automation · Curtains (a deleted device: none). */
+    fun automation(devices: HomeDevices, id: String) = Action.AUTOMATION.label + device(devices, id)
+
     /** A dial's or slider's choice in words: Volume, Send to automation · Yeelight… */
-    fun dial(context: Context, key: String?) = DialChoice.of(key).label + device(context, key)
+    fun dial(context: Context, key: String?) = DialChoice.of(key).label + device(Profiles.devices(context), key)
 
     /** " · Yeelight" for a Send to automation for a device (one since deleted: nothing). */
-    private fun device(context: Context, id: String?) =
-        Mappings.deviceOf(id)?.let { Profiles.devices(context).get(it)?.name }?.let { " · $it" }.orEmpty()
+    private fun device(devices: HomeDevices, id: String?) =
+        Mappings.deviceOf(id)?.let { devices.get(it)?.name }?.let { " · $it" }.orEmpty()
 
     /** An app's name, or its package if it's gone. */
     fun appName(context: Context, pkg: String) = runCatching {

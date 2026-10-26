@@ -122,4 +122,11 @@ class HomeDevicesTest {
         assertEquals(listOf("torch.toggle", "automation", "wait:1000", "automation@d8", "automation"), cleared.get("q1")!!.steps)
         assertEquals(0, HomeDevices.uses("d1", list.withoutDevice("d1"), HomeDevices.withoutDevice(calls, "d1"), HomeDevices.withoutDevice(shared, "d1"), cleared))
     }
+
+    @Test fun `a Send to automation step is labelled with its device, a deleted one with none`() {
+        val curtains = HomeDevices().added("Curtains")!!.first
+        assertEquals("Send to automation · Curtains", Labels.automation(curtains, "automation@d1"))
+        assertEquals("Send to automation", Labels.automation(curtains.deleted("d1"), "automation@d1"))
+        assertEquals("Send to automation", Labels.automation(curtains, "automation"))
+    }
 }
