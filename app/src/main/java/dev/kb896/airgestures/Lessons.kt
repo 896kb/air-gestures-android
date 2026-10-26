@@ -113,9 +113,9 @@ object Lessons {
 
 /**
  * The settings backup file: everything but the owner key (that has its own export) and the
- * calibrations (they belong to a band). Version 2 adds the band controls and the drawings;
- * version 1 still restores, with today's band controls (as an upgrade gets them) and without
- * the built-in actions.
+ * calibrations (they belong to a band). Version 2 adds the band controls and the drawings, and
+ * later the Home devices (optional: a backup without them still reads); version 1 still
+ * restores, with today's band controls (as an upgrade gets them) and without the built-in actions.
  */
 object Backup {
     const val VERSION = 2
@@ -138,6 +138,8 @@ object Backup {
         val drawingsFrame: Int? = DrawingLibrary.FRAME,
         /** Of [drawings], the ones still to teach again (see Drawings.toReteach). */
         val drawingsReteach: Set<String> = emptySet(),
+        /** Null in a backup made before Home devices: restoring it leaves them as they are. */
+        val devices: HomeDevices? = null,
     )
 
     /** Every gesture's call action after a restore: the backup's, else its default (a 0.7.7 backup lacks the newer gestures). */
@@ -162,6 +164,7 @@ object Backup {
                 settings.drawingsFrame?.let { frame -> put("drawings_frame", frame) }
                 put("drawings_reteach", JSONArray(settings.drawingsReteach.sorted()))
             }
+            settings.devices?.let { put("devices", JSONArray(it.toJson())) }
         }.toString(2)
     }
 
@@ -189,6 +192,7 @@ object Backup {
             drawingsFrame = if (json.has("drawings_frame")) json.getInt("drawings_frame") else null,
             drawingsReteach = json.optJSONArray("drawings_reteach")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } }.toSet() }
                 .orEmpty(),
+            devices = json.optJSONArray("devices")?.let { HomeDevices.fromJson(it.toString()) },
         )
     }.getOrNull()
 }

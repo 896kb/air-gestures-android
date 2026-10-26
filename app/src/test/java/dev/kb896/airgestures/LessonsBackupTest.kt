@@ -64,6 +64,7 @@ class LessonsBackupTest {
         band = BandControls.standard().with(Builtin.DRAW, BandControl(Gesture.SWIPE_RIGHT)),
         sharedDrawings = mapOf("Bulb" to "torch.toggle"),
         drawings = DrawingLibrary(listOf(Drawing("Bulb", listOf(listOf(listOf(0.0 to 0.0, 9.0 to 9.0)))))),
+        devices = HomeDevices(listOf(HomeDevice("d1", "Yeelight"), HomeDevice("d3", "Desk lamp"))),
     )
 
     @Test fun `settings round-trip, tap spots and apps included`() =
@@ -135,5 +136,14 @@ class LessonsBackupTest {
         // A version 2 backup made before the frame was stored: its drawings are the old frame's.
         val old = Backup.write(settings).replace(Regex(",\\s*\"drawings_frame\":\\s*\\d+"), "")
         assertNull(Backup.read(old)!!.drawingsFrame)
+    }
+
+    @Test fun `a backup carries the home devices, one from before them leaves them as they are`() {
+        val profiles = settings.profiles.withAction("p1", "middle_tap", "automation@d3")
+        val read = Backup.read(Backup.write(settings.copy(profiles = profiles)))!!
+        assertEquals(settings.devices, read.devices)
+        assertEquals("automation@d3", read.profiles.profile("p1")!!.map["middle_tap"])
+        val old = org.json.JSONObject(Backup.write(settings)).apply { remove("devices") }.toString()
+        assertNull(Backup.read(old)!!.devices)
     }
 }

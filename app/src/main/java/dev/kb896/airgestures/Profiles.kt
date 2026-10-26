@@ -6,7 +6,7 @@ import org.json.JSONObject
 /**
  * Where the [ProfileList] lives (the app's settings, as JSON) and which app is in front.
  * The first read moves the mapping from before profiles into Profile 1. Also the band controls
- * (once, above the profiles) and the shared drawing actions.
+ * (once, above the profiles), the shared drawing actions and the Home devices.
  */
 object Profiles {
     private const val PROFILES = "profiles"
@@ -18,6 +18,7 @@ object Profiles {
     private const val BROKEN = "profiles.broken"
     private const val BAND = "band.controls"
     private const val SHARED_DRAWINGS = "drawings.shared"
+    private const val DEVICES = "devices"
     private const val VERSION_KEY = "controls.version"
     /** 2: band controls (from 0.7.7, and from the first controls dev build with built-in actions). */
     private const val VERSION = 2
@@ -180,6 +181,43 @@ object Profiles {
             sequences = it
             prefs(context).edit().putString(SEQUENCES, it.toJson()).apply()
         }
+    }
+
+    @Volatile
+    private var devices: HomeDevices? = null
+
+    /** The Home devices; none until one is added (or when unreadable). */
+    fun devices(context: Context): HomeDevices = devices ?: synchronized(this) {
+        devices ?: (prefs(context).getString(DEVICES, null)?.let(HomeDevices::fromJson) ?: HomeDevices()).also { devices = it }
+    }
+
+    fun updateDevices(context: Context, change: (HomeDevices) -> HomeDevices): HomeDevices = synchronized(this) {
+        change(devices(context)).also {
+            devices = it
+            prefs(context).edit().putString(DEVICES, it.toJson()).apply()
+        }
+    }
+
+    /** A new device called [name], or the one already called that; null for a blank name. */
+    fun addDevice(context: Context, name: String): HomeDevice? = synchronized(this) {
+        val (list, device) = devices(context).added(name) ?: return null
+        updateDevices(context) { list }
+        device
+    }
+
+    /** How many actions and dials send for device [id], in every profile, During calls and the shared drawings. */
+    fun deviceUses(context: Context, id: String) =
+        HomeDevices.uses(id, load(context), Prefs(context).calls(), sharedDrawings(context))
+
+    /** Device [id] gone; whatever sent for it sends without a device. */
+    fun deleteDevice(context: Context, id: String) = synchronized(this) {
+        updateDrawingActions(context) { list, shared -> list.withoutDevice(id) to HomeDevices.withoutDevice(shared, id) }
+        val prefs = Prefs(context)
+        for (gesture in Gesture.entries) {
+            val call = prefs.callActionId(gesture)
+            if (Mappings.withoutDevice(call, id) != call) prefs.setCallAction(gesture, Mappings.AUTOMATION)
+        }
+        updateDevices(context) { it.deleted(id) }
     }
 
     /** Buzz on a profile switch (the band already buzzes for its gestures). */

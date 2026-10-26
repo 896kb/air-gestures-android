@@ -58,6 +58,7 @@ enum class Action(val id: String, val label: String, val icon: Int) {
             id.startsWith(Tap.PREFIX) -> TAP
             id.startsWith(Strokes.SWIPE) || id.startsWith(Strokes.PATH) -> SWIPE_HERE
             id.startsWith(Sequences.PREFIX) -> SEQUENCE
+            Mappings.isAutomation(id) -> AUTOMATION
             else -> entries.firstOrNull { it.id == id } ?: NONE
         }
     }
@@ -131,8 +132,12 @@ enum class DialChoice(val key: String, val label: String, val up: String, val do
     NONE("none", "Nothing", "", "", R.drawable.ic_minus);
 
     companion object {
-        /** "tracks" was the old next/previous choice; playback position replaced it. */
-        fun of(key: String?) = if (key == "tracks") SEEK else entries.firstOrNull { it.key == key } ?: VOLUME
+        /** "tracks" was the old next/previous choice; playback position replaced it. Automation for a device is `automation@<id>`. */
+        fun of(key: String?) = when {
+            key == "tracks" -> SEEK
+            Mappings.isAutomation(key) -> AUTOMATION
+            else -> entries.firstOrNull { it.key == key } ?: VOLUME
+        }
     }
 }
 

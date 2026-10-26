@@ -191,7 +191,7 @@ class SetupActivity : Screen() {
         val prefs = Prefs(this)
         return Backup.Settings(
             Profiles.load(this),
-            Gesture.entries.associate { it.key to prefs.callActionId(it) },
+            prefs.calls(),
             prefs.hand,
             Profiles.speak(this),
             Profiles.vibrate(this),
@@ -201,6 +201,7 @@ class SetupActivity : Screen() {
             Drawings.load(this),
             drawingsFrame = DrawingLibrary.FRAME,
             drawingsReteach = Drawings.toReteach(this),
+            devices = Profiles.devices(this),
         )
     }
 
@@ -220,6 +221,7 @@ class SetupActivity : Screen() {
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
+        settings.devices?.let { restored -> Profiles.updateDevices(applicationContext) { restored } }
         Profiles.updateBand(applicationContext) { settings.band }
         BandService.instance?.drawingsChanged()
         BandService.instance?.remap()

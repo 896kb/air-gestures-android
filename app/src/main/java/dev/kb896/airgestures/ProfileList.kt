@@ -131,6 +131,29 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
     /** Only actions for drawings that exist ([names]), and no "" ones. */
     fun prunedDrawings(names: Set<String>) = copy(profiles = profiles.map { p -> p.copy(drawings = DrawingLibrary.pruned(p.drawings, names)) })
 
+    /**
+     * Every stored action id and dial choice: gestures, overrides, both dials, the sliders'
+     * targets (kept in gestures mode too) and the drawings' own actions.
+     */
+    fun ids() = profiles.flatMap { p ->
+        p.map.values + p.palm.values.flatMap { it.values } + listOf(p.dial, p.middleDial) +
+            p.indexDrags.targets + p.middleDrags.targets + p.drawings.values
+    }
+
+    /** Wherever Send to automation is for [device] (an action or a dial), it sends without a device. */
+    fun withoutDevice(device: String) = copy(profiles = profiles.map { p ->
+        fun clear(id: String) = Mappings.withoutDevice(id, device)
+        p.copy(
+            map = p.map.mapValues { clear(it.value) },
+            dial = clear(p.dial),
+            palm = p.palm.mapValues { (_, own) -> own.mapValues { clear(it.value) } },
+            middleDial = clear(p.middleDial),
+            indexDrags = p.indexDrags.copy(targets = p.indexDrags.targets.map(::clear)),
+            middleDrags = p.middleDrags.copy(targets = p.middleDrags.targets.map(::clear)),
+            drawings = p.drawings.mapValues { clear(it.value) },
+        )
+    })
+
     /** The first controls dev build's built-in action ids out of every profile (their gestures go back to their defaults). */
     fun withoutBuiltins() = copy(profiles = profiles.map { p ->
         p.copy(

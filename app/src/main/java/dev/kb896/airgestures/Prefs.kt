@@ -66,11 +66,14 @@ class Prefs(context: Context) {
     fun setCallAction(gesture: Gesture, id: String) =
         prefs.edit().putString("call.${gesture.key}", id).apply()
 
+    /** The During calls layer: gesture key → action id, [Mappings.AS_USUAL] or [Mappings.NOTHING]. */
+    fun calls() = Gesture.entries.associate { it.key to callActionId(it) }
+
     /** Everything the bridge needs to know about gestures, as JSON (see [Mappings.profilesJson]). */
     fun profilesJson(): String = Mappings.profilesJson(Mappings.Input(
         Profiles.load(context),
         Profiles.band(context),
-        Gesture.entries.associate { it.key to callActionId(it) },
+        calls(),
         Profiles.sharedDrawings(context),
         listOf("left", "right").associateWith { Calibrations.get(context, bandAddress, it) },
         hand,

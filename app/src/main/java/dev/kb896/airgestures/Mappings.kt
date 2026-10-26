@@ -11,6 +11,8 @@ object Mappings {
     /** In the call layer: the gesture does nothing during a call. */
     const val NOTHING = "-"
     const val AUTOMATION = "automation"
+    /** Send to automation for a Home device: `automation@<device id>`. */
+    private const val FOR_DEVICE = "$AUTOMATION@"
 
     const val DIAL = "dial:"
     const val DRAWING = "drawing:"
@@ -33,6 +35,21 @@ object Mappings {
         val calibrations: Map<String, Calibration>,
         val hand: String,
     )
+
+    /**
+     * Send to automation as stored (an action id, or a dial's or slider's [DialChoice] key):
+     * plain [AUTOMATION] without a device, as before devices, else `automation@<device id>`.
+     */
+    fun automationId(device: String?) = if (device == null) AUTOMATION else FOR_DEVICE + device
+
+    /** A stored Send to automation, for a device or none. */
+    fun isAutomation(id: String?) = id == AUTOMATION || id?.startsWith(FOR_DEVICE) == true
+
+    /** The device a stored Send to automation is for (null: none, or not automation). */
+    fun deviceOf(id: String?) = id?.takeIf { it.startsWith(FOR_DEVICE) }?.removePrefix(FOR_DEVICE)?.ifEmpty { null }
+
+    /** [id], sending without a device if it was for [device]. */
+    fun withoutDevice(id: String, device: String) = if (deviceOf(id) == device) AUTOMATION else id
 
     /** A stored [AUTOMATION] becomes `automation:<name>`: the bridge reports only action names. */
     private fun named(id: String, name: String) = if (id == AUTOMATION) "$AUTOMATION:$name" else id
