@@ -81,9 +81,20 @@ fn gesture(
     pump(connection, band, reply, now);
 }
 
-/// The actions since the last call, split: what to run, and the `@` events.
+/// The actions since the last call, split: what to run, and the `@` events (without the
+/// Activity screen's `@activity` lines: see [activities]).
 fn taken(connection: &mut Connection) -> (Vec<String>, Vec<String>) {
-    connection.take_actions().into_iter().partition(|line| !line.starts_with('@'))
+    connection.take_actions().into_iter().filter(|line| !line.starts_with("@activity ")).partition(|line| !line.starts_with('@'))
+}
+
+/// The Activity screen's lines since the last call, as JSON.
+fn activities(connection: &mut Connection) -> Vec<serde_json::Value> {
+    connection
+        .take_actions()
+        .iter()
+        .filter_map(|line| line.strip_prefix("@activity "))
+        .map(|json| serde_json::from_str(json).unwrap())
+        .collect()
 }
 
 #[test]
@@ -91,7 +102,23 @@ fn a_swipe_down_plays_the_next_track() {
     let (mut connection, mut band) = connected(false);
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
     assert_eq!(taken(&mut connection), (vec!["media.next".to_owned()], vec!["@gesture swipe down".to_owned()]));
-    assert!(connection.take_log().contains(&"gesture swipe down".to_owned()));
+}
+
+#[test]
+fn the_activity_screen_hears_each_gesture_with_its_palm_and_what_it_did() {
+    let (mut connection, mut band) = connected(false);
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    // No orientation yet: palm down, and no calibration of the user's own.
+    assert_eq!(
+        activities(&mut connection),
+        vec![serde_json::json!({"what": "swipe down", "palm": "down", "calibrated": false, "run": "media.next"})]
+    );
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 4.0);
+    let held = &activities(&mut connection)[0];
+    assert_eq!((held["what"].clone(), held["band"].clone(), held["result"].clone()), (serde_json::json!("middle hold"), serde_json::json!("controls"), serde_json::json!("off")));
+    // Off: a gesture says so.
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 5.0);
+    assert_eq!(activities(&mut connection)[0]["off"], serde_json::json!(true));
 }
 
 #[test]

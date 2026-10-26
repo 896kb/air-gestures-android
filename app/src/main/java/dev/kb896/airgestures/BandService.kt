@@ -330,6 +330,12 @@ class BandService : Service(), BandLink.Listener {
             val kind = line.removePrefix("@").substringBefore(' ')
             val rest = line.substringAfter(' ', "")
             when (kind) {
+                // The Activity screen's line: the gesture, its palm and what it did, in the app's words.
+                "activity" -> ActivityLine.format(
+                    rest,
+                    label = { id -> ActivityLine.label(id) { Labels.action(this, it) } },
+                    profile = { Profiles.load(this).profiles.getOrNull(it)?.name },
+                )?.let(::onLog)
                 "gesture" -> practice?.gesture(rest)
                 "practiced" -> practice?.action(rest)
                 "controls" -> bandToggled(rest == "on")

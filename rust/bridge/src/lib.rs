@@ -8,12 +8,13 @@
 //! connection (`report`, `teach`). Also the Meta sign-in and the ownership claim
 //! (`metaauth`, `meta`, `claim`), ported from the Linux app.
 
-use band_core::controls::{Controls, Finger, Output};
+use band_core::controls::{Controls, DragMode, Finger, Output, Palm};
 use band_core::events::{Event, Hand};
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
 use serde::Serialize;
 
+pub mod activity;
 pub mod claim;
 pub mod fieldtext;
 pub mod firmware;
@@ -51,6 +52,8 @@ pub struct Connection {
     field: Option<fieldtext::FieldTyping>,
     /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
     roll: palmlive::LiveRoll,
+    /// The Activity screen's lines (`@activity`): a pinch's steps gathered.
+    activity: activity::Activity,
 }
 
 #[derive(Serialize)]
@@ -107,6 +110,7 @@ impl Connection {
             probing: false,
             field: None,
             roll: palmlive::LiveRoll::default(),
+            activity: activity::Activity::default(),
         })
     }
 
@@ -542,21 +546,21 @@ impl Connection {
     /// (`now`: none, e.g. from `set_profiles`: the next `tick` writes it).
     fn take(&mut self, outputs: Vec<Output<String>>, now: Option<f64>) -> Result<Vec<u8>, String> {
         let mut outgoing = Vec::new();
+        // The Activity screen's lines first: what each gesture did (and the palm it was made with).
+        for line in self.activity_lines(&outputs, now) {
+            self.actions.push(format!("@activity {line}"));
+        }
         for output in outputs {
             match output {
-                Output::Run(action) => {
-                    self.log.push(format!("action {action}"));
-                    self.actions.push(action);
-                }
+                Output::Run(action) => self.actions.push(action),
                 Output::SetHand(hand) => match now {
                     Some(now) => outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?),
                     None => self.pending_hand = Some(hand),
                 },
                 other => {
-                    match &other {
-                        Output::Gesture(gesture) => self.log.push(format!("gesture {}", gesture.label())),
-                        Output::Drawn { name, distance } => self.log.push(format!("drawn {name} ({distance:.2})")),
-                        _ => {}
+                    // The match's distance, for tuning (the Activity line names the drawing).
+                    if let Output::Drawn { name, distance } = &other {
+                        self.log.push(format!("drawn {name} ({distance:.2})"));
                     }
                     let roll = self.controls.prototypes().palm_down_roll;
                     self.actions.extend(line(&other, roll));
@@ -564,6 +568,43 @@ impl Connection {
             }
         }
         Ok(outgoing)
+    }
+
+    /// The `@activity` lines for these outputs (see `activity`). The palm is the engine's now
+    /// (`Controls::palm`); without a clock, palm down.
+    fn activity_lines(&mut self, outputs: &[Output<String>], now: Option<f64>) -> Vec<String> {
+        let controls = &self.controls;
+        let band = |gesture, palm| controls.profiles().band.on(gesture, palm);
+        // A step's source: the active profile's dial or slider with that action.
+        let source = |id: &str| {
+            let profile = controls.profiles().list.get(controls.active())?;
+            let dial = |d: &band_core::controls::Dial<String>| d.up == id || d.down == id;
+            for finger in [Finger::Index, Finger::Middle] {
+                let setup = profile.finger(finger);
+                let name = finger_key(finger);
+                let own = if finger == Finger::Index { controls.dial().or(setup.dial.as_ref()) } else { setup.dial.as_ref() };
+                if own.is_some_and(dial) {
+                    return Some(format!("{name} dial"));
+                }
+                if let DragMode::Sliders(sliders) = &setup.drags {
+                    for (pair, slider) in sliders.iter().enumerate() {
+                        if slider.as_ref().is_some_and(dial) {
+                            let pair = ["left/right", "toward/away", "up/down"][pair];
+                            return Some(format!("{name} {pair} slider"));
+                        }
+                    }
+                }
+            }
+            None
+        };
+        let ctx = activity::Context {
+            palm: now.map_or(Palm::Down, |now| controls.palm(now)),
+            calibrated: controls.options().palm.is_some(),
+            enabled: controls.enabled(),
+            band: &band,
+            source: &source,
+        };
+        self.activity.take(outputs, &ctx, now)
     }
 }
 

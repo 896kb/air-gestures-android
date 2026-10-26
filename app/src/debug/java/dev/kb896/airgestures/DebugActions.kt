@@ -75,10 +75,23 @@ import kotlin.concurrent.thread
  *
  *     ... --es teach circle
  *
+ * An Activity screen line from the bridge's `@activity` JSON (see ActivityLine), without a band:
+ *
+ *     ... --es activity '{"what":"index tap","palm":"up","calibrated":true,"run":"media.next"}'
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra("activity")?.let { json ->
+            val line = ActivityLine.format(
+                json,
+                label = { id -> ActivityLine.label(id) { Labels.action(context, it) } },
+                profile = { Profiles.load(context).profiles.getOrNull(it)?.name },
+            ) ?: return
+            BandService.state.update { copy(log = (log + line).takeLast(60)) }
+            return
+        }
         intent.getStringExtra("teach")?.let { shape ->
             val screen = TeachDrawingActivity.listening ?: run {
                 Log.i("AirGestures", "debug teach: no Teach a drawing screen in front")
