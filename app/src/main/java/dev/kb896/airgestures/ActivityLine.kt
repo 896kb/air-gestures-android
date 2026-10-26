@@ -23,8 +23,10 @@ object ActivityLine {
         }
         val did = when {
             o.has("run") -> label(o.getString("run"))
-            o.has("practiced") -> "would: " + label(o.getString("practiced"))
-            o.has("steps") -> o.getJSONArray("steps").let { a ->
+            // A gesture's practiced action (a pinch's steps carry "practiced": true instead).
+            o.opt("practiced") is String -> "would: " + label(o.getString("practiced"))
+            // In practice a pinch's steps say what they would have done.
+            o.has("steps") -> (if (o.optBoolean("practiced")) "would: " else "") + o.getJSONArray("steps").let { a ->
                 (0 until a.length()).joinToString(", ") { i ->
                     val step = a.getJSONArray(i)
                     val n = step.optInt(1, 1)
@@ -36,6 +38,9 @@ object ActivityLine {
             o.optBoolean("off") -> "nothing (controls off)"
             // Just after connecting, or another action a moment ago (band-core's action gate).
             o.optBoolean("too_soon") -> "nothing (too soon after the last)"
+            // While teaching drags, or a drawing is open: gestures do nothing else.
+            o.optBoolean("teaching") -> "teaching drags"
+            o.optBoolean("drawing") -> "drawing"
             else -> "nothing"
         }
         return "$head → $did"

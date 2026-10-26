@@ -26,5 +26,5 @@ fn the_controls_outputs_become_at_lines() {
         Some("@drag-sample middle 0.0000 0.6000 0.8000 -142.30")
     );
     assert_eq!(l(Output::Run("media.next".into())), None, "actions go as they are");
-    assert_eq!(l(Output::PinchEnded { finger: Finger::Index, class: band_core::controls::Class::Turn, palm: Palm::Down, up: 1, down: 0 }), None);
+    assert_eq!(l(Output::PinchEnded { finger: Finger::Index, class: band_core::controls::Class::Turn, palm: Palm::Down, up: 1, down: 0, practiced: false }), None);
 }

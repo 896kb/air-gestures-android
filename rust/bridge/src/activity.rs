@@ -7,7 +7,8 @@
 //! `"steps": [[id, n], …]`, `"band": "controls", "result": "on"|"off"`, `"band": "next"|"previous",
 //! "profile": index`, `"band": …, "held": app`, `"band": "draw", "result": "opened"|"cancelled"`,
 //! `"paused": control`, `"off": true` (the controls were off), `"too_soon": true`,
-//! `"nothing": true`; a drawing is `{"drawn": name}` with its `run` / `practiced`, or
+//! `"teaching": true` (teaching drags), `"drawing": true` (a draw session open), `"nothing": true`;
+//! a pinch's `steps` carry `"practiced": true` in practice (what they would have done); a drawing is `{"drawn": name}` with its `run` / `practiced`, or
 //! `{"not_drawn": true}`.
 
 use band_core::controls::{Builtin, Class, Finger, Gesture, Output, Palm, Unused};
@@ -98,6 +99,8 @@ pub fn lines(outputs: &[Output<String>], ctx: &Context) -> Vec<String> {
                 Unused::ControlsOff => did(&mut pending, &mut lines, "off", json!(true), None),
                 Unused::TooSoon => did(&mut pending, &mut lines, "too_soon", json!(true), None),
                 Unused::Paused(builtin) => did(&mut pending, &mut lines, "paused", json!(builtin_key(*builtin)), None),
+                Unused::Teaching => did(&mut pending, &mut lines, "teaching", json!(true), None),
+                Unused::Drawing => did(&mut pending, &mut lines, "drawing", json!(true), None),
             },
             Output::Controls { enabled } => did(&mut pending, &mut lines, "band", json!("controls"), Some(("result", json!(if *enabled { "on" } else { "off" })))),
             Output::Profile { index, step } => {
@@ -112,12 +115,17 @@ pub fn lines(outputs: &[Output<String>], ctx: &Context) -> Vec<String> {
             }
             Output::DrawStarted => did(&mut pending, &mut lines, "band", json!("draw"), Some(("result", json!("opened")))),
             Output::DrawCancelled => did(&mut pending, &mut lines, "band", json!("draw"), Some(("result", json!("cancelled")))),
-            Output::PinchEnded { finger, class, palm, up, down } => {
+            // Also when band-core drops a stepping pinch (pause, a drawing or drag teaching starting).
+            Output::PinchEnded { finger, class, palm, up, down, practiced } => {
                 close(pending.take(), &mut lines);
                 if let Some((what, up_id, down_id)) = (ctx.steps)(*finger, *class) {
                     let steps: Vec<Value> =
                         [(up_id, *up), (down_id, *down)].into_iter().filter(|(_, n)| *n > 0).map(|(id, n)| json!([id, n])).collect();
-                    lines.push(json!({"what": what, "palm": palm.key(), "calibrated": ctx.calibrated, "steps": steps}).to_string());
+                    let mut line = json!({"what": what, "palm": palm.key(), "calibrated": ctx.calibrated, "steps": steps});
+                    if *practiced {
+                        line["practiced"] = json!(true);
+                    }
+                    lines.push(line.to_string());
                 }
             }
             _ => {}
@@ -154,6 +162,8 @@ mod tests {
         assert_eq!(why(Unused::ControlsOff)["off"], json!(true));
         assert_eq!(why(Unused::TooSoon)["too_soon"], json!(true));
         assert_eq!(why(Unused::Paused(Builtin::Draw))["paused"], json!("draw"));
+        assert_eq!(why(Unused::Teaching)["teaching"], json!(true));
+        assert_eq!(why(Unused::Drawing)["drawing"], json!(true));
     }
 
     #[test]
@@ -177,12 +187,19 @@ mod tests {
         };
         let c = ctx(NO_BAND, steps);
         let mut out: Vec<Output<String>> = (0..6).map(|_| Output::Run("volume.down".into())).collect();
-        out.push(Output::PinchEnded { finger: Finger::Index, class: Class::Turn, palm: Palm::Down, up: 0, down: 6 });
+        out.push(Output::PinchEnded { finger: Finger::Index, class: Class::Turn, palm: Palm::Down, up: 0, down: 6, practiced: false });
         let lines = lines(&out, &c);
         assert_eq!(lines.len(), 1);
         assert_eq!(parsed(&lines[0]), json!({"what": "index dial", "palm": "down", "calibrated": true, "steps": [["volume.down", 6]]}));
-        let slider = Output::PinchEnded { finger: Finger::Middle, class: Class::Drag(Drag::Right), palm: Palm::Up, up: 2, down: 1 };
+        let slider = Output::PinchEnded { finger: Finger::Middle, class: Class::Drag(Drag::Right), palm: Palm::Up, up: 2, down: 1, practiced: false };
         assert_eq!(parsed(&super::lines(&[slider], &c)[0])["steps"], json!([["brightness.up", 2], ["brightness.down", 1]]));
+        // In practice the steps came as Practiced: "would".
+        let practiced = Output::PinchEnded { finger: Finger::Index, class: Class::Turn, palm: Palm::Down, up: 4, down: 0, practiced: true };
+        let line = parsed(&super::lines(&[practiced], &c)[0]);
+        assert_eq!((line["steps"].clone(), line["practiced"].clone()), (json!([["volume.up", 4]]), json!(true)));
+        // A pinch dropped by opening a drawing: its line, then the drawing's own outputs (no gesture: no line).
+        let dropped = Output::PinchEnded { finger: Finger::Index, class: Class::Turn, palm: Palm::Up, up: 1, down: 0, practiced: false };
+        assert_eq!(super::lines(&[dropped, Output::DrawStarted], &c).len(), 1);
     }
 
     #[test]
