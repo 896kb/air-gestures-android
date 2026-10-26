@@ -294,11 +294,17 @@ abstract class GestureScreen : Screen() {
         }
     }
 
-    /** Name a new Home device; [onAdded] gets its id (or the id of the one already called that). */
-    fun newDevice(onAdded: (String) -> Unit) = ask("New device", "", "Add") { typed ->
+    /**
+     * Name a new Home device; [onAdded] gets its id (or the id of the one already called that).
+     * A blank name asks again, so a pick waiting for the device isn't lost (Cancel there drops it).
+     */
+    fun newDevice(onAdded: (String) -> Unit): Unit = ask("New device", "", "Add") { typed ->
         val device = Profiles.addDevice(applicationContext, typed)
         if (device == null) {
-            sheet("A device needs a name", note("Type a name, like Desk lamp."), "OK", cancel = false) { true }
+            sheet("A device needs a name", note("Type a name, like Desk lamp."), "OK", cancel = false) {
+                newDevice(onAdded)
+                true
+            }
         } else {
             onAdded(device.id)
         }
