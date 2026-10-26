@@ -23,7 +23,7 @@ class CreditsActivity : Screen() {
             "896.ro", "https://896.ro",
         ),
         Person(
-            R.drawable.ic_activity, "Band vibration and Bluetooth music controls", "Tudor Palasan (iinsaane)",
+            R.drawable.credits_iinsaane, "Band vibration and Bluetooth music controls", "Tudor Palasan (iinsaane)",
             "Band vibration feedback, volume detents, per-profile Bluetooth music controls and reconnect stability.",
             "iinsaane on GitHub", "https://github.com/iinsaane",
         ),
