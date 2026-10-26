@@ -39,8 +39,8 @@ class PracticeActivity : Screen() {
             band = Profiles.band(this),
             // A middle dial on the index dial's actions can't be told apart from an index turn: no lesson then.
             middleDial = Lessons.middleDialLesson(
-                Mappings.dial(active.dial, "dial")?.toList().orEmpty().toSet(),
-                Mappings.dial(active.middleDial, "middle_dial")?.toList().orEmpty().toSet(),
+                Mappings.dial(active.dial, "dial", active.name)?.toList().orEmpty().toSet(),
+                Mappings.dial(active.middleDial, "middle_dial", active.name)?.toList().orEmpty().toSet(),
             ),
             sliders = listOf(Part.INDEX, Part.MIDDLE).filter { active.drags(it).sliders }.toSet(),
         )
@@ -124,8 +124,8 @@ class PracticeActivity : Screen() {
         if (done) return
         // The names the bridge reports for each dial's steps (automation's carry the dial's name).
         val active = Profiles.active(this)
-        val dial = Mappings.dial(active.dial, "dial")?.toList().orEmpty().toSet()
-        val middleDial = Mappings.dial(active.middleDial, "middle_dial")?.toList().orEmpty().toSet()
+        val dial = Mappings.dial(active.dial, "dial", active.name)?.toList().orEmpty().toSet()
+        val middleDial = Mappings.dial(active.middleDial, "middle_dial", active.name)?.toList().orEmpty().toSet()
         if (step.done.matches(gesture, action, dial, middleDial)) {
             done = true
             render()

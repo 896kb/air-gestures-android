@@ -333,7 +333,7 @@ class BandService : Service(), BandLink.Listener {
                 // The Activity screen's line: the gesture, its palm and what it did, in the app's words.
                 "activity" -> ActivityLine.format(
                     rest,
-                    label = { id -> ActivityLine.label(id) { Labels.action(this, it) } },
+                    label = { id -> ActivityLine.label(id, device = { Profiles.devices(this).get(it)?.name }) { Labels.action(this, it) } },
                     profile = { Profiles.load(this).profiles.getOrNull(it)?.name },
                 )?.let(::onLog)
                 "gesture" -> practice?.gesture(rest)

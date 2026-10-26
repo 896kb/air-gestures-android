@@ -60,15 +60,19 @@ object ActivityLine {
     }
 
     /**
-     * An action id in words: automation and the dials' own steps here, everything else by
-     * [others] (the app's labels: Labels.action).
+     * An action id in words: automation (with its device's name, by [device]) and the dials' own
+     * steps here, everything else by [others] (the app's labels: Labels.action).
      */
-    fun label(id: String, others: (String) -> String): String = when {
-        id.startsWith("${Mappings.AUTOMATION}:${Mappings.DIAL}") -> "Automation " + if (id.endsWith(":down")) "down" else "up"
-        id.startsWith("${Mappings.AUTOMATION}:") -> Action.AUTOMATION.label
-        id == DialChoice.SEEK.up -> "Seek forward"
-        id == DialChoice.SEEK.down -> "Seek back"
-        id.isEmpty() -> "nothing"
-        else -> others(id)
+    fun label(id: String, device: (String) -> String? = { null }, others: (String) -> String): String {
+        val sent = Mappings.sent(id)
+        val on = sent?.device?.let(device)?.let { " · $it" }.orEmpty()
+        return when {
+            sent is Mappings.Automation.Step -> "Automation " + (if (sent.step < 0) "down" else "up") + on
+            sent != null -> Action.AUTOMATION.label + on
+            id == DialChoice.SEEK.up -> "Seek forward"
+            id == DialChoice.SEEK.down -> "Seek back"
+            id.isEmpty() -> "nothing"
+            else -> others(id)
+        }
     }
 }

@@ -126,7 +126,7 @@ enum class DialChoice(val key: String, val label: String, val up: String, val do
     NAVIGATE("navigate", "Navigate", "nav.next", "nav.previous", R.drawable.ic_scan_line),
     /**
      * For smart lights and the like: Tasker / Home Assistant get the steps, gathered every 250 ms.
-     * Its up/down are placeholders: Mappings.dial sends `automation:dial:<name>:up|down` instead.
+     * Its up/down are placeholders: Mappings.dial sends `automation…:dial:<name>:up|down` instead (with its device and profile).
      */
     AUTOMATION("automation", "Send to automation", "automation:dial_up", "automation:dial_down", R.drawable.ic_zap),
     NONE("none", "Nothing", "", "", R.drawable.ic_minus);

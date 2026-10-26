@@ -5,7 +5,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ActivityLineTest {
-    private fun line(json: String) = ActivityLine.format(json, label = { ActivityLine.label(it) { id -> Action.of(id).label } }, profile = { listOf("Music", "Reading").getOrNull(it) })
+    private fun line(json: String) = ActivityLine.format(
+        json,
+        label = { ActivityLine.label(it, device = { id -> mapOf("d1" to "Yeelight")[id] }) { id -> Action.of(id).label } },
+        profile = { listOf("Music", "Reading").getOrNull(it) },
+    )
 
     @Test fun `a gesture, its palm and what it did, in the app's words`() {
         assertEquals("index tap · palm up → Next track", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"media.next"}"""))
@@ -39,5 +43,14 @@ class ActivityLineTest {
         assertEquals("Lightbulb (drawn) → nothing (too soon after the last)", line("""{"drawn":"Lightbulb","too_soon":true}"""))
         assertEquals("index tap · palm up → Send to automation", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"automation:index_tap:up"}"""))
         assertNull(line("not json"))
+    }
+
+    @Test fun `automation names its device, an unknown one is left out`() {
+        assertEquals("middle dial · palm down → Automation up · Yeelight ×2",
+            line("""{"what":"middle dial","palm":"down","calibrated":true,"steps":[["automation@d1/Music:dial:middle_dial:up",2]]}"""))
+        assertEquals("index tap · palm up → Send to automation · Yeelight", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"automation@d1/Music:index_tap:up"}"""))
+        assertEquals("Star (drawn) → Send to automation · Yeelight", line("""{"drawn":"Star","run":"automation@d1/During+calls:drawing:Star"}"""))
+        assertEquals("index tap · palm up → Send to automation", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"automation@d7/Music:index_tap:up"}"""))
+        assertEquals("index dial · palm up → Automation down", line("""{"what":"index dial","palm":"up","calibrated":true,"steps":[["automation/Music:dial:dial:down",1]]}"""))
     }
 }

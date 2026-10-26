@@ -2,6 +2,8 @@ package dev.kb896.airgestures
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.util.Locale
 
 /** The plain logic behind the mapping and the new actions, kept free of Android so it's unit-tested. */
@@ -16,6 +18,8 @@ object Mappings {
 
     const val DIAL = "dial:"
     const val DRAWING = "drawing:"
+    /** The During calls layer's name, as its screen shows it: the `profile` its automation sends. */
+    const val CALLS = "During calls"
     private val PAIRS = listOf("left_right", "toward_away", "up_down")
 
     /**
@@ -51,47 +55,63 @@ object Mappings {
     /** [id], sending without a device if it was for [device]. */
     fun withoutDevice(id: String, device: String) = if (deviceOf(id) == device) AUTOMATION else id
 
-    /** A stored [AUTOMATION] becomes `automation:<name>`: the bridge reports only action names. */
-    private fun named(id: String, name: String) = if (id == AUTOMATION) "$AUTOMATION:$name" else id
+    /**
+     * The bridge reports only action names, so a stored Send to automation becomes one that says
+     * what sends: `<stored>/<profile>:<name>`, e.g. `automation@d1/Music:index_tap:up` ([sent]
+     * reads it back). [profile]: the name of the profile (or [CALLS]) it's in, URL-encoded so it
+     * can hold anything; null for none (the shared drawings), `<stored>:<name>` as before profiles.
+     */
+    private fun named(id: String, name: String, profile: String?) =
+        if (isAutomation(id)) id + profile?.let { "/" + URLEncoder.encode(it, "UTF-8") }.orEmpty() + ":" + name else id
 
-    /** A dial's two actions (null: nothing); automation steps carry the dial's name (`dial` for the index dial, as 0.7.7). */
-    fun dial(key: String, name: String): Pair<String, String>? = when (val choice = DialChoice.of(key)) {
+    /**
+     * A dial's two actions (null: nothing); automation steps carry the dial's name (`dial` for the
+     * index dial, as 0.7.7), its device and [profile]'s name.
+     */
+    fun dial(key: String, name: String, profile: String?): Pair<String, String>? = when (val choice = DialChoice.of(key)) {
         DialChoice.NONE -> null
-        DialChoice.AUTOMATION -> "$AUTOMATION:$DIAL$name:up" to "$AUTOMATION:$DIAL$name:down"
+        DialChoice.AUTOMATION -> named(key, "$DIAL$name:up", profile) to named(key, "$DIAL$name:down", profile)
         else -> choice.up to choice.down
     }
 
-    private fun dialJson(key: String, name: String): Any =
-        dial(key, name)?.let { (up, down) -> JSONObject().put("up", up).put("down", down) } ?: JSONObject.NULL
+    private fun dialJson(key: String, name: String, profile: String): Any =
+        dial(key, name, profile)?.let { (up, down) -> JSONObject().put("up", up).put("down", down) } ?: JSONObject.NULL
 
     private fun finger(profile: Profile, part: Part): JSONObject {
         val f = part.name.lowercase()
         val drags = profile.drags(part)
         return JSONObject().apply {
-            put("dial", dialJson(profile.dialOf(part), if (part == Part.INDEX) "dial" else "${f}_dial"))
+            put("dial", dialJson(profile.dialOf(part), if (part == Part.INDEX) "dial" else "${f}_dial", profile.name))
             put("drags", if (!drags.sliders) "gestures" else JSONObject().put("sliders",
-                JSONArray(drags.targets.mapIndexed { i, key -> dialJson(key, "${f}_${PAIRS[i]}") })))
+                JSONArray(drags.targets.mapIndexed { i, key -> dialJson(key, "${f}_${PAIRS[i]}", profile.name) })))
         }
     }
 
-    private fun drawingsJson(map: Map<String, String>) =
-        JSONObject(map.filterValues { it.isNotEmpty() }.mapValues { (name, id) -> named(id, "$DRAWING$name") })
+    private fun drawingsJson(map: Map<String, String>, profile: String?) =
+        JSONObject(map.filterValues { it.isNotEmpty() }.mapValues { (name, id) -> named(id, "$DRAWING$name", profile) })
+
+    /**
+     * [profile]'s own drawings, and the shared ones that send to automation where it has none
+     * of its own: band-core would run the shared action, which can't say which profile it's in.
+     */
+    private fun drawingsOf(profile: Profile, shared: Map<String, String>) =
+        shared.filterValues(::isAutomation) + profile.drawings.filterValues { it.isNotEmpty() }
 
     fun profilesJson(input: Input): String {
         val list = input.list
         val profiles = JSONArray()
         for (profile in list.profiles) {
             val map = JSONObject()
-            for (gesture in Gesture.entries) map.put(gesture.key, named(profile.map[gesture.key] ?: gesture.default.id, gesture.key))
+            for (gesture in Gesture.entries) map.put(gesture.key, named(profile.map[gesture.key] ?: gesture.default.id, gesture.key, profile.name))
             val palm = JSONObject()
-            for ((key, own) in profile.palm) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at") }))
+            for ((key, own) in profile.palm) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at", profile.name) }))
             profiles.put(JSONObject().apply {
                 put("name", profile.name)
                 put("map", map)
                 put("palm", palm)
                 put("index", finger(profile, Part.INDEX))
                 put("middle", finger(profile, Part.MIDDLE))
-                put("drawings", drawingsJson(profile.drawings))
+                put("drawings", drawingsJson(drawingsOf(profile, input.drawings), profile.name))
             })
         }
         val index = { id: String -> list.profiles.indexOfFirst { it.id == id } }
@@ -100,8 +120,8 @@ object Mappings {
             put("picked", index(list.picked).coerceAtLeast(0))
             put("apps", JSONObject(list.apps.mapValues { index(it.value) }.filterValues { it >= 0 }))
             put("band", input.band.toJson())
-            put("calls", JSONObject(input.calls.filterValues { it != AS_USUAL }.mapValues { (key, id) -> if (id == NOTHING) "-" else named(id, key) }))
-            put("drawings", drawingsJson(input.drawings))
+            put("calls", JSONObject(input.calls.filterValues { it != AS_USUAL }.mapValues { (key, id) -> if (id == NOTHING) "-" else named(id, key, CALLS) }))
+            put("drawings", drawingsJson(input.drawings, null))
             put("calibration", JSONObject().apply {
                 for (hand in listOf("left", "right")) put(hand, input.calibrations[hand]?.toJson() ?: JSONObject.NULL)
             })
@@ -109,20 +129,65 @@ object Mappings {
         }.toString()
     }
 
-    /** What `automation:<rest>` sends (Actions.automation). */
+    /**
+     * What a Send to automation sends (Actions.automation): from [profile] (its name, or [CALLS];
+     * null: unknown), for [device] (an id; null: none).
+     */
     sealed class Automation {
+        abstract val profile: String?
+        abstract val device: String?
+
         /** A gesture; [palm]: the position its override is for. */
-        data class Gesture(val name: String, val palm: String?) : Automation()
-        /** A dial or slider step, gathered per [name]. */
-        data class Step(val name: String, val step: Int) : Automation()
-        data class Drawing(val name: String) : Automation()
+        data class Gesture(val name: String, val palm: String?, override val profile: String? = null, override val device: String? = null) : Automation()
+
+        /** A dial or slider step. */
+        data class Step(val name: String, val step: Int, override val profile: String? = null, override val device: String? = null) : Automation() {
+            /** What its steps are gathered by: the dial or slider, the device and the profile. */
+            val key get() = copy(step = 0)
+        }
+
+        data class Drawing(val name: String, override val profile: String? = null, override val device: String? = null) : Automation()
     }
 
-    fun automation(rest: String): Automation = when {
-        rest.startsWith(DIAL) -> rest.removePrefix(DIAL).let { Automation.Step(it.substringBeforeLast(':'), if (it.endsWith(":down")) -1 else +1) }
-        rest.startsWith(DRAWING) -> Automation.Drawing(rest.removePrefix(DRAWING))
-        ':' in rest -> Automation.Gesture(rest.substringBefore(':'), rest.substringAfter(':'))
-        else -> Automation.Gesture(rest, null)
+    /** What an action name from the bridge sends ([named]), or null when it isn't automation. */
+    fun sent(action: String): Automation? {
+        if (':' !in action) return null
+        val head = action.substringBefore(':')
+        val stored = head.substringBefore('/')
+        if (!isAutomation(stored)) return null
+        val profile = if ('/' in head) head.substringAfter('/').let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) } else null
+        val device = deviceOf(stored)
+        val rest = action.substringAfter(':')
+        return when {
+            rest.startsWith(DIAL) -> rest.removePrefix(DIAL).let {
+                Automation.Step(it.substringBeforeLast(':'), if (it.endsWith(":down")) -1 else +1, profile, device)
+            }
+            rest.startsWith(DRAWING) -> Automation.Drawing(rest.removePrefix(DRAWING), profile, device)
+            ':' in rest -> Automation.Gesture(rest.substringBefore(':'), rest.substringAfter(':'), profile, device)
+            else -> Automation.Gesture(rest, null, profile, device)
+        }
+    }
+
+    /**
+     * The broadcast's extras for [made]: `gesture` (a dial or slider's name, or `drawing`), then
+     * `palm` (an override), `name` (a drawing), `steps` (a dial or slider's, when given), `profile`,
+     * and `device` = [device], the device's current name (left out without one).
+     */
+    fun extras(made: Automation, device: String?, steps: Int? = null): Map<String, Any> = buildMap {
+        when (made) {
+            is Automation.Gesture -> {
+                put("gesture", made.name)
+                made.palm?.let { put("palm", it) }
+            }
+            is Automation.Drawing -> {
+                put("gesture", "drawing")
+                put("name", made.name)
+            }
+            is Automation.Step -> put("gesture", made.name)
+        }
+        steps?.let { put("steps", it) }
+        made.profile?.let { put("profile", it) }
+        device?.let { put("device", it) }
     }
 }
 
