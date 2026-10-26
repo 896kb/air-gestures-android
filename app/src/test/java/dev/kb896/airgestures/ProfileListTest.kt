@@ -136,7 +136,6 @@ class ProfileListTest {
         val old = ProfileList.fromJson("""[{"id":"p1","name":"A","map":{},"dial":"volume"}]""", "{}", "p1").profile("p1")!!
         assertEquals("none", old.middleDial)
         assertEquals(Drags(), old.indexDrags)
-        assertFalse(old.musicBluetoothOnly)
         assertTrue(old.palm.isEmpty() && old.drawings.isEmpty())
     }
 

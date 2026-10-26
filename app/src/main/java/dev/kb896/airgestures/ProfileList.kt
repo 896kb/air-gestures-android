@@ -32,8 +32,6 @@ data class Profile(
     val middleDrags: Drags = Drags(),
     /** Drawing name → this profile's own action (wins over the shared one). */
     val drawings: Map<String, String> = emptyMap(),
-    /** Playback, track, and seek actions require Bluetooth audio output for this profile. */
-    val musicBluetoothOnly: Boolean = false,
 ) {
     fun dialOf(part: Part) = if (part == Part.MIDDLE) middleDial else dial
     fun drags(part: Part) = if (part == Part.MIDDLE) middleDrags else indexDrags
@@ -98,9 +96,6 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
     fun withAction(id: String, gesture: String, action: String) = change(id) { it.copy(map = it.map + (gesture to action)) }
 
     fun withDial(id: String, dial: String) = change(id) { it.copy(dial = dial) }
-
-    fun withMusicBluetoothOnly(id: String, enabled: Boolean) =
-        change(id) { it.copy(musicBluetoothOnly = enabled) }
 
     /** [palm] runs [action] on [gesture] instead of the normal one ("" = nothing); a third is refused. */
     fun withOverride(id: String, gesture: String, palm: Palm, action: String) = change(id) {
@@ -184,7 +179,6 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                 put("middle_dial", profile.middleDial)
                 put("drags", JSONObject().put("index", drags(profile.indexDrags)).put("middle", drags(profile.middleDrags)))
                 put("drawings", JSONObject(profile.drawings))
-                put("musicBluetoothOnly", profile.musicBluetoothOnly)
             })
         }
         return list.toString() to JSONObject(apps).toString()
@@ -245,7 +239,6 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                     indexDrags = drags(drags?.optJSONObject("index")),
                     middleDrags = drags(drags?.optJSONObject("middle")),
                     drawings = strings(item.optJSONObject("drawings")),
-                    musicBluetoothOnly = item.optBoolean("musicBluetoothOnly", false),
                 )
             }
             require(parsed.isNotEmpty()) { "no profiles" }

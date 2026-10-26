@@ -85,17 +85,6 @@ class ProfileActivity : GestureScreen() {
             })
         }
 
-        gestures.addView(settingRow(
-            "Bluetooth music only",
-            "Playback and seek need connected Bluetooth audio; volume is unaffected",
-            pill(if (profile.musicBluetoothOnly) "On" else "Off") {
-                Profiles.update(applicationContext) {
-                    it.withMusicBluetoothOnly(profileId, !profile.musicBluetoothOnly)
-                }
-                render()
-            }.first,
-        ))
-
         drawings.removeAllViews()
         val own = profile.drawings.keys.count { Drawings.load(this).get(it) != null }
         drawings.addView(navRow(R.drawable.ic_pencil, "Drawings", detail = if (own == 0) "The shared ones" else "$own of its own") {
