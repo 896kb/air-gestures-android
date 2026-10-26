@@ -214,6 +214,15 @@ class WriteService : AccessibilityService() {
 
     /** Back to gestures. */
     private fun leave(why: String) {
+        // Word choices shown in the field go back to the word, and the last edits go in (the
+        // bridge's, also when it ended the field itself as the controls went off).
+        field?.let { node ->
+            BandService.instance?.let { service ->
+                service.fieldChooseCancel()
+                val edits = service.fieldEdits()?.optJSONArray("edits")
+                for (i in 0 until (edits?.length() ?: 0)) edits!!.getJSONObject(i).let { apply(node, it.optInt("delete"), it.optString("insert")) }
+            }
+        }
         dropInline()
         expected = null
         main.removeCallbacks(lookAgain)
