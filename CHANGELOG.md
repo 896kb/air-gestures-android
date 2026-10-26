@@ -7,17 +7,17 @@ fails without one.
 ## Unreleased
 
 - **Band vibration** (thanks to Tudor Palasan): the band buzzes for the app. A Band
-  vibration switch in Setup, on by default; cues when the controls go on and off, for the
-  next and previous profile and for handwriting; a tick on every dial and drag step; and
-  optional notification vibration, off by default. With the controls off, the band's own
+  vibration switch in Setup, on by default; cues when the controls go on and off and for
+  handwriting, and for the next and previous profile when Vibrate is on under Profiles; a
+  tick for dial and drag steps; and optional notification vibration, off by default. With the controls off, the band's own
   gesture buzz is silenced too.
 - Notification vibration only buzzes for notifications the phone would alert for: not
   silent or low-importance ones, not during Do Not Disturb, and not when a player or a
   progress bar updates its notification (pausing music with a gesture no longer buzzes).
 - Vibration no longer stops until a reconnect when the band doesn't answer a firmware
   status request: it waits 5 s at most.
-- Firmware updates are no longer slowed by vibration writes: the band's replies are read
-  while a write is still going.
+- The band's replies that need no answer are read while a write to the band is still
+  going, instead of waiting for it (firmware updates write a lot).
 - A band that leaves out the detailed vibration status is noted once in the log per
   connection, not after every buzz.
 
