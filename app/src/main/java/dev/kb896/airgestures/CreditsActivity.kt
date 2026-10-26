@@ -25,7 +25,7 @@ class CreditsActivity : Screen() {
         Person(
             R.drawable.credits_iinsaane, "Band vibration and Bluetooth music controls", "Tudor Palasan (iinsaane)",
             "Band vibration feedback, volume detents, per-profile Bluetooth music controls and reconnect stability.",
-            "iinsaane on GitHub", "https://github.com/iinsaane",
+            "iinsaane.com", "https://iinsaane.com",
         ),
     )
 
