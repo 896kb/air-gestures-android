@@ -436,7 +436,7 @@ abstract class GestureScreen : Screen() {
                 "name: for a drawing, its name",
             ).joinToString("\n") { "· $it" }, Cb.INK_500))
             addView(text(14f, "Any app on the phone can receive this broadcast, so device names are visible to them.", Cb.INK_500))
-            addView(homeDevicesRow())
+            addView(homeDevicesRow().also { guideDevices = it.getChildAt(2) as android.widget.TextView })
             addView(Cb.label(context, "Tasker"))
             addView(text(14f, "New profile, Event, System, Intent Received. Action: paste the line above. In the task, %gesture, %steps, %profile and %device hold the values."))
             addView(Cb.label(context, "MacroDroid"))
@@ -476,6 +476,14 @@ abstract class GestureScreen : Screen() {
 
     /** Home devices' row (the Gestures screen, the automation guide): how many there are. */
     fun homeDevicesRow() = navRow(R.drawable.ic_house, "Home devices", detail = devicesDetail()) { open<HomeDevicesActivity>() }
+
+    /** The automation guide's Home devices count (navRow's detail): its sheet stays open over Home devices. */
+    private var guideDevices: android.widget.TextView? = null
+
+    override fun onResume() {
+        super.onResume()
+        guideDevices?.text = devicesDetail()
+    }
 
     private fun devicesDetail() = when (val n = Profiles.devices(this).devices.size) {
         0 -> "None yet"
