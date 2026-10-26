@@ -25,7 +25,7 @@ fails without one.
   finger's hold acts when you let go.
 - **Palm position:** every gesture can do something else with the palm up or sideways (up
   to two positions); calibrate per band and wrist.
-- **Drawings:** pinch and draw in the air or on a table, matched against the drawings you
+- **Drawings:** pinch and draw in the air, matched against the drawings you
   teach (three tries each); shared or per-profile actions; a pad shows what you draw.
 - **Draw is on the index hold** by default. Coming from 0.7.7, it stays off if the index
   hold already does something (in any profile, or during calls): that hold keeps doing it.

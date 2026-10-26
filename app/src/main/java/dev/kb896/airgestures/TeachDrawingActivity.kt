@@ -202,7 +202,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         when {
             message != null -> body.addView(note(message!!).apply { setTextColor(Cb.INK_900) })
             teach.full && alike -> body.addView(row().apply { addView(Cb.chip(context, Cb.Signal.LIVE, "Alike")) })
-            else -> body.addView(note("Pinch and draw it, ${DrawTeach.TRIES} times: in the air or with the pen grip on a table."))
+            else -> body.addView(note("Pinch and draw it in the air, ${DrawTeach.TRIES} times."))
         }
 
         val list = Profiles.load(this)

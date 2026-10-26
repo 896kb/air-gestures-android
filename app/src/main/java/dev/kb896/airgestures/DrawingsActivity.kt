@@ -51,7 +51,7 @@ class DrawingsActivity : GestureScreen() {
             addView(navRow(Builtin.DRAW.icon, "Draw", detail = draw?.label ?: "Nothing", count = report.count(Builtin.DRAW)) {
                 BandControlActivity.open(this@DrawingsActivity, Builtin.DRAW)
             })
-            if (draw == null) addView(note("Put Draw on a gesture, then pinch and draw in the air or on a table."))
+            if (draw == null) addView(note("Put Draw on a gesture, then pinch and draw in the air."))
         }))
 
         body.addView(card("All profiles", column(gap = 8f).apply {
