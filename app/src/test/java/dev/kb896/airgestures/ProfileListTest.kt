@@ -88,8 +88,7 @@ class ProfileListTest {
     }
 
     @Test fun `it round-trips through JSON`() {
-        val list = three().renamed("p2", "Reading").assigned("app", "p2")
-            .withMusicBluetoothOnly("p2", true).step(+1)
+        val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1)
         val json = list.toJson()
         assertEquals(list, ProfileList.fromJson(json.first, json.second, list.picked))
     }
@@ -99,6 +98,18 @@ class ProfileListTest {
         val picked = list.picking(second.id)
         assertEquals(second.id, picked.picked)
         assertEquals(second, picked.active(null))
+    }
+
+    @Test fun `profiles with the removed Bluetooth music setting keep their mappings`() {
+        val list = ProfileList.fromJson(
+            """[{"id":"p1","name":"Music","map":{"index_tap":"media.play_pause"},"dial":"seek","musicBluetoothOnly":true}]""",
+            """{"player":"p1"}""", "p1",
+        )
+        assertEquals(mapOf("index_tap" to "media.play_pause"), list.active("player").map)
+        assertEquals("seek", list.active("player").dial)
+        val (profiles, apps) = list.toJson()
+        assertFalse(profiles.contains("musicBluetoothOnly"))
+        assertEquals(list, ProfileList.fromJson(profiles, apps, list.picked))
     }
 
     @Test fun pickingAnUnknownProfileChangesNothing() {
