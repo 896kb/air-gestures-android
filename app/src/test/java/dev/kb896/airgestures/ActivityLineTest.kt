@@ -13,6 +13,7 @@ class ActivityLineTest {
         assertEquals("swipe down · palm down (not calibrated) → Next track", line("""{"what":"swipe down","palm":"down","calibrated":false,"run":"media.next"}"""))
         assertEquals("index tap · palm down → would: Play or pause", line("""{"what":"index tap","palm":"down","calibrated":true,"practiced":"media.play_pause"}"""))
         assertEquals("swipe up · sideways → nothing (controls off)", line("""{"what":"swipe up","palm":"sideways","calibrated":true,"off":true}"""))
+        assertEquals("swipe up · palm down → nothing (too soon after the last)", line("""{"what":"swipe up","palm":"down","calibrated":true,"too_soon":true}"""))
     }
 
     @Test fun `a pinch's steps are one line`() {

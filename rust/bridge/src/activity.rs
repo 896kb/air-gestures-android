@@ -1,256 +1,190 @@
-//! The Activity screen's lines: what each gesture did, with the palm it was made with, as
-//! `@activity <json>` (Kotlin words it with the app's labels). One line per gesture (its run,
-//! its band control, paused, nothing, …), per drawing, and per pinch for dial and slider steps
-//! (gathered until they pause for [`STEP_GAP`] or something else happens).
+//! The Activity screen's lines: what each gesture did, with the palm it was resolved in, as
+//! `@activity <json>` (Kotlin words it with the app's labels). One line per gesture, per
+//! drawing, and per stepping pinch, all from band-core's own report: `Output::Gesture`'s palm,
+//! `Output::Unused`'s reason, `Output::PinchEnded`'s steps (each step's own `Run` isn't a line).
 //!
 //! JSON: `{"what", "palm", "calibrated"}` and one of `"run": id`, `"practiced": id`,
 //! `"steps": [[id, n], …]`, `"band": "controls", "result": "on"|"off"`, `"band": "next"|"previous",
 //! "profile": index`, `"band": …, "held": app`, `"band": "draw", "result": "opened"|"cancelled"`,
-//! `"paused": control`, `"off": true` (the controls were off), `"nothing": true`; a drawing is
-//! `{"drawn": name}` with its `run` / `practiced`, or `{"not_drawn": true}`.
-//!
-//! The palm is the one the engine reads when the gesture comes out (`Controls::palm(now)`):
-//! for a hold reported at its release, that's the release's, not the press's (band-core
-//! doesn't report the press palm with the gesture).
+//! `"paused": control`, `"off": true` (the controls were off), `"too_soon": true`,
+//! `"nothing": true`; a drawing is `{"drawn": name}` with its `run` / `practiced`, or
+//! `{"not_drawn": true}`.
 
-use band_core::controls::{Builtin, Gesture, Output, Palm};
+use band_core::controls::{Builtin, Class, Finger, Gesture, Output, Palm, Unused};
 use serde_json::{Map, Value, json};
 
 use crate::report::builtin_key;
 
-/// A pinch's steps that pause this long (seconds) are one line.
-pub const STEP_GAP: f64 = 0.8;
+/// What a pinch stepped, by its finger and class: its name ("index dial", "middle left/right
+/// slider") and the up and down actions.
+pub type Steps<'a> = &'a dyn Fn(Finger, Class) -> Option<(String, String, String)>;
 
-/// What the line needs from the connection at the moment its outputs came.
+/// What the lines need from the connection.
 pub struct Context<'a> {
-    pub palm: Palm,
     /// The palm calibration in use is the user's (else band-core's defaults).
     pub calibrated: bool,
-    /// The controls are on.
-    pub enabled: bool,
-    /// The band control on a gesture in a position.
+    /// The band control on a gesture in a position (to name the one an app's own profile held back).
     pub band: &'a dyn Fn(Gesture, Palm) -> Option<Builtin>,
-    /// Where a step's action comes from: "index dial", "middle left/right slider".
-    pub source: &'a dyn Fn(&str) -> Option<String>,
+    pub steps: Steps<'a>,
 }
 
-/// A pinch's steps so far.
-struct Steps {
-    source: String,
-    palm: Palm,
-    calibrated: bool,
-    counts: Vec<(String, u32)>,
-    last: f64,
-}
-
-impl Steps {
-    fn line(&self) -> String {
-        let steps: Vec<Value> = self.counts.iter().map(|(id, n)| json!([id, n])).collect();
-        json!({"what": self.source, "palm": self.palm.key(), "calibrated": self.calibrated, "steps": steps}).to_string()
-    }
-}
-
-/// A gesture waiting to see what it did (the outputs right after it).
+/// A gesture or a drawing waiting for what it did (the outputs right after it).
 struct Pending {
     line: Map<String, Value>,
-    gesture: Option<Gesture>,
-    palm: Palm,
+    gesture: Option<(Gesture, Palm)>,
 }
 
-#[derive(Default)]
-pub struct Activity {
-    steps: Option<Steps>,
-}
-
-impl Activity {
-    /// The lines for these outputs (in their order). `now`: also ends a pinch's steps that paused.
-    pub fn take(&mut self, outputs: &[Output<String>], ctx: &Context, now: Option<f64>) -> Vec<String> {
-        let mut lines = Vec::new();
-        if let (Some(now), Some(steps)) = (now, &self.steps)
-            && now - steps.last >= STEP_GAP
-        {
-            lines.push(steps.line());
-            self.steps = None;
-        }
-        let mut pending: Option<Pending> = None;
-        let finish = |pending: Option<Pending>, lines: &mut Vec<String>| {
-            if let Some(p) = pending {
-                lines.push(Self::close(p, ctx));
-            }
-        };
-        for output in outputs {
-            match output {
-                Output::Gesture(gesture) => {
-                    finish(pending.take(), &mut lines);
-                    // A gesture ends the pinch's steps before it.
-                    if let Some(steps) = self.steps.take() {
-                        lines.push(steps.line());
-                    }
-                    let mut line = Map::new();
-                    line.insert("what".into(), json!(gesture.label()));
-                    line.insert("palm".into(), json!(ctx.palm.key()));
-                    line.insert("calibrated".into(), json!(ctx.calibrated));
-                    pending = Some(Pending { line, gesture: Some(*gesture), palm: ctx.palm });
-                }
-                Output::Drawn { name, .. } => {
-                    finish(pending.take(), &mut lines);
-                    let mut line = Map::new();
-                    line.insert("drawn".into(), json!(name));
-                    pending = Some(Pending { line, gesture: None, palm: ctx.palm });
-                }
-                Output::NotDrawn => {
-                    finish(pending.take(), &mut lines);
-                    lines.push(json!({"not_drawn": true}).to_string());
-                }
-                Output::Run(id) | Output::Practiced(id) => {
-                    let key = if matches!(output, Output::Run(_)) { "run" } else { "practiced" };
-                    match pending.as_mut().filter(|p| Self::open(p)) {
-                        Some(p) => {
-                            p.line.insert(key.into(), json!(id));
-                            finish(pending.take(), &mut lines);
-                        }
-                        // No gesture before it: a dial's or a slider's step.
-                        None => self.step(id, ctx, now, &mut lines),
-                    }
-                }
-                Output::Controls { enabled } => Self::band(&mut pending, &mut lines, ctx, "controls", "result", json!(if *enabled { "on" } else { "off" })),
-                Output::Profile { index, step } => {
-                    let control = if *step < 0 { "previous" } else { "next" };
-                    Self::band(&mut pending, &mut lines, ctx, control, "profile", json!(index))
-                }
-                Output::ProfileHeld { app } => {
-                    let control = pending
-                        .as_ref()
-                        .and_then(|p| p.gesture.and_then(|g| (ctx.band)(g, p.palm)))
-                        .map_or("next", builtin_key);
-                    Self::band(&mut pending, &mut lines, ctx, control, "held", json!(app))
-                }
-                Output::DrawStarted => Self::band(&mut pending, &mut lines, ctx, "draw", "result", json!("opened")),
-                Output::DrawCancelled => Self::band(&mut pending, &mut lines, ctx, "draw", "result", json!("cancelled")),
-                _ => {}
-            }
-        }
-        finish(pending, &mut lines);
-        lines
-    }
-
+impl Pending {
     /// Nothing written to it yet but what made it.
-    fn open(p: &Pending) -> bool {
-        !p.line.keys().any(|k| k != "what" && k != "palm" && k != "calibrated" && k != "drawn")
+    fn open(&self) -> bool {
+        !self.line.keys().any(|k| !matches!(k.as_str(), "what" | "palm" | "calibrated" | "drawn"))
     }
 
-    /// A band control's effect, on the gesture before it (none: the app's own call, not a line).
-    fn band(pending: &mut Option<Pending>, lines: &mut Vec<String>, ctx: &Context, control: &str, key: &str, value: Value) {
-        let Some(mut p) = pending.take().filter(Self::open) else { return };
-        p.line.insert("band".into(), json!(control));
-        p.line.insert(key.into(), value);
-        lines.push(Self::close(p, ctx));
+    fn put(mut self, key: &str, value: Value) -> String {
+        self.line.insert(key.into(), value);
+        Value::Object(self.line).to_string()
     }
+}
 
-    /// A gesture's line once its outputs are over: what it did, or why nothing.
-    fn close(mut p: Pending, ctx: &Context) -> String {
-        if Self::open(&p) {
-            match p.gesture.and_then(|g| (ctx.band)(g, p.palm)) {
-                // A band control is on it and didn't act (practice, the band not live): its action waits.
-                Some(builtin) => p.line.insert("paused".into(), json!(builtin_key(builtin))),
-                None if !ctx.enabled => p.line.insert("off".into(), json!(true)),
-                None => p.line.insert("nothing".into(), json!(true)),
-            };
+/// What the gesture just reported did (none open: the app's own call, or a pinch's step).
+fn did(pending: &mut Option<Pending>, lines: &mut Vec<String>, key: &str, value: Value, extra: Option<(&str, Value)>) {
+    if let Some(mut p) = pending.take().filter(Pending::open) {
+        if let Some((k, v)) = extra {
+            p.line.insert(k.into(), v);
         }
-        Value::Object(p.line).to_string()
+        lines.push(p.put(key, value));
     }
+}
 
-    /// One step of a dial or slider: counted on this pinch's line.
-    fn step(&mut self, id: &str, ctx: &Context, now: Option<f64>, lines: &mut Vec<String>) {
-        let source = (ctx.source)(id).unwrap_or_else(|| "pinch".into());
-        if self.steps.as_ref().is_some_and(|s| s.source != source)
-            && let Some(old) = self.steps.take()
-        {
-            lines.push(old.line());
+/// The lines for these outputs, in their order.
+pub fn lines(outputs: &[Output<String>], ctx: &Context) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut pending: Option<Pending> = None;
+    // A gesture with nothing after it (teaching drags, a drawing open): nothing.
+    let close = |pending: Option<Pending>, lines: &mut Vec<String>| {
+        if let Some(p) = pending {
+            lines.push(if p.open() { p.put("nothing", json!(true)) } else { Value::Object(p.line).to_string() });
         }
-        let now = now.unwrap_or_else(|| self.steps.as_ref().map_or(0.0, |s| s.last));
-        let steps = self.steps.get_or_insert_with(|| Steps {
-            source,
-            palm: ctx.palm,
-            calibrated: ctx.calibrated,
-            counts: Vec::new(),
-            last: now,
-        });
-        steps.last = now;
-        match steps.counts.iter_mut().find(|(known, _)| known == id) {
-            Some((_, n)) => *n += 1,
-            None => steps.counts.push((id.to_owned(), 1)),
+    };
+    for output in outputs {
+        match output {
+            Output::Gesture { gesture, palm } => {
+                close(pending.take(), &mut lines);
+                let mut line = Map::new();
+                line.insert("what".into(), json!(gesture.label()));
+                line.insert("palm".into(), json!(palm.key()));
+                line.insert("calibrated".into(), json!(ctx.calibrated));
+                pending = Some(Pending { line, gesture: Some((*gesture, *palm)) });
+            }
+            Output::Drawn { name, .. } => {
+                close(pending.take(), &mut lines);
+                let mut line = Map::new();
+                line.insert("drawn".into(), json!(name));
+                pending = Some(Pending { line, gesture: None });
+            }
+            Output::NotDrawn => {
+                close(pending.take(), &mut lines);
+                lines.push(json!({"not_drawn": true}).to_string());
+            }
+            Output::Run(id) => did(&mut pending, &mut lines, "run", json!(id), None),
+            Output::Practiced(id) => did(&mut pending, &mut lines, "practiced", json!(id), None),
+            Output::Unused { why, .. } => match why {
+                Unused::Unbound => did(&mut pending, &mut lines, "nothing", json!(true), None),
+                Unused::ControlsOff => did(&mut pending, &mut lines, "off", json!(true), None),
+                Unused::TooSoon => did(&mut pending, &mut lines, "too_soon", json!(true), None),
+                Unused::Paused(builtin) => did(&mut pending, &mut lines, "paused", json!(builtin_key(*builtin)), None),
+            },
+            Output::Controls { enabled } => did(&mut pending, &mut lines, "band", json!("controls"), Some(("result", json!(if *enabled { "on" } else { "off" })))),
+            Output::Profile { index, step } => {
+                did(&mut pending, &mut lines, "band", json!(if *step < 0 { "previous" } else { "next" }), Some(("profile", json!(index))))
+            }
+            Output::ProfileHeld { app } => {
+                let control = pending
+                    .as_ref()
+                    .and_then(|p| p.gesture.and_then(|(g, palm)| (ctx.band)(g, palm)))
+                    .map_or("next", builtin_key);
+                did(&mut pending, &mut lines, "band", json!(control), Some(("held", json!(app))))
+            }
+            Output::DrawStarted => did(&mut pending, &mut lines, "band", json!("draw"), Some(("result", json!("opened")))),
+            Output::DrawCancelled => did(&mut pending, &mut lines, "band", json!("draw"), Some(("result", json!("cancelled")))),
+            Output::PinchEnded { finger, class, palm, up, down } => {
+                close(pending.take(), &mut lines);
+                if let Some((what, up_id, down_id)) = (ctx.steps)(*finger, *class) {
+                    let steps: Vec<Value> =
+                        [(up_id, *up), (down_id, *down)].into_iter().filter(|(_, n)| *n > 0).map(|(id, n)| json!([id, n])).collect();
+                    lines.push(json!({"what": what, "palm": palm.key(), "calibrated": ctx.calibrated, "steps": steps}).to_string());
+                }
+            }
+            _ => {}
         }
     }
+    close(pending, &mut lines);
+    lines
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use band_core::controls::Drag;
 
-    fn ctx<'a>(band: &'a dyn Fn(Gesture, Palm) -> Option<Builtin>, source: &'a dyn Fn(&str) -> Option<String>) -> Context<'a> {
-        Context { palm: Palm::Up, calibrated: true, enabled: true, band, source }
+    fn ctx<'a>(band: &'a dyn Fn(Gesture, Palm) -> Option<Builtin>, steps: Steps<'a>) -> Context<'a> {
+        Context { calibrated: true, band, steps }
     }
 
     fn parsed(line: &str) -> Value {
         serde_json::from_str(line).unwrap()
     }
 
+    const NO_BAND: &dyn Fn(Gesture, Palm) -> Option<Builtin> = &|_, _| None;
+    const NO_STEPS: Steps = &|_, _| None;
+
     #[test]
-    fn a_gesture_and_what_it_ran_are_one_line() {
-        let band = |_, _| None;
-        let source = |_: &str| None;
-        let mut a = Activity::default();
-        let lines = a.take(&[Output::Gesture(Gesture::IndexTap), Output::Run("media.next".into())], &ctx(&band, &source), Some(1.0));
+    fn a_gesture_its_palm_and_what_it_ran_or_why_not() {
+        let c = ctx(NO_BAND, NO_STEPS);
+        let tap = Output::Gesture { gesture: Gesture::IndexTap, palm: Palm::Up };
+        let lines = lines(&[tap.clone(), Output::Run("media.next".into())], &c);
         assert_eq!(parsed(&lines[0]), json!({"what": "index tap", "palm": "up", "calibrated": true, "run": "media.next"}));
-        let lines = a.take(&[Output::Gesture(Gesture::IndexDragAway)], &ctx(&band, &source), Some(2.0));
-        assert_eq!(parsed(&lines[0])["nothing"], json!(true));
+        let why = |why| parsed(&super::lines(&[tap.clone(), Output::Unused { gesture: Gesture::IndexTap, why }], &c)[0]);
+        assert_eq!(why(Unused::Unbound)["nothing"], json!(true));
+        assert_eq!(why(Unused::ControlsOff)["off"], json!(true));
+        assert_eq!(why(Unused::TooSoon)["too_soon"], json!(true));
+        assert_eq!(why(Unused::Paused(Builtin::Draw))["paused"], json!("draw"));
     }
 
     #[test]
-    fn band_controls_say_what_they_did_or_that_they_held_the_action() {
-        let band = |g, _| (g == Gesture::MiddleHold).then_some(Builtin::Controls).or((g == Gesture::MiddleDouble).then_some(Builtin::Draw));
-        let source = |_: &str| None;
-        let mut a = Activity::default();
-        let lines = a.take(&[Output::Gesture(Gesture::MiddleHold), Output::Controls { enabled: false }], &ctx(&band, &source), Some(1.0));
-        assert_eq!(parsed(&lines[0])["band"], json!("controls"));
-        assert_eq!(parsed(&lines[0])["result"], json!("off"));
-        let lines = a.take(&[Output::Gesture(Gesture::MiddleDouble)], &ctx(&band, &source), Some(2.0));
-        assert_eq!(parsed(&lines[0])["paused"], json!("draw"));
-        let lines = a.take(&[Output::Gesture(Gesture::IndexTriple), Output::Profile { index: 1, step: 1 }], &ctx(&band, &source), Some(3.0));
-        assert_eq!((parsed(&lines[0])["band"].clone(), parsed(&lines[0])["profile"].clone()), (json!("next"), json!(1)));
+    fn band_controls_say_what_they_did() {
+        let c = ctx(NO_BAND, NO_STEPS);
+        let hold = Output::Gesture { gesture: Gesture::MiddleHold, palm: Palm::Down };
+        let line = parsed(&lines(&[hold, Output::Controls { enabled: false }], &c)[0]);
+        assert_eq!((line["band"].clone(), line["result"].clone()), (json!("controls"), json!("off")));
         // The app's own pause: no gesture, no line.
-        assert!(a.take(&[Output::Controls { enabled: false }], &ctx(&band, &source), Some(4.0)).is_empty());
+        assert!(lines(&[Output::Controls { enabled: false }], &c).is_empty());
     }
 
     #[test]
-    fn a_pinchs_steps_are_one_line_once_they_pause() {
-        let band = |_, _| None;
-        let source = |id: &str| id.starts_with("volume").then(|| "index dial".to_owned());
-        let c = ctx(&band, &source);
-        let mut a = Activity::default();
-        for i in 0..6 {
-            assert!(a.take(&[Output::Run("volume.down".into())], &c, Some(1.0 + 0.1 * f64::from(i))).is_empty());
-        }
-        a.take(&[Output::Run("volume.up".into())], &c, Some(1.7));
-        let lines = a.take(&[], &c, Some(1.7 + STEP_GAP));
-        assert_eq!(parsed(&lines[0]), json!({"what": "index dial", "palm": "up", "calibrated": true, "steps": [["volume.down", 6], ["volume.up", 1]]}));
-        // A gesture ends them at once, before its own line.
-        a.take(&[Output::Run("volume.up".into())], &c, Some(5.0));
-        let lines = a.take(&[Output::Gesture(Gesture::SwipeUp), Output::Run("media.previous".into())], &c, Some(5.1));
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("steps") && lines[1].contains("swipe up"));
+    fn a_stepping_pinch_is_one_line_its_steps_are_none() {
+        let steps: Steps = &|finger, class| match (finger, class) {
+            (Finger::Index, Class::Turn) => Some(("index dial".into(), "volume.up".into(), "volume.down".into())),
+            (Finger::Middle, Class::Drag(d)) if d.pair() == 0 => {
+                Some(("middle left/right slider".into(), "brightness.up".into(), "brightness.down".into()))
+            }
+            _ => None,
+        };
+        let c = ctx(NO_BAND, steps);
+        let mut out: Vec<Output<String>> = (0..6).map(|_| Output::Run("volume.down".into())).collect();
+        out.push(Output::PinchEnded { finger: Finger::Index, class: Class::Turn, palm: Palm::Down, up: 0, down: 6 });
+        let lines = lines(&out, &c);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(parsed(&lines[0]), json!({"what": "index dial", "palm": "down", "calibrated": true, "steps": [["volume.down", 6]]}));
+        let slider = Output::PinchEnded { finger: Finger::Middle, class: Class::Drag(Drag::Right), palm: Palm::Up, up: 2, down: 1 };
+        assert_eq!(parsed(&super::lines(&[slider], &c)[0])["steps"], json!([["brightness.up", 2], ["brightness.down", 1]]));
     }
 
     #[test]
-    fn drawings_and_the_controls_off() {
-        let band = |_, _| None;
-        let source = |_: &str| None;
-        let mut a = Activity::default();
-        let lines = a.take(&[Output::DrawFinished { strokes: vec![] }, Output::Drawn { name: "Lightbulb".into(), distance: 0.5 }, Output::Run("torch.toggle".into())], &ctx(&band, &source), Some(1.0));
+    fn drawings() {
+        let c = ctx(NO_BAND, NO_STEPS);
+        let lines = lines(&[Output::DrawFinished { strokes: vec![] }, Output::Drawn { name: "Lightbulb".into(), distance: 0.5 }, Output::Run("torch.toggle".into())], &c);
         assert_eq!(parsed(&lines[0]), json!({"drawn": "Lightbulb", "run": "torch.toggle"}));
-        assert_eq!(parsed(&a.take(&[Output::NotDrawn], &ctx(&band, &source), Some(2.0))[0]), json!({"not_drawn": true}));
-        let off = Context { enabled: false, ..ctx(&band, &source) };
-        assert_eq!(parsed(&a.take(&[Output::Gesture(Gesture::SwipeDown)], &off, Some(3.0))[0])["off"], json!(true));
+        assert_eq!(parsed(&super::lines(&[Output::NotDrawn], &c)[0]), json!({"not_drawn": true}));
     }
 }

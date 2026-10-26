@@ -34,6 +34,8 @@ object ActivityLine {
             o.has("band") -> band(o, profile)
             o.has("paused") -> "paused (${Builtin.of(o.getString("paused"))?.label ?: o.getString("paused")})"
             o.optBoolean("off") -> "nothing (controls off)"
+            // Just after connecting, or another action a moment ago (band-core's action gate).
+            o.optBoolean("too_soon") -> "nothing (too soon after the last)"
             else -> "nothing"
         }
         return "$head → $did"

@@ -1,10 +1,11 @@
 use airgestures_bridge::line;
-use band_core::controls::{Finger, Gesture, Output};
+use band_core::controls::{Finger, Gesture, Output, Palm};
 
 #[test]
 fn the_controls_outputs_become_at_lines() {
     let l = |output: Output<String>| line(&output, -142.3);
-    assert_eq!(l(Output::Gesture(Gesture::IndexHold)).as_deref(), Some("@gesture index hold"));
+    // The palm isn't on this line (practice and handwriting match the label): it's in `@activity`.
+    assert_eq!(l(Output::Gesture { gesture: Gesture::IndexHold, palm: Palm::Up }).as_deref(), Some("@gesture index hold"));
     assert_eq!(l(Output::Controls { enabled: false }).as_deref(), Some("@controls off"));
     assert_eq!(l(Output::Profile { index: 1, step: -1 }).as_deref(), Some("@profile 1 -1"));
     assert_eq!(l(Output::ProfileHeld { app: "vlc".into() }).as_deref(), Some("@held vlc"));
@@ -25,4 +26,5 @@ fn the_controls_outputs_become_at_lines() {
         Some("@drag-sample middle 0.0000 0.6000 0.8000 -142.30")
     );
     assert_eq!(l(Output::Run("media.next".into())), None, "actions go as they are");
+    assert_eq!(l(Output::PinchEnded { finger: Finger::Index, class: band_core::controls::Class::Turn, palm: Palm::Down, up: 1, down: 0 }), None);
 }

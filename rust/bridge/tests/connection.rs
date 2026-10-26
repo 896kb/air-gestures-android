@@ -116,9 +116,20 @@ fn the_activity_screen_hears_each_gesture_with_its_palm_and_what_it_did() {
     gesture(&mut connection, &mut band, 0, MIDDLE, 3, 4.0);
     let held = &activities(&mut connection)[0];
     assert_eq!((held["what"].clone(), held["band"].clone(), held["result"].clone()), (serde_json::json!("middle hold"), serde_json::json!("controls"), serde_json::json!("off")));
-    // Off: a gesture says so.
+    // Off: a gesture says so (band-core's Unused::ControlsOff).
     gesture(&mut connection, &mut band, 7, THUMB, 0, 5.0);
     assert_eq!(activities(&mut connection)[0]["off"], serde_json::json!(true));
+    // On again; a swipe left is bound to nothing (Unused::Unbound).
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 7.0);
+    activities(&mut connection);
+    gesture(&mut connection, &mut band, 8, THUMB, 0, 9.0);
+    let left = &activities(&mut connection)[0];
+    assert_eq!((left["what"].clone(), left["nothing"].clone()), (serde_json::json!("swipe left"), serde_json::json!(true)));
+    // The palm band-core resolved with: turned palm up (−142.3° on its right-hand calibration).
+    roll_to(&mut connection, &mut band, -142.3, 11.0);
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 11.1);
+    let down = &activities(&mut connection)[0];
+    assert_eq!((down["palm"].clone(), down["run"].clone()), (serde_json::json!("up"), serde_json::json!("media.next")));
 }
 
 #[test]

@@ -8,7 +8,7 @@
 //! connection (`report`, `teach`). Also the Meta sign-in and the ownership claim
 //! (`metaauth`, `meta`, `claim`), ported from the Linux app.
 
-use band_core::controls::{Controls, DragMode, Finger, Output, Palm};
+use band_core::controls::{Class, Controls, DragMode, Finger, Output};
 use band_core::events::{Event, Hand};
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
@@ -52,8 +52,6 @@ pub struct Connection {
     field: Option<fieldtext::FieldTyping>,
     /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
     roll: palmlive::LiveRoll,
-    /// The Activity screen's lines (`@activity`): a pinch's steps gathered.
-    activity: activity::Activity,
 }
 
 #[derive(Serialize)]
@@ -110,7 +108,6 @@ impl Connection {
             probing: false,
             field: None,
             roll: palmlive::LiveRoll::default(),
-            activity: activity::Activity::default(),
         })
     }
 
@@ -547,7 +544,7 @@ impl Connection {
     fn take(&mut self, outputs: Vec<Output<String>>, now: Option<f64>) -> Result<Vec<u8>, String> {
         let mut outgoing = Vec::new();
         // The Activity screen's lines first: what each gesture did (and the palm it was made with).
-        for line in self.activity_lines(&outputs, now) {
+        for line in self.activity_lines(&outputs) {
             self.actions.push(format!("@activity {line}"));
         }
         for output in outputs {
@@ -570,49 +567,41 @@ impl Connection {
         Ok(outgoing)
     }
 
-    /// The `@activity` lines for these outputs (see `activity`). The palm is the engine's now
-    /// (`Controls::palm`); without a clock, palm down.
-    fn activity_lines(&mut self, outputs: &[Output<String>], now: Option<f64>) -> Vec<String> {
+    /// The `@activity` lines for these outputs (see `activity`): band-core reports each
+    /// gesture's palm and outcome; a stepping pinch's dial or slider comes from the active profile.
+    fn activity_lines(&self, outputs: &[Output<String>]) -> Vec<String> {
         let controls = &self.controls;
         let band = |gesture, palm| controls.profiles().band.on(gesture, palm);
-        // A step's source: the active profile's dial or slider with that action.
-        let source = |id: &str| {
+        let steps = |finger: Finger, class: Class| {
             let profile = controls.profiles().list.get(controls.active())?;
-            let dial = |d: &band_core::controls::Dial<String>| d.up == id || d.down == id;
-            for finger in [Finger::Index, Finger::Middle] {
-                let setup = profile.finger(finger);
-                let name = finger_key(finger);
-                let own = if finger == Finger::Index { controls.dial().or(setup.dial.as_ref()) } else { setup.dial.as_ref() };
-                if own.is_some_and(dial) {
-                    return Some(format!("{name} dial"));
+            let setup = profile.finger(finger);
+            let name = finger_key(finger);
+            let (what, dial) = match class {
+                // The index dial an app set (`Controls::dial`) wins over the profile's.
+                Class::Turn => (format!("{name} dial"), if finger == Finger::Index { controls.dial().or(setup.dial.as_ref()) } else { setup.dial.as_ref() }),
+                Class::Drag(drag) => {
+                    let pair = drag.pair();
+                    let slider = match &setup.drags {
+                        DragMode::Sliders(sliders) => sliders.get(pair).and_then(Option::as_ref),
+                        DragMode::Gestures => None,
+                    };
+                    (format!("{name} {} slider", ["left/right", "toward/away", "up/down"][pair.min(2)]), slider)
                 }
-                if let DragMode::Sliders(sliders) = &setup.drags {
-                    for (pair, slider) in sliders.iter().enumerate() {
-                        if slider.as_ref().is_some_and(dial) {
-                            let pair = ["left/right", "toward/away", "up/down"][pair];
-                            return Some(format!("{name} {pair} slider"));
-                        }
-                    }
-                }
-            }
-            None
+                Class::Unknown => return None,
+            };
+            dial.map(|d| (what, d.up.clone(), d.down.clone()))
         };
-        let ctx = activity::Context {
-            palm: now.map_or(Palm::Down, |now| controls.palm(now)),
-            calibrated: controls.options().palm.is_some(),
-            enabled: controls.enabled(),
-            band: &band,
-            source: &source,
-        };
-        self.activity.take(outputs, &ctx, now)
+        let ctx = activity::Context { calibrated: controls.options().palm.is_some(), band: &band, steps: &steps };
+        activity::lines(outputs, &ctx)
     }
 }
 
 /// The `@` line the app follows for an output (`None`: `Run` and `SetHand`, which go as they
-/// are). `roll`: the prototypes' palm-down roll, which a drag sample was read in.
+/// are, and `Unused` / `PinchEnded`, which are in the `@activity` lines). `roll`: the
+/// prototypes' palm-down roll, which a drag sample was read in.
 pub fn line(output: &Output<String>, roll: f64) -> Option<String> {
     Some(match output {
-        Output::Gesture(gesture) => format!("@gesture {}", gesture.label()),
+        Output::Gesture { gesture, .. } => format!("@gesture {}", gesture.label()),
         Output::Controls { enabled } => format!("@controls {}", if *enabled { "on" } else { "off" }),
         Output::Profile { index, step } => format!("@profile {index} {step}"),
         Output::ProfileHeld { app } => format!("@held {app}"),
@@ -629,7 +618,8 @@ pub fn line(output: &Output<String>, roll: f64) -> Option<String> {
         Output::DragSample { finger, direction: [x, y, z] } => {
             format!("@drag-sample {} {x:.4} {y:.4} {z:.4} {roll:.2}", finger_key(*finger))
         }
-        Output::Run(_) | Output::SetHand(_) => return None,
+        // What a gesture did and a pinch's steps: in the `@activity` lines (see `activity`).
+        Output::Run(_) | Output::SetHand(_) | Output::Unused { .. } | Output::PinchEnded { .. } => return None,
     })
 }
 
