@@ -81,14 +81,16 @@ class WriteService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
-                // The keyboard, system pop-ups and our own popup come up over the field: they don't end it.
-                if (field != null && from != app && from != packageName && from != "com.android.systemui" &&
-                    !from.contains("inputmethod") && !from.contains("keyboard")) {
-                    leave("$from came up")
+                if (field != null && FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) {
+                    leave(if (from == packageName) "a screen of this app came up" else "$from came up")
                 }
             }
         }
     }
+
+    /** Whether [name] is one of our screens (a lesson, say), not a pop-up or pad of ours over the field. */
+    private fun activity(name: CharSequence?) =
+        name != null && runCatching { android.app.Activity::class.java.isAssignableFrom(Class.forName(name.toString())) }.getOrDefault(false)
 
     /** The controls as last seen: off, then on again, writes into the field in focus. */
     private var controlsOff = false
@@ -206,6 +208,9 @@ class WriteService : AccessibilityService() {
         inline = ""
         popup.hide()
     }
+
+    /** A lesson or a teach screen takes the band's gestures: back to them (main thread). */
+    fun lessonStarted() = leave("a lesson started")
 
     /** Back to gestures. */
     private fun leave(why: String) {
@@ -546,5 +551,17 @@ object FieldWriting {
         state.otaBusy -> "the band is updating"
         state.paused -> "the controls are off"
         else -> null
+    }
+
+    /**
+     * Whether a window of [from] coming up ends writing into a field of [app]: another app's, or
+     * a screen of ours ([own]: our package; [ownScreen]: an activity, a lesson say, whose gestures
+     * aren't the field's); not the keyboard, system pop-ups, or our pop-up and pads over the field.
+     */
+    fun leaves(from: String, app: String?, own: String, ownScreen: Boolean): Boolean = when (from) {
+        app -> false
+        own -> ownScreen
+        "com.android.systemui" -> false
+        else -> "inputmethod" !in from && "keyboard" !in from
     }
 }

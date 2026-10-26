@@ -386,6 +386,8 @@ class BandService : Service(), BandLink.Listener {
      * the built-ins don't act), whether the controls are on or off.
      */
     fun startPractice(lesson: Practice) {
+        // A field being written into would take the lesson's gestures (writing wins over practice).
+        WriteService.instance?.lessonStarted()
         practice = lesson
         link.setPractice(true)
     }
