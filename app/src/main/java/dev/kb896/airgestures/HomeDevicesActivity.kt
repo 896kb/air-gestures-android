@@ -78,7 +78,8 @@ class HomeDevicesActivity : GestureScreen() {
         }
         confirm("Delete ${device.name}?", body, "Delete") {
             Profiles.deleteDevice(applicationContext, device.id)
-            if (n > 0) BandService.instance?.remap()
+            // Also when n is 0: a slider target kept in gestures mode may have changed.
+            BandService.instance?.remap()
             render()
         }
     }

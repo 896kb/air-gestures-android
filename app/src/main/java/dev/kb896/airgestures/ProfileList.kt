@@ -133,11 +133,13 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
 
     /**
      * Every stored action id and dial choice: gestures, overrides, both dials, the sliders'
-     * targets (kept in gestures mode too) and the drawings' own actions.
+     * targets (kept in gestures mode too; [shown]: only a finger's in sliders mode, as the
+     * screens show them) and the drawings' own actions.
      */
-    fun ids() = profiles.flatMap { p ->
+    fun ids(shown: Boolean = false) = profiles.flatMap { p ->
+        fun targets(drags: Drags) = if (shown && !drags.sliders) emptyList() else drags.targets
         p.map.values + p.palm.values.flatMap { it.values } + listOf(p.dial, p.middleDial) +
-            p.indexDrags.targets + p.middleDrags.targets + p.drawings.values
+            targets(p.indexDrags) + targets(p.middleDrags) + p.drawings.values
     }
 
     /** Wherever Send to automation is for [device] (an action or a dial), it sends without a device. */

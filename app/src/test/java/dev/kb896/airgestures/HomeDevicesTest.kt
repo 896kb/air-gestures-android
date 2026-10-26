@@ -56,7 +56,9 @@ class HomeDevicesTest {
                 palm = mapOf("index_tap" to mapOf("up" to "automation@d1", "down" to "automation@d2")),
                 middleDrags = Drags(sliders = true, targets = listOf("automation@d1", "none", "automation@d2")),
                 drawings = mapOf("Bulb" to "automation@d1")),
-            Profile("p2", "Reading", mapOf("swipe_up" to "automation@d2"), "none", middleDial = "automation@d1"),
+            Profile("p2", "Reading", mapOf("swipe_up" to "automation@d2"), "none", middleDial = "automation@d1",
+                // Kept while the index finger's drags are gestures: not shown, so not a use.
+                indexDrags = Drags(sliders = false, targets = listOf("automation@d1", "none", "automation@d7"))),
         ),
         picked = "p1",
         apps = emptyMap(),
@@ -69,13 +71,14 @@ class HomeDevicesTest {
         assertEquals(8, HomeDevices.uses("d1", list, calls, shared))
         assertEquals(3, HomeDevices.uses("d2", list, calls, shared))
         assertEquals(0, HomeDevices.uses("d9", list, calls, shared))
+        assertEquals(0, HomeDevices.uses("d7", list, calls, shared))
     }
 
     @Test fun `a new device's id is above every id still in the mappings`() {
-        // d5 is only During calls', d6 only a shared drawing's: a new device never inherits them.
+        // d7 is only a kept slider target, d5 only During calls', d6 only a shared drawing's: a new device never inherits them.
         val used = HomeDevices.referenced(list, calls + ("swipe_up" to "automation@d5"), shared + ("Star" to "automation@d6"))
-        assertEquals(setOf("d1", "d2", "d5", "d6"), used)
-        assertEquals("d7", HomeDevices().added("Fan", used)!!.second.id)
+        assertEquals(setOf("d1", "d2", "d5", "d6", "d7"), used)
+        assertEquals("d8", HomeDevices().added("Fan", used)!!.second.id)
         assertEquals("d3", two.added("Fan", setOf("d1", "x"))!!.second.id)
     }
 
@@ -87,6 +90,8 @@ class HomeDevicesTest {
         assertEquals("automation", music.dial)
         assertEquals(mapOf("up" to "automation", "down" to "automation@d2"), music.palm["index_tap"])
         assertEquals(listOf("automation", "none", "automation@d2"), music.middleDrags.targets)
+        // Unseen ones too.
+        assertEquals(listOf("automation", "none", "automation@d7"), cleared.profile("p2")!!.indexDrags.targets)
         assertEquals("automation", music.drawings["Bulb"])
         assertEquals("automation", cleared.profile("p2")!!.middleDial)
         assertEquals("automation@d2", cleared.profile("p2")!!.map["swipe_up"])

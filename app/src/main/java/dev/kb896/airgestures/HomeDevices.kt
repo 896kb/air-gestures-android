@@ -58,9 +58,13 @@ data class HomeDevices(val devices: List<HomeDevice> = emptyList()) {
             HomeDevices(read.distinctBy { it.id })
         }.getOrDefault(HomeDevices())
 
-        /** How many stored actions and dial choices are for [device]: in the profiles, During calls ([calls]) and the [shared] drawings. */
+        /**
+         * How many actions and dial choices the user can see are for [device]: in the profiles,
+         * During calls ([calls]) and the [shared] drawings; not a slider's target kept while its
+         * finger's drags are gestures (deleting the device clears those too).
+         */
         fun uses(device: String, list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
-            (list.ids() + calls.values + shared.values).count { Mappings.deviceOf(it) == device }
+            (list.ids(shown = true) + calls.values + shared.values).count { Mappings.deviceOf(it) == device }
 
         /** Every device id the profiles, During calls ([calls]) and the [shared] drawings send for, shown or not. */
         fun referenced(list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
