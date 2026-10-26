@@ -69,10 +69,10 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
     /** Whether any profile does something on [gesture] (see [Profile.does]). */
     fun uses(gesture: Gesture) = profiles.any { it.does(gesture) }
 
-    /** A new profile at the end, with the lowest free number for its id and name. */
+    /** A new profile at the end, with the lowest free number for its id and name; its middle dial is [NEW_MIDDLE_DIAL]. */
     fun added(map: Map<String, String>, dial: String): Pair<ProfileList, Profile> {
         val n = generateSequence(1) { it + 1 }.first { n -> profiles.none { it.id == "p$n" || it.name == "Profile $n" } }
-        val made = Profile("p$n", "Profile $n", map, dial)
+        val made = Profile("p$n", "Profile $n", map, dial, middleDial = NEW_MIDDLE_DIAL)
         return copy(profiles = profiles + made) to made
     }
 
@@ -162,6 +162,12 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
     companion object {
         const val MAX_OVERRIDES = 2
 
+        /**
+         * A new profile's middle dial (a fresh install's Profile 1 too). One stored without it
+         * (0.7.7 had none) reads as nothing, so an upgrade changes no profile.
+         */
+        val NEW_MIDDLE_DIAL = DialChoice.BRIGHTNESS.key
+
         /** The first controls dev build's built-in actions (band controls now). */
         val BUILTIN_IDS = setOf("controls.toggle", "profile.next", "profile.previous")
 
@@ -183,6 +189,10 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
         /** Before profiles: the one mapping there was becomes Profile 1. */
         fun migrated(map: Map<String, String>, dial: String) =
             ProfileList(listOf(Profile("p1", "Profile 1", map, dial)), "p1", emptyMap())
+
+        /** A fresh install: Profile 1 with [map] and [dial], and a new profile's middle dial. */
+        fun fresh(map: Map<String, String>, dial: String) =
+            ProfileList(listOf(Profile("p1", "Profile 1", map, dial, middleDial = NEW_MIDDLE_DIAL)), "p1", emptyMap())
 
         /** Throws on anything it can't read, including a list with no profiles. */
         fun fromJson(profiles: String, apps: String, picked: String): ProfileList {

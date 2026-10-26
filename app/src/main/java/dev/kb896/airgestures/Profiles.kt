@@ -62,9 +62,13 @@ object Profiles {
             android.util.Log.w("AirGestures", "profiles unreadable; kept as $BROKEN, starting from the old mapping")
             prefs.edit().putString(BROKEN, profiles).apply()
         }
-        // Before profiles (or unreadable): the stored mapping becomes Profile 1.
+        // Before profiles (or unreadable): the stored mapping becomes Profile 1. No profiles and
+        // no old mapping is a fresh install, which starts as a new profile does.
         val map = Gesture.entries.associate { it.key to (prefs.getString("map.${it.key}", null) ?: it.default.id) }
-        return migrated(context, ProfileList.migrated(map, DialChoice.of(prefs.getString("dial.choice", null)).key).also { write(context, it) })
+        val dial = DialChoice.of(prefs.getString("dial.choice", null)).key
+        val fresh = profiles == null && prefs.all.keys.none { it.startsWith("map.") || it == "dial.choice" }
+        val list = if (fresh) ProfileList.fresh(map, dial) else ProfileList.migrated(map, dial)
+        return migrated(context, list.also { write(context, it) })
     }
 
     /**

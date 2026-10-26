@@ -22,6 +22,13 @@ class ProfileListTest {
         assertEquals("seek", list.active(null).dial)
     }
 
+    @Test fun `a new profile's and a fresh install's middle dial is brightness, the old mapping's nothing`() {
+        assertEquals("brightness", ProfileList.migrated(map, "volume").added(map, "volume").second.middleDial)
+        assertEquals("brightness", ProfileList.fresh(map, "volume").active(null).middleDial)
+        assertEquals("volume", ProfileList.fresh(map, "volume").active(null).dial)
+        assertEquals("none", ProfileList.migrated(map, "volume").active(null).middleDial)
+    }
+
     @Test fun `new profiles get the next free number`() {
         val list = three()
         assertEquals(listOf("p1", "p2", "p3"), list.profiles.map { it.id })
