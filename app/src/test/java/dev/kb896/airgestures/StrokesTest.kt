@@ -60,4 +60,14 @@ class StrokesTest {
         assertEquals("q1" to "Music", Sequences.started("seq:q1/Music"))
         assertEquals("q12" to "Café: night/2", Sequences.started("seq:q12/Caf%C3%A9%3A+night%2F2"))
     }
+
+    @Test fun `a sequence's automation steps send its name, the other steps run as they are`() {
+        val steps = listOf("torch.toggle", "automation@d1", "wait:1000", "automation")
+        assertEquals(
+            listOf(null, Mappings.Automation.Sequence("Goodnight", "Music", "d1"), null, Mappings.Automation.Sequence("Goodnight", "Music", null)),
+            steps.map { Sequences.stepAutomation("Goodnight", "Music", it) },
+        )
+        // Try it: no profile.
+        assertEquals(Mappings.Automation.Sequence("Goodnight", null, "d1"), Sequences.stepAutomation("Goodnight", null, "automation@d1"))
+    }
 }

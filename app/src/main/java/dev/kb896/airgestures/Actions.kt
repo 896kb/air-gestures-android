@@ -98,7 +98,7 @@ class Actions(
                     action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
                     action.startsWith(Tap.PREFIX) -> tap(action)
                     action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
-                    action.startsWith(Sequences.PREFIX) -> sequence(action.removePrefix(Sequences.PREFIX))
+                    action.startsWith(Sequences.PREFIX) -> Sequences.started(action).let { (id, profile) -> sequence(id, profile) }
                     sent != null -> automation(sent)
                     else -> "unknown action $action"
                 }
@@ -202,9 +202,10 @@ class Actions(
 
     /**
      * Run a sequence's steps in order: actions, and waits between them. Steps without a wait
-     * get a short pause, so the screen can catch up (an app opening, a list scrolling).
+     * get a short pause, so the screen can catch up (an app opening, a list scrolling). A Send
+     * to automation step sends the sequence's name, from [profile] (null: Try it, no gesture).
      */
-    private fun sequence(id: String): String? {
+    private fun sequence(id: String, profile: String?): String? {
         val sequence = Profiles.sequences(context).get(id) ?: return "that sequence is gone"
         if (running != null) return "$runningName is still running"
         running = id
@@ -216,7 +217,8 @@ class Actions(
             }
             val step = sequence.steps[at]
             val wait = Sequences.waitMs(step)
-            if (wait == null) run(step)?.let { log("${sequence.name}, step ${at + 1}: $it") }
+            val sent = Sequences.stepAutomation(sequence.name, profile, step)
+            if (sent != null) send(sent) else if (wait == null) run(step)?.let { log("${sequence.name}, step ${at + 1}: $it") }
             main.postDelayed({ step(at + 1) }, wait ?: (STEP_PAUSE_MS + busyMs(step)))
         }
         step(0)

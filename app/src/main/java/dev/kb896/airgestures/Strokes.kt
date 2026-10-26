@@ -98,6 +98,13 @@ object Sequences {
         return rest.substringBefore('/') to runCatching { URLDecoder.decode(profile, "UTF-8") }.getOrDefault(profile)
     }
 
+    /**
+     * What a Send to automation step of sequence [sequenceName] sends (`gesture=sequence`, its
+     * name, [profile] and the step's device); null for any other step, which runs as it is.
+     */
+    fun stepAutomation(sequenceName: String, profile: String?, step: String) =
+        if (Mappings.isAutomation(step)) Mappings.Automation.Sequence(sequenceName, profile, Mappings.deviceOf(step)) else null
+
     data class Sequence(val id: String, val name: String, val steps: List<String>)
 
     /**
