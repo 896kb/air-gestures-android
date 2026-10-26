@@ -197,6 +197,7 @@ class DrawingsActivity : GestureScreen() {
             }
             // Refused after all: the copies stay; the next good load prunes nothing that exists.
             Drawings.update(context) { it.renamed(old, new) } ?: return false
+            Drawings.renamed(context, old, new)
             Profiles.updateDrawingActions(context) { l, shared -> l.renamedDrawing(old, null) to (shared - old) }
             return true
         }

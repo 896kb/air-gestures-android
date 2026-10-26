@@ -577,8 +577,8 @@ impl Connection {
             let setup = profile.finger(finger);
             let name = finger_key(finger);
             let (what, dial) = match class {
-                // The index dial an app set (`Controls::dial`) wins over the profile's.
-                Class::Turn => (format!("{name} dial"), if finger == Finger::Index { controls.dial().or(setup.dial.as_ref()) } else { setup.dial.as_ref() }),
+                // The index dial as the engine steps it (`Controls::dial`: an app's, else the profile's).
+                Class::Turn => (format!("{name} dial"), if finger == Finger::Index { controls.dial() } else { setup.dial.as_ref() }),
                 Class::Drag(drag) => {
                     let pair = drag.pair();
                     let slider = match &setup.drags {

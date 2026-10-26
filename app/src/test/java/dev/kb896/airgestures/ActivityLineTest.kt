@@ -33,6 +33,7 @@ class ActivityLineTest {
         assertEquals("swipe down · palm down → Draw (pad open)", line("""{"what":"swipe down","palm":"down","calibrated":true,"band":"draw","result":"opened"}"""))
         assertEquals("Lightbulb (drawn) → Flashlight on or off", line("""{"drawn":"Lightbulb","run":"torch.toggle"}"""))
         assertEquals("drawing → not one of your drawings", line("""{"not_drawn":true}"""))
+        assertEquals("Lightbulb (drawn) → nothing (too soon after the last)", line("""{"drawn":"Lightbulb","too_soon":true}"""))
         assertEquals("index tap · palm up → Send to automation", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"automation:index_tap:up"}"""))
         assertNull(line("not json"))
     }

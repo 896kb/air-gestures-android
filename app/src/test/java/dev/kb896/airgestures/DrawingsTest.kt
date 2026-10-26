@@ -74,4 +74,13 @@ class DrawingsTest {
         assertEquals(emptySet<String>(), DrawingLibrary.toReteach(storedFrame = DrawingLibrary.FRAME, names = listOf("Bulb")))
         assertEquals(emptySet<String>(), DrawingLibrary.toReteach(storedFrame = 1, names = emptyList()))
     }
+
+    @Test fun `a restored library is re-taught by its frame, and a rename keeps its place in the note`() {
+        val names = listOf("Bulb", "Z")
+        assertEquals(setOf("Bulb", "Z"), DrawingLibrary.restoredReteach(frame = null, names = names, listed = emptySet()))
+        assertEquals(setOf("Bulb", "Z"), DrawingLibrary.restoredReteach(frame = 1, names = names, listed = emptySet()))
+        assertEquals(setOf("Z"), DrawingLibrary.restoredReteach(frame = DrawingLibrary.FRAME, names = names, listed = setOf("Z", "Gone")))
+        assertEquals(setOf("Zed", "Bulb"), DrawingLibrary.renamedIn(setOf("Z", "Bulb"), "Z", "Zed"))
+        assertEquals(setOf("Bulb"), DrawingLibrary.renamedIn(setOf("Bulb"), "Q", "Quill"))
+    }
 }

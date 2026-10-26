@@ -37,6 +37,16 @@ data class DrawingLibrary(val drawings: List<Drawing> = emptyList()) {
          */
         const val FRAME = 2
 
+        /**
+         * A restored library's drawings to teach again: all of them when its backup has no frame
+         * (made before the frame was stored) or an older one, else the ones its backup listed.
+         */
+        fun restoredReteach(frame: Int?, names: List<String>, listed: Set<String>): Set<String> =
+            if (frame == null || frame < FRAME) names.toSet() else listed intersect names.toSet()
+
+        /** The re-teach list after [old] became [new]: it keeps its place under the new name. */
+        fun renamedIn(names: Set<String>, old: String, new: String) = if (old in names) names - old + new else names
+
         /** The drawings to teach again: all of them when they were taught in an older frame. */
         fun toReteach(storedFrame: Int, names: List<String>): Set<String> = if (storedFrame < FRAME) names.toSet() else emptySet()
 
@@ -210,7 +220,21 @@ object Drawings {
     /** Null (nothing written) while drawings.json can't be read. */
     fun update(context: Context, change: (DrawingLibrary) -> DrawingLibrary): DrawingLibrary? = store(context).update(change)
 
-    fun replace(context: Context, library: DrawingLibrary) = store(context).replace(library)
+    /**
+     * All of them replaced on purpose (a backup's), with what's left to teach again ([reteach]:
+     * see [DrawingLibrary.restoredReteach]); the frame is the current one from then on, so a
+     * later first read doesn't flag them again.
+     */
+    fun replace(context: Context, library: DrawingLibrary, reteach: Set<String>) {
+        store(context).replace(library)
+        prefs(context).edit().putInt(FRAME_KEY, DrawingLibrary.FRAME).putStringSet(RETEACH_KEY, reteach).apply()
+    }
+
+    /** [old] was renamed [new]: if it's on the re-teach note, it stays there under its new name. */
+    fun renamed(context: Context, old: String, new: String) {
+        val names = prefs(context).getStringSet(RETEACH_KEY, emptySet()).orEmpty()
+        prefs(context).edit().putStringSet(RETEACH_KEY, DrawingLibrary.renamedIn(names, old, new)).apply()
+    }
 
     /** The action [name] runs in [profile]: its own, else the shared one ("" = none). */
     fun action(context: Context, profile: Profile, name: String) = DrawingLibrary.action(profile.drawings, Profiles.sharedDrawings(context), name)

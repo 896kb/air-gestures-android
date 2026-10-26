@@ -199,6 +199,8 @@ class SetupActivity : Screen() {
             Profiles.band(this),
             Profiles.sharedDrawings(this),
             Drawings.load(this),
+            drawingsFrame = DrawingLibrary.FRAME,
+            drawingsReteach = Drawings.toReteach(this),
         )
     }
 
@@ -207,7 +209,10 @@ class SetupActivity : Screen() {
         val prefs = Prefs(this)
         // The drawings first (their file is the source of truth), then the profiles and the shared
         // drawings' actions in one edit, so the two never disagree.
-        settings.drawings?.let { restored -> Drawings.replace(applicationContext, restored) }
+        // Drawings taught in the old frame (or from a backup that didn't say) go on the re-teach note.
+        settings.drawings?.let { restored ->
+            Drawings.replace(applicationContext, restored, DrawingLibrary.restoredReteach(settings.drawingsFrame, restored.names, settings.drawingsReteach))
+        }
         Profiles.updateDrawingActions(applicationContext) { _, shared -> settings.profiles to (settings.sharedDrawings ?: shared) }
         // Every gesture: the backup's call action, else its default (not what was set before).
         for ((key, id) in Backup.restoredCalls(settings.calls)) Gesture.of(key)?.let { prefs.setCallAction(it, id) }

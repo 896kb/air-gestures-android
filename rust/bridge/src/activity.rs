@@ -60,10 +60,15 @@ fn did(pending: &mut Option<Pending>, lines: &mut Vec<String>, key: &str, value:
 pub fn lines(outputs: &[Output<String>], ctx: &Context) -> Vec<String> {
     let mut lines = Vec::new();
     let mut pending: Option<Pending> = None;
-    // A gesture with nothing after it (teaching drags, a drawing open): nothing.
+    // A gesture with nothing after it (teaching drags, a drawing open): nothing. A drawing with
+    // nothing after it: its action (a match always has one) was refused by the action gate.
     let close = |pending: Option<Pending>, lines: &mut Vec<String>| {
         if let Some(p) = pending {
-            lines.push(if p.open() { p.put("nothing", json!(true)) } else { Value::Object(p.line).to_string() });
+            lines.push(match (p.open(), p.gesture.is_none()) {
+                (true, true) => p.put("too_soon", json!(true)),
+                (true, false) => p.put("nothing", json!(true)),
+                _ => Value::Object(p.line).to_string(),
+            });
         }
     };
     for output in outputs {
@@ -186,5 +191,8 @@ mod tests {
         let lines = lines(&[Output::DrawFinished { strokes: vec![] }, Output::Drawn { name: "Lightbulb".into(), distance: 0.5 }, Output::Run("torch.toggle".into())], &c);
         assert_eq!(parsed(&lines[0]), json!({"drawn": "Lightbulb", "run": "torch.toggle"}));
         assert_eq!(parsed(&super::lines(&[Output::NotDrawn], &c)[0]), json!({"not_drawn": true}));
+        // Matched, but its action came too soon after the last (the gate): no Run after it.
+        let gated = super::lines(&[Output::Drawn { name: "Lightbulb".into(), distance: 0.5 }], &c);
+        assert_eq!(parsed(&gated[0]), json!({"drawn": "Lightbulb", "too_soon": true}));
     }
 }

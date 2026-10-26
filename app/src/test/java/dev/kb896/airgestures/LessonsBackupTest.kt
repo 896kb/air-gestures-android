@@ -121,4 +121,13 @@ class LessonsBackupTest {
         assertFalse(Lessons.middleDialLesson(index = setOf("volume.up", "volume.down"), middle = setOf("volume.up", "volume.down")))
         assertFalse(Lessons.middleDialLesson(index = emptySet(), middle = emptySet()))
     }
+
+    @Test fun `a backup carries the drawings' frame and what's left to re-teach`() {
+        val read = Backup.read(Backup.write(settings.copy(drawingsReteach = setOf("Bulb"))))!!
+        assertEquals(DrawingLibrary.FRAME, read.drawingsFrame)
+        assertEquals(setOf("Bulb"), read.drawingsReteach)
+        // A version 2 backup made before the frame was stored: its drawings are the old frame's.
+        val old = Backup.write(settings).replace(Regex(",\\s*\"drawings_frame\":\\s*\\d+"), "")
+        assertNull(Backup.read(old)!!.drawingsFrame)
+    }
 }

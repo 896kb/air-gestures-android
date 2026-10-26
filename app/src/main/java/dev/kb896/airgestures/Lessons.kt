@@ -133,6 +133,10 @@ object Backup {
         val sharedDrawings: Map<String, String>? = emptyMap(),
         /** Null in a version 1 backup: restoring it leaves the drawings as they are. */
         val drawings: DrawingLibrary? = null,
+        /** The frame [drawings] were taught in (null: a backup from before it was stored, the old frame). */
+        val drawingsFrame: Int? = DrawingLibrary.FRAME,
+        /** Of [drawings], the ones still to teach again (see Drawings.toReteach). */
+        val drawingsReteach: Set<String> = emptySet(),
     )
 
     /** Every gesture's call action after a restore: the backup's, else its default (a 0.7.7 backup lacks the newer gestures). */
@@ -152,7 +156,11 @@ object Backup {
             settings.sequences?.let { put("sequences", JSONObject(it.toJson())) }
             put("band", settings.band.toJson())
             settings.sharedDrawings?.let { put("shared_drawings", JSONObject(it)) }
-            settings.drawings?.let { put("drawings", JSONArray(it.toJson())) }
+            settings.drawings?.let {
+                put("drawings", JSONArray(it.toJson()))
+                settings.drawingsFrame?.let { frame -> put("drawings_frame", frame) }
+                put("drawings_reteach", JSONArray(settings.drawingsReteach.sorted()))
+            }
         }.toString(2)
     }
 
@@ -176,6 +184,9 @@ object Backup {
             sharedDrawings = if (version == 1) null else
                 shared?.keys()?.asSequence()?.mapNotNull { key -> (shared.opt(key) as? String)?.let { key to it } }?.toMap().orEmpty(),
             drawings = json.optJSONArray("drawings")?.let { DrawingLibrary.fromJson(it.toString()) },
+            drawingsFrame = if (json.has("drawings_frame")) json.getInt("drawings_frame") else null,
+            drawingsReteach = json.optJSONArray("drawings_reteach")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } }.toSet() }
+                .orEmpty(),
         )
     }.getOrNull()
 }
