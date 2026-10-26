@@ -41,8 +41,8 @@ fails without one.
   dials, sliders and drawings alike. Its broadcast then carries `device` with the device's
   name. Renaming a device renames it everywhere (update your rules too); deleting one
   leaves its gestures sending without a device. The settings backup includes them.
-- The settings backup is version 2 (band controls and drawings); version 1 backups still
-  restore.
+- The settings backup is version 3 (band controls, drawings and Home devices); version 1
+  and 2 backups still restore.
 
 ## 0.7.7
 

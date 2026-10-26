@@ -113,12 +113,13 @@ object Lessons {
 
 /**
  * The settings backup file: everything but the owner key (that has its own export) and the
- * calibrations (they belong to a band). Version 2 adds the band controls and the drawings, and
- * later the Home devices (optional: a backup without them still reads); version 1 still
- * restores, with today's band controls (as an upgrade gets them) and without the built-in actions.
+ * calibrations (they belong to a band). Version 2 adds the band controls and the drawings,
+ * version 3 the Home devices (an app without them refuses it: their gestures would read as
+ * Nothing there); versions 1 and 2 still restore, version 1 with today's band controls (as an
+ * upgrade gets them) and without the built-in actions.
  */
 object Backup {
-    const val VERSION = 2
+    const val VERSION = 3
 
     data class Settings(
         val profiles: ProfileList,
@@ -168,11 +169,11 @@ object Backup {
         }.toString(2)
     }
 
-    /** The settings in [text], or null for anything that isn't a whole backup of version 1 or 2. */
+    /** The settings in [text], or null for anything that isn't a whole backup of version 1 to 3. */
     fun read(text: String): Settings? = runCatching {
         val json = JSONObject(text)
         val version = json.getInt("version")
-        require(version == 1 || version == VERSION) { "another version" }
+        require(version in 1..VERSION) { "another version" }
         val stored = json.getJSONObject("calls")
         val calls = stored.keys().asSequence().associateWith { stored.getString(it) }
         val profiles = ProfileList.fromJson(json.getJSONArray("profiles").toString(), json.getJSONObject("apps").toString(), json.getString("picked"))

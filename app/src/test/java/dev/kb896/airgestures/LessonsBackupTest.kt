@@ -80,7 +80,7 @@ class LessonsBackupTest {
     @Test fun `a broken, empty or newer backup is refused`() {
         assertNull(Backup.read("not json"))
         assertNull(Backup.read("""{"version":1,"profiles":[],"picked":"p1","apps":{},"calls":{},"hand":"band"}"""))
-        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*2"), "\"version\": 3")))
+        assertNull(Backup.read(Backup.write(settings).replace(Regex("\"version\":\\s*3"), "\"version\": 4")))
     }
 
     @Test fun `a version 1 backup restores with today's band controls and no built-in actions`() {
@@ -147,5 +147,12 @@ class LessonsBackupTest {
         assertEquals("automation@d3", read.profiles.profile("p1")!!.map["middle_tap"])
         val old = org.json.JSONObject(Backup.write(settings)).apply { remove("devices") }.toString()
         assertNull(Backup.read(old)!!.devices)
+    }
+
+    @Test fun `a backup with home devices is version 3, so an app without them refuses it, and version 2 still reads`() {
+        // Their automation@<id> would read as Volume and Nothing there.
+        assertEquals(3, org.json.JSONObject(Backup.write(settings)).getInt("version"))
+        val v2 = org.json.JSONObject(Backup.write(settings)).apply { put("version", 2); remove("devices") }.toString()
+        assertEquals(settings.copy(devices = null), Backup.read(v2))
     }
 }
