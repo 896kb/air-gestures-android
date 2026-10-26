@@ -172,9 +172,15 @@ class BandLink(
         debugSend { Bridge.otaStart(it, mode, dir, now()) }
     }
 
-    /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
+    /**
+     * The band's handwriting into a text field, on or off (see Bridge.setFieldTyping): one after
+     * another on [fieldSends], so an on and the off after it land in that order.
+     */
     fun setFieldTyping(on: Boolean, before: String = "", popup: Boolean = true) =
-        debugSend { Bridge.setFieldTyping(it, on, before, popup, now()) }
+        fieldSends.execute { send("handwriting") { Bridge.setFieldTyping(it, on, before, popup, now()) } }
+
+    /** Field typing's own thread (see [setFieldTyping]). */
+    private val fieldSends = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "band-field") }
 
     /** The field's edits since the last call and the pen; null when not connected. */
     fun fieldEdits(): org.json.JSONObject? = synchronized(lock) {
@@ -207,14 +213,17 @@ class BandLink(
     }
 
     /** Send what [request] returns for the open session, off the main thread; problems go to the log. */
-    private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") {
+    private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") { send("debug", request) }
+
+    /** Ask the bridge for bytes and write them to the band, here; failures go to the log after [what]. */
+    private fun send(what: String, request: (Long) -> ByteArray) {
         try {
             val out = synchronized(lock) { if (handle == 0L) null else request(handle) }
             val stream = socket?.outputStream
-            if (out == null || stream == null) log("debug: not connected") else synchronized(stream) { stream.write(out) }
+            if (out == null || stream == null) log("$what: not connected") else synchronized(stream) { stream.write(out) }
             drain()
         } catch (e: Exception) {
-            log("debug: ${e.message}")
+            log("$what: ${e.message}")
         }
     }
 
