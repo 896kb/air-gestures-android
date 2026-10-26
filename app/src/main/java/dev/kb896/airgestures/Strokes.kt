@@ -2,6 +2,7 @@ package dev.kb896.airgestures
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLDecoder
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -86,6 +87,24 @@ object Sequences {
 
     fun waitMs(step: String) = step.removePrefix(WAIT).toLongOrNull()?.takeIf { step.startsWith(WAIT) && it > 0 }
 
+    /**
+     * A sequence action as the bridge reports it: its id, and the profile whose gesture started
+     * it (`seq:<id>/<URL-encoded profile>`, see [Mappings.profilesJson]); null for a plain `seq:<id>`.
+     */
+    fun started(action: String): Pair<String, String?> {
+        val rest = action.removePrefix(PREFIX)
+        if ('/' !in rest) return rest to null
+        val profile = rest.substringAfter('/')
+        return rest.substringBefore('/') to runCatching { URLDecoder.decode(profile, "UTF-8") }.getOrDefault(profile)
+    }
+
+    /**
+     * What a Send to automation step of sequence [sequenceName] sends (`gesture=sequence`, its
+     * name, [profile] and the step's device); null for any other step, which runs as it is.
+     */
+    fun stepAutomation(sequenceName: String, profile: String?, step: String) =
+        if (Mappings.isAutomation(step)) Mappings.Automation.Sequence(sequenceName, profile, Mappings.deviceOf(step)) else null
+
     data class Sequence(val id: String, val name: String, val steps: List<String>)
 
     /**
@@ -118,6 +137,14 @@ object Sequences {
         }
 
         fun deleted(id: String) = copy(sequences = sequences.filter { it.id != id })
+
+        /** Every sequence's steps, in order. */
+        fun steps() = sequences.flatMap { it.steps }
+
+        /** Every step that sent for [device] sending without one ([Mappings.withoutDevice]). */
+        fun withoutDevice(device: String) = copy(sequences = sequences.map { sequence ->
+            sequence.copy(steps = sequence.steps.map { Mappings.withoutDevice(it, device) })
+        })
 
         private fun change(id: String, how: (Sequence) -> Sequence) = copy(sequences = sequences.map { if (it.id == id) how(it) else it })
 

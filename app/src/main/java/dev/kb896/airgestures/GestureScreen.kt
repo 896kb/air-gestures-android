@@ -1,6 +1,45 @@
 package dev.kb896.airgestures
 
+import android.content.Context
 import android.content.Intent
+
+/** Actions in words, for screens and services alike (the draw pad names what a drawing ran). */
+object Labels {
+    /** An action id in words: Open <app>, Drawn swipe, Sequence: <name>, Wait 2 s, Send to automation · Yeelight… */
+    fun action(context: Context, id: String): String = when {
+        Sequences.waitMs(id) != null -> "Wait ${seconds(Sequences.waitMs(id)!!)}"
+        id.startsWith(Strokes.PATH) -> "Drawn swipe"
+        id.startsWith(Sequences.PREFIX) -> sequence(Profiles.sequences(context), id)
+        else -> when (val action = Action.of(id)) {
+            Action.OPEN_APP -> "Open ${appName(context, id.removePrefix(APP_PREFIX))}"
+            Action.AUTOMATION -> automation(Profiles.devices(context), id)
+            else -> action.label
+        }
+    }
+
+    /** A sequence action (stored, or as the bridge reports it with its profile) in words: Sequence: <name>. */
+    fun sequence(library: Sequences.Library, id: String) =
+        library.get(Sequences.started(id).first)?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
+
+    /** A stored Send to automation in words: Send to automation · Curtains (a deleted device: none). */
+    fun automation(devices: HomeDevices, id: String) = Action.AUTOMATION.label + device(devices, id)
+
+    /** A dial's or slider's choice in words: Volume, Send to automation · Yeelight… */
+    fun dial(context: Context, key: String?) = DialChoice.of(key).label + device(Profiles.devices(context), key)
+
+    /** " · Yeelight" for a Send to automation for a device (one since deleted: nothing). */
+    private fun device(devices: HomeDevices, id: String?) =
+        Mappings.deviceOf(id)?.let { devices.get(it)?.name }?.let { " · $it" }.orEmpty()
+
+    /** An app's name, or its package if it's gone. */
+    fun appName(context: Context, pkg: String) = runCatching {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault(pkg)
+
+    /** 0.5 s, 2 s, 1.2 s. */
+    fun seconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
+}
 
 /**
  * What the gesture screens share: the rows and the pickers for an action, an app, a tap
@@ -18,24 +57,55 @@ abstract class GestureScreen : Screen() {
         else -> stepLabel(id)
     }
 
-    /** An action id in words: Open <app>, Drawn swipe, Sequence: <name>, Wait 2 s… */
-    fun stepLabel(id: String): String = when {
-        Sequences.waitMs(id) != null -> "Wait ${formatSeconds(Sequences.waitMs(id)!!)}"
-        id.startsWith(Strokes.PATH) -> "Drawn swipe"
-        id.startsWith(Sequences.PREFIX) ->
-            Profiles.sequences(this).get(id.removePrefix(Sequences.PREFIX))?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
-        else -> when (val action = Action.of(id)) {
-            Action.OPEN_APP -> "Open ${appName(id.removePrefix(APP_PREFIX))}"
-            else -> action.label
-        }
-    }
+    /** An action id in words (see [Labels.action]). */
+    fun stepLabel(id: String): String = Labels.action(this, id)
 
-    fun gestureRow(iconRes: Int, gesture: String, action: String, unset: Boolean, info: (() -> Unit)? = null, onClick: (() -> Unit)?) =
+    /**
+     * A gesture's row: its icon and name, then on the right its [action] (a coral Paused chip
+     * before it when a band control holds it back), each tag under it (a palm override, "palm up ·
+     * Next track"; `true`: that one is paused), a [hint] ("when you let go"), the (i), the coral
+     * [count] of paused actions behind it (a row opening another screen) and the chevron.
+     */
+    fun gestureRow(
+        iconRes: Int,
+        gesture: String,
+        action: String,
+        unset: Boolean,
+        paused: Boolean = false,
+        tags: List<Pair<String, Boolean>> = emptyList(),
+        hint: String? = null,
+        info: (() -> Unit)? = null,
+        count: Int = 0,
+        onClick: () -> Unit,
+    ) =
         row(gap = 12f).apply {
             setPadding(0, dpi(8f), 0, dpi(8f))
             addView(icon(iconRes, 16f, if (unset) Cb.INK_300 else Cb.INK_900))
-            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = gesture }, weighted())
-            addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action })
+            // The gesture's name keeps its line; the right side takes the rest and wraps there.
+            addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply {
+                text = gesture
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                maxWidth = resources.displayMetrics.widthPixels * 3 / 5
+            })
+            addView(column(gap = 3f).apply {
+                gravity = android.view.Gravity.END
+                // Above the action, not beside it: beside, a long action squeezes the gesture's name onto two lines.
+                // Each at its own width, at the end (a vertical layout's default is the whole width).
+                val end = { android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { gravity = android.view.Gravity.END } }
+                if (paused) addView(compactChip(pausedChip()), end())
+                addView(Cb.text(context, 13f, color = if (unset) Cb.INK_400 else Cb.INK_500).apply { text = action; gravity = android.view.Gravity.END }, end())
+                for ((tag, tagPaused) in tags) {
+                    addView(row(gap = 6f).apply {
+                        gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                        if (tagPaused) addView(compactChip(pausedChip()))
+                        addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = tag; gravity = android.view.Gravity.END }, weighted())
+                    }, end())
+                }
+                if (hint != null) addView(Cb.text(context, 12f, color = Cb.INK_400).apply { text = hint; gravity = android.view.Gravity.END }, end())
+            }, weighted())
             // (i): how this action is used (Send to automation's guide).
             if (info != null) {
                 addView(android.widget.FrameLayout(context).apply {
@@ -47,40 +117,102 @@ abstract class GestureScreen : Screen() {
                     setOnClickListener { info() }
                 })
             }
-            addView(icon(if (onClick != null) R.drawable.ic_chevron_right else R.drawable.ic_lock, 14f, Cb.INK_400))
-            if (onClick != null) {
-                isClickable = true
-                background = ripple()
-                setOnClickListener { onClick() }
-            }
+            if (count > 0) addView(Cb.count(context, count))
+            addView(icon(R.drawable.ic_chevron_right, 14f, Cb.INK_400))
+            isClickable = true
+            background = ripple()
+            setOnClickListener { onClick() }
         }
 
-    /** The rows of [profile]'s gestures, its dial and the fixed middle hold. */
-    fun profileRows(profile: String) = column(gap = 4f).apply {
-        val prefs = Prefs(context)
-        for (gesture in Gesture.entries) {
-            val id = prefs.actionId(gesture, profile)
-            val action = Action.of(id)
-            val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
-            addView(gestureRow(action.icon, gesture.label, label(id, calls = false), action == Action.NONE, guide) {
-                pick(gesture, profile)
-            })
-        }
-        val dial = prefs.dial(profile)
-        val dialGuide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
-        addView(gestureRow(dial.icon, "Pinch and turn", dial.label, dial == DialChoice.NONE, dialGuide) { pickDial(profile) })
-        addView(gestureRow(R.drawable.ic_power, "Middle hold", "Controls on or off", false, onClick = null))
+    /** A status chip sized for a row's right side (9 sp, tighter padding). */
+    fun compactChip(chip: android.widget.TextView) = chip.apply {
+        textSize = 9f
+        letterSpacing = .06f
+        setPadding(dpi(7f), dpi(3f), dpi(7f), dpi(3f))
     }
 
-    /** The During calls rows: every gesture, As usual unless set. */
-    fun callRows() = column(gap = 4f).apply {
-        val prefs = Prefs(context)
-        for (gesture in Gesture.entries) {
-            val id = prefs.callActionId(gesture)
-            val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
-            val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
-            addView(gestureRow(icon, gesture.label, label(id, calls = true), usual) { pick(gesture, null) })
+    /**
+     * A profile's gestures in groups (mockup 9): Thumb (the swipes), Index and Middle (tap, double
+     * and triple tap, hold); the drags are on their own screen. Paused chips and palm tags from [report].
+     */
+    fun profileRows(profileId: String, report: Report) = column(gap = 14f).apply {
+        val list = Profiles.load(context)
+        val index = list.profiles.indexOfFirst { it.id == profileId }
+        val profile = list.profiles.getOrNull(index) ?: return@apply
+        for (part in Part.entries) {
+            addView(Cb.label(context, part.label))
+            addView(column(gap = 4f).apply {
+                for (gesture in Gesture.entries.filter { it.part == part && !it.drag }) addView(profileRow(profile, index, gesture, report))
+            })
         }
+    }
+
+    /**
+     * One gesture of [profile] (the [index]-th): its normal action (Paused when a band control
+     * holds it), each palm override as a tag, and for a hold "when you let go" where it waits.
+     */
+    fun profileRow(profile: Profile, index: Int, gesture: Gesture, report: Report): android.view.View {
+        val id = profile.map[gesture.key] ?: gesture.default.id
+        val action = Action.of(id)
+        val tags = Palm.entries.mapNotNull { palm ->
+            profile.palm[gesture.key]?.get(palm.key)?.let { "${palm.label} · ${label(it, calls = false)}" to (report.paused(index, gesture, palm) != null) }
+        }
+        val hold = gesture == Gesture.INDEX_HOLD || gesture == Gesture.MIDDLE_HOLD
+        val letGo = if (hold) letGo(report.holdWaits(index, gesture.part)) else null
+        val paused = report.paused(index, gesture, null)
+        val hint = listOfNotNull(pausedWhere(paused), letGo).joinToString(" · ").ifEmpty { null }
+        val guide = if (action == Action.AUTOMATION) ({ automationGuide() }) else null
+        return gestureRow(action.icon, gesture.short, label(id, calls = false), action == Action.NONE,
+            paused = paused != null, tags = tags, hint = hint, info = guide) {
+            GestureActivity.open(this, profile.id, gesture)
+        }
+    }
+
+    /**
+     * Under a Paused chip, when it's paused only in some positions (a band control limited to the
+     * palm up): "palm up only", "palm down, sideways only". Null when it's paused in all three.
+     */
+    fun pausedWhere(paused: Report.Paused?) = pausedWhere(paused?.positions)
+
+    fun pausedWhere(positions: Set<Palm>?): String? = positions?.takeIf { it.size < Palm.entries.size }?.let { it.words(", ") + " only" }
+
+    /**
+     * A hold that waits for the release in [waits] (band-core's hold_waits): "when you let go",
+     * naming the positions when not all three; null when it never waits.
+     */
+    fun letGo(waits: Set<Palm>): String? = when {
+        waits.isEmpty() -> null
+        waits.size == Palm.entries.size -> "when you let go"
+        else -> "when you let go · " + waits.words()
+    }
+
+    /**
+     * The During calls rows, grouped as a profile's: every gesture but the drags (as usual in a
+     * call), As usual unless set; one a band control holds back is Paused ([report]).
+     */
+    fun callRows(report: Report) = column(gap = 14f).apply {
+        val prefs = Prefs(context)
+        for (part in Part.entries) {
+            addView(Cb.label(context, part.label))
+            addView(column(gap = 4f).apply {
+                for (gesture in Gesture.entries.filter { it.part == part && !it.drag }) {
+                    val id = prefs.callActionId(gesture)
+                    val usual = id == Mappings.AS_USUAL || id == Mappings.NOTHING
+                    val icon = if (usual) R.drawable.ic_minus else Action.of(id).icon
+                    val paused = report.paused(null, gesture, null)
+                    addView(gestureRow(icon, gesture.short, label(id, calls = true), usual, paused = paused != null, hint = pausedWhere(paused)) {
+                        pick(gesture, null)
+                    })
+                }
+            })
+        }
+    }
+
+    /** "Middle hold is Controls on/off; …": the gestures that are band controls now. */
+    fun bandNote(band: BandControls): String? {
+        val on = Builtin.entries.mapNotNull { b -> band[b]?.let { "${it.label} is ${b.label}" } }
+        if (on.isEmpty()) return null
+        return on.joinToString("; ", postfix = ".") + " Band controls work in every profile; what you set on those gestures here waits until they move."
     }
 
     /**
@@ -99,13 +231,13 @@ abstract class GestureScreen : Screen() {
 
     /**
      * The action picker: [calls] adds As usual, Nothing and the call actions; [inSequence] leaves
-     * out what a sequence can't hold (another sequence, automation, nothing). Actions that need
-     * more (an app, a spot, a swipe, a sequence) ask for it before [onChosen] gets the id.
+     * out what a sequence can't hold ([Action.inSequence]). Actions that need more (an app, a
+     * spot, a swipe, a sequence, automation's device) ask for it before [onChosen] gets the id.
      */
     fun pickAction(title: String, current: String, calls: Boolean = false, inSequence: Boolean = false, onChosen: (String) -> Unit) {
         val actions = Action.entries.filter { action ->
             when {
-                inSequence -> action != Action.NONE && !action.callOnly && action != Action.SEQUENCE && action != Action.AUTOMATION
+                inSequence -> action.inSequence
                 calls -> action != Action.NONE
                 else -> !action.callOnly
             }
@@ -139,12 +271,49 @@ abstract class GestureScreen : Screen() {
                     pickScreen(mode, current) { onChosen(it.first()) }
                 }
                 Action.SEQUENCE -> pickSequence(current, onChosen)
-                Action.AUTOMATION -> {
-                    onChosen(action.id)
-                    automationGuide(firstTime = true)
+                Action.AUTOMATION -> pickDevice(current) { device ->
+                    onChosen(Mappings.automationId(device))
+                    // The guide is about gestures' names; a step's row says what it sends.
+                    if (!inSequence) automationGuide(firstTime = true)
                 }
                 else -> onChosen(action.id)
             }
+        }
+    }
+
+    /**
+     * Right after Send to automation: which Home device it's for. No device, each device, or a
+     * new one (named here, then picked); [current]'s is ticked (a stored action id or dial choice).
+     * [onPicked] gets the device's id, null for none.
+     */
+    fun pickDevice(current: String, onPicked: (String?) -> Unit) {
+        val devices = Profiles.devices(this).devices
+        val options = listOf(Option("No device", current == Mappings.AUTOMATION, R.drawable.ic_minus)) +
+            devices.map { Option(it.name, it.id == Mappings.deviceOf(current), R.drawable.ic_house) } +
+            Option("+ New device…", false, R.drawable.ic_house)
+        val note = "Its name goes along as device, for your Tasker, MacroDroid or Home Assistant rules."
+        choose("For which device?", options, heading = "Send to automation", note = note) { index ->
+            when {
+                index == 0 -> onPicked(null)
+                index <= devices.size -> onPicked(devices[index - 1].id)
+                else -> newDevice(onPicked)
+            }
+        }
+    }
+
+    /**
+     * Name a new Home device; [onAdded] gets its id (or the id of the one already called that).
+     * A blank name asks again, so a pick waiting for the device isn't lost (Cancel there drops it).
+     */
+    fun newDevice(onAdded: (String) -> Unit): Unit = ask("New device", "", "Add") { typed ->
+        val device = Profiles.addDevice(applicationContext, typed)
+        if (device == null) {
+            sheet("A device needs a name", note("Type a name, like Desk lamp."), "OK", cancel = false) {
+                newDevice(onAdded)
+                true
+            }
+        } else {
+            onAdded(device.id)
         }
     }
 
@@ -210,25 +379,40 @@ abstract class GestureScreen : Screen() {
     }
 
     /** An app's name, or its package if it's gone. */
-    fun appName(pkg: String) = runCatching {
-        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-    }.getOrDefault(pkg)
+    fun appName(pkg: String) = Labels.appName(this, pkg)
 
-    private fun pickDial(profile: String) {
-        val current = Prefs(this).dial(profile)
-        choose("Pinch and turn", DialChoice.entries.map { Option(it.label, it == current, it.icon) }) { index ->
-            BandService.setDial(applicationContext, profile, DialChoice.entries[index])
-            render()
-            if (DialChoice.entries[index] == DialChoice.AUTOMATION) automationGuide(firstTime = true)
+    /** The dial choices as the pickers list them: Nothing first (mockup 11). */
+    val dialChoices get() = listOf(DialChoice.NONE) + DialChoice.entries.filter { it != DialChoice.NONE }
+
+    /** What [part]'s pinch and turn does in [profile] (mockup 11: the middle dial says what it does to the hold). */
+    fun pickDial(profile: String, part: Part) {
+        val key = Profiles.load(this).profile(profile)?.dialOf(part).orEmpty()
+        val current = DialChoice.of(key)
+        val note = if (part == Part.MIDDLE) {
+            if (current != DialChoice.NONE) "Middle hold now acts when you let go." else "With a dial, the middle hold acts when you let go."
+        } else null
+        val title = if (part == Part.MIDDLE) "Middle dial" else "Index dial"
+        val choices = dialChoices
+        choose(title, choices.map { Option(it.label, it == current, it.icon) }, note = note) { index ->
+            val choice = choices[index]
+            fun set(chosen: String) {
+                if (part == Part.MIDDLE) BandService.setMiddleDial(applicationContext, profile, chosen) else BandService.setDial(applicationContext, profile, chosen)
+                render()
+            }
+            if (choice != DialChoice.AUTOMATION) return@choose set(choice.key)
+            pickDevice(key) { device ->
+                set(Mappings.automationId(device))
+                automationGuide(firstTime = true)
+            }
         }
     }
 
     /** 0.5 s, 2 s, 1.2 s. */
-    fun formatSeconds(ms: Long) = if (ms % 1000 == 0L) "${ms / 1000} s" else String.format(java.util.Locale.ROOT, "%.1f s", ms / 1000.0)
+    fun formatSeconds(ms: Long) = Labels.seconds(ms)
 
     /**
      * How Send to automation reaches Tasker, MacroDroid or Home Assistant: the broadcast (to
-     * copy), what it carries, a recipe for each, a test, and the full guide. Shown once when
+     * copy), what it carries, the Home devices, a recipe for each, a test, and the full guide. Shown once when
      * the action is first picked ([firstTime]), and from any row's (i).
      */
     fun automationGuide(firstTime: Boolean = false) {
@@ -255,17 +439,34 @@ abstract class GestureScreen : Screen() {
                     android.widget.Toast.makeText(this@GestureScreen, "Copied", android.widget.Toast.LENGTH_SHORT).show()
                 }.first)
             })
-            addView(text(14f, "With gesture = which one (swipe_left, middle_tap, … or dial for pinch and turn), and for the dial steps = how far it turned (+3, −2).", Cb.INK_500))
+            addView(text(14f, "With these extras:", Cb.INK_500))
+            addView(text(14f, listOf(
+                "gesture: which one (swipe_left, middle_tap, …), dial for pinch and turn, middle_dial, a slider index_left_right and so on, drawing, or sequence",
+                "steps: for a dial or slider, how far it turned (+3, −2)",
+                "palm: for an override, the position (down, sideways, up)",
+                "profile: the profile it's in (During calls in a call)",
+                "device: the Home device it's for, if you picked one",
+                "name: for a drawing or a sequence, its name",
+            ).joinToString("\n") { "· $it" }, Cb.INK_500))
+            addView(text(14f, "Any app on the phone can receive this broadcast, so device names are visible to them.", Cb.INK_500))
+            addView(homeDevicesRow().also { guideDevices = it.getChildAt(2) as android.widget.TextView })
             addView(Cb.label(context, "Tasker"))
-            addView(text(14f, "New profile, Event, System, Intent Received. Action: paste the line above. In the task, %gesture and %steps hold the values."))
+            addView(text(14f, "New profile, Event, System, Intent Received. Action: paste the line above. In the task, %gesture, %steps, %profile and %device hold the values."))
             addView(Cb.label(context, "MacroDroid"))
-            addView(text(14f, "Trigger: Intent Received, the same action. Tick the extras gesture and steps to get them as variables."))
+            addView(text(14f, "Trigger: Intent Received, the same action. Tick the extras gesture, steps, profile and device to get them as variables."))
             addView(Cb.label(context, "Home Assistant"))
             addView(text(14f, "Needs the Home Assistant app 2026.8.4 or newer. In it: Settings, Companion app, Manage sensors, Last update trigger: enable it and turn on Add new intent, then check the new intent reads the line above (the switch saves the next broadcast it gets) and force-stop the app once. Automations then trigger on the event android.intent_received; the extras are in its data."))
+            addView(Cb.label(context, "From a sequence"))
+            addView(text(14f, "A sequence's Send to automation step sends gesture sequence, name (the sequence's), device and profile (the profile whose gesture started it), so phone actions and Home Assistant mix in one gesture. In Home Assistant: event android.intent_received with data gesture: sequence and name: Goodnight."))
             addView(row(gap = 10f).apply {
                 addView(pill("Send a test") {
-                    sendBroadcast(android.content.Intent(Actions.AUTOMATION_ACTION).putExtra("gesture", "test"))
-                    android.widget.Toast.makeText(this@GestureScreen, "Sent gesture = test", android.widget.Toast.LENGTH_SHORT).show()
+                    // As from the profile in use, for the first device (if any), so a rule on either can be tried.
+                    val profile = Profiles.active(this@GestureScreen).name
+                    val device = Profiles.devices(this@GestureScreen).devices.firstOrNull()?.name
+                    sendBroadcast(android.content.Intent(Actions.AUTOMATION_ACTION).putExtra("gesture", "test").putExtra("profile", profile)
+                        .apply { device?.let { putExtra("device", it) } })
+                    val sent = "Sent gesture = test, profile = $profile" + device?.let { ", device = $it" }.orEmpty()
+                    android.widget.Toast.makeText(this@GestureScreen, sent, android.widget.Toast.LENGTH_SHORT).show()
                 }.first)
                 addView(pill("Full guide") {
                     startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(GUIDE_URL)))
@@ -286,6 +487,23 @@ abstract class GestureScreen : Screen() {
             addView(body)
         }
         sheet("Send to automation", scroll, "Close", cancel = false) { true }
+    }
+
+    /** Home devices' row (the Gestures screen, the automation guide): how many there are. */
+    fun homeDevicesRow() = navRow(R.drawable.ic_house, "Home devices", detail = devicesDetail()) { open<HomeDevicesActivity>() }
+
+    /** The automation guide's Home devices count (navRow's detail): its sheet stays open over Home devices. */
+    private var guideDevices: android.widget.TextView? = null
+
+    override fun onResume() {
+        super.onResume()
+        guideDevices?.text = devicesDetail()
+    }
+
+    private fun devicesDetail() = when (val n = Profiles.devices(this).devices.size) {
+        0 -> "None yet"
+        1 -> "1 device"
+        else -> "$n devices"
     }
 
     companion object {

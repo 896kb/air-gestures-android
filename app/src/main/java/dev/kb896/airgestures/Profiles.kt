@@ -1,10 +1,12 @@
 package dev.kb896.airgestures
 
 import android.content.Context
+import org.json.JSONObject
 
 /**
  * Where the [ProfileList] lives (the app's settings, as JSON) and which app is in front.
- * The first read moves the mapping from before profiles into Profile 1.
+ * The first read moves the mapping from before profiles into Profile 1. Also the band controls
+ * (once, above the profiles), the shared drawing actions and the Home devices.
  */
 object Profiles {
     private const val PROFILES = "profiles"
@@ -14,6 +16,12 @@ object Profiles {
     private const val VIBRATE = "profile.vibrate"
     private const val SEQUENCES = "sequences"
     private const val BROKEN = "profiles.broken"
+    private const val BAND = "band.controls"
+    private const val SHARED_DRAWINGS = "drawings.shared"
+    private const val DEVICES = "devices"
+    private const val VERSION_KEY = "controls.version"
+    /** 2: band controls (from 0.7.7, and from the first controls dev build with built-in actions). */
+    private const val VERSION = 2
 
     @Volatile
     private var cached: ProfileList? = null
@@ -49,15 +57,41 @@ object Profiles {
             val picked = prefs.getString(PICKED, null) ?: "p1"
             val apps = prefs.getString(APPS, null) ?: "{}"
             // Unreadable app assignments cost only the assignments, not the profiles.
-            runCatching { return ProfileList.fromJson(profiles, apps, picked) }
-            runCatching { return ProfileList.fromJson(profiles, "{}", picked) }
+            runCatching { return migrated(context, ProfileList.fromJson(profiles, apps, picked)) }
+            runCatching { return migrated(context, ProfileList.fromJson(profiles, "{}", picked)) }
             // The profiles themselves are unreadable: keep a copy before starting over.
             android.util.Log.w("AirGestures", "profiles unreadable; kept as $BROKEN, starting from the old mapping")
             prefs.edit().putString(BROKEN, profiles).apply()
         }
-        // Before profiles (or unreadable): the stored mapping becomes Profile 1.
+        // Before profiles (or unreadable): the stored mapping becomes Profile 1. No profiles and
+        // no old mapping is a fresh install, which starts as a new profile does.
         val map = Gesture.entries.associate { it.key to (prefs.getString("map.${it.key}", null) ?: it.default.id) }
-        return ProfileList.migrated(map, DialChoice.of(prefs.getString("dial.choice", null)).key).also { write(context, it) }
+        val dial = DialChoice.of(prefs.getString("dial.choice", null)).key
+        val fresh = profiles == null && prefs.all.keys.none { it.startsWith("map.") || it == "dial.choice" }
+        val list = if (fresh) ProfileList.fresh(map, dial) else ProfileList.migrated(map, dial)
+        return migrated(context, list.also { write(context, it) })
+    }
+
+    /**
+     * Once: built-in action ids (the first controls dev build stored them in profiles and During
+     * calls) go, their gestures back to their defaults; the band controls start on today's
+     * gestures (0.7.7 had them fixed there, so its profiles keep doing what they did), with
+     * Draw on the index hold unless something uses it ([BandControls.migrated]; a fresh
+     * install's defaults don't).
+     */
+    private fun migrated(context: Context, list: ProfileList): ProfileList {
+        val prefs = prefs(context)
+        if (prefs.getInt(VERSION_KEY, 0) >= VERSION) return list
+        val clean = list.withoutBuiltins()
+        val calls = Gesture.entries.associate { it.key to (prefs.getString("call.${it.key}", null) ?: "") }
+        val builtinCalls = ProfileList.builtinCalls(calls)
+        prefs.edit().apply {
+            for (key in builtinCalls) remove("call.$key")
+            if (!prefs.contains(BAND)) putString(BAND, BandControls.migrated(clean, calls - builtinCalls).toJson().toString())
+            putInt(VERSION_KEY, VERSION)
+        }.apply()
+        if (clean != list) write(context, clean)
+        return clean
     }
 
     private fun write(context: Context, list: ProfileList) {
@@ -71,6 +105,55 @@ object Profiles {
             cached = it
             write(context, it)
         }
+    }
+
+    @Volatile
+    private var band: BandControls? = null
+
+    /** The band controls; today's gestures until changed (or when unreadable). */
+    fun band(context: Context): BandControls = band ?: synchronized(this) {
+        // The first read stores an upgrade's own (see migrated): not today's before it.
+        load(context)
+        band ?: (prefs(context).getString(BAND, null)?.let { runCatching { BandControls.fromJson(it) }.getOrNull() }
+            ?: BandControls.standard()).also { band = it }
+    }
+
+    fun updateBand(context: Context, change: (BandControls) -> BandControls): BandControls = synchronized(this) {
+        change(band(context)).also {
+            band = it
+            prefs(context).edit().putString(BAND, it.toJson().toString()).apply()
+        }
+    }
+
+    /** Drawing name → its action in every profile without its own. */
+    fun sharedDrawings(context: Context): Map<String, String> =
+        prefs(context).getString(SHARED_DRAWINGS, null)?.let { runCatching { JSONObject(it).let { o -> o.keys().asSequence().associateWith(o::getString) } }.getOrNull() }.orEmpty()
+
+    /**
+     * The drawings' actions, the profiles' own and the shared ones, changed together and
+     * stored in one edit (under the store's lock).
+     */
+    fun updateDrawingActions(context: Context, change: (ProfileList, Map<String, String>) -> Pair<ProfileList, Map<String, String>>) =
+        synchronized(this) {
+            val before = load(context) to sharedDrawings(context)
+            val after = change(before.first, before.second)
+            if (after != before) writeDrawingActions(context, after.first, after.second)
+        }
+
+    private fun writeDrawingActions(context: Context, list: ProfileList, shared: Map<String, String>) {
+        cached = list
+        val (profiles, apps) = list.toJson()
+        prefs(context).edit().putString(PROFILES, profiles).putString(APPS, apps).putString(PICKED, list.picked)
+            .putString(SHARED_DRAWINGS, JSONObject(shared).toString()).apply()
+    }
+
+    /** Actions only for drawings that exist ([names]): drawings.json is the source of truth. Worked out under the lock, on what's stored then. */
+    fun pruneDrawingActions(context: Context, names: Set<String>) =
+        updateDrawingActions(context) { list, shared -> list.prunedDrawings(names) to DrawingLibrary.pruned(shared, names) }
+
+    /** Read, change and store under the store's lock, so two changes don't lose one. */
+    fun updateSharedDrawings(context: Context, change: (Map<String, String>) -> Map<String, String>) = synchronized(this) {
+        prefs(context).edit().putString(SHARED_DRAWINGS, JSONObject(change(sharedDrawings(context))).toString()).apply()
     }
 
     /** The profile in force now (the app in front's own, else the picked one). */
@@ -98,6 +181,45 @@ object Profiles {
             sequences = it
             prefs(context).edit().putString(SEQUENCES, it.toJson()).apply()
         }
+    }
+
+    @Volatile
+    private var devices: HomeDevices? = null
+
+    /** The Home devices; none until one is added (or when unreadable). */
+    fun devices(context: Context): HomeDevices = devices ?: synchronized(this) {
+        devices ?: (prefs(context).getString(DEVICES, null)?.let(HomeDevices::fromJson) ?: HomeDevices()).also { devices = it }
+    }
+
+    fun updateDevices(context: Context, change: (HomeDevices) -> HomeDevices): HomeDevices = synchronized(this) {
+        change(devices(context)).also {
+            devices = it
+            prefs(context).edit().putString(DEVICES, it.toJson()).apply()
+        }
+    }
+
+    /** A new device called [name], or the one already called that; null for a blank name. */
+    fun addDevice(context: Context, name: String): HomeDevice? = synchronized(this) {
+        val referenced = HomeDevices.referenced(load(context), Prefs(context).calls(), sharedDrawings(context), sequences(context))
+        val (list, device) = devices(context).added(name, referenced) ?: return null
+        updateDevices(context) { list }
+        device
+    }
+
+    /** How many actions and dials send for device [id], in every profile, During calls, the shared drawings and the sequences. */
+    fun deviceUses(context: Context, id: String) =
+        HomeDevices.uses(id, load(context), Prefs(context).calls(), sharedDrawings(context), sequences(context))
+
+    /** Device [id] gone; whatever sent for it sends without a device. */
+    fun deleteDevice(context: Context, id: String) = synchronized(this) {
+        updateDrawingActions(context) { list, shared -> list.withoutDevice(id) to HomeDevices.withoutDevice(shared, id) }
+        val prefs = Prefs(context)
+        for (gesture in Gesture.entries) {
+            val call = prefs.callActionId(gesture)
+            if (Mappings.withoutDevice(call, id) != call) prefs.setCallAction(gesture, Mappings.AUTOMATION)
+        }
+        updateSequences(context) { it.withoutDevice(id) }
+        updateDevices(context) { it.deleted(id) }
     }
 
     /** Buzz on a profile switch (the band already buzzes for its gestures). */

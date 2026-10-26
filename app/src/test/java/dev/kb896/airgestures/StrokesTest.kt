@@ -1,7 +1,9 @@
 package dev.kb896.airgestures
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StrokesTest {
@@ -53,5 +55,27 @@ class StrokesTest {
         assertEquals(library, Sequences.Library.fromJson(library.toJson()))
         assertEquals(listOf("wait:2000", "app:com.spotify.music", "tap:0.5000,0.4000"), library.moved("q1", 1, -1).get("q1")!!.steps)
         assertEquals(emptyList<Sequences.Sequence>(), library.deleted("q1").sequences)
+    }
+
+    @Test fun `a started sequence reads its id and profile, a plain id has none`() {
+        assertEquals("q1" to null, Sequences.started("seq:q1"))
+        assertEquals("q1" to "Music", Sequences.started("seq:q1/Music"))
+        assertEquals("q12" to "Café: night/2", Sequences.started("seq:q12/Caf%C3%A9%3A+night%2F2"))
+    }
+
+    @Test fun `a sequence's automation steps send its name, the other steps run as they are`() {
+        val steps = listOf("torch.toggle", "automation@d1", "wait:1000", "automation")
+        assertEquals(
+            listOf(null, Mappings.Automation.Sequence("Goodnight", "Music", "d1"), null, Mappings.Automation.Sequence("Goodnight", "Music", null)),
+            steps.map { Sequences.stepAutomation("Goodnight", "Music", it) },
+        )
+        // Try it: no profile.
+        assertEquals(Mappings.Automation.Sequence("Goodnight", null, "d1"), Sequences.stepAutomation("Goodnight", null, "automation@d1"))
+    }
+
+    @Test fun `a step can send to automation, but not be another sequence, nothing or a call action`() {
+        assertTrue(Action.AUTOMATION.inSequence)
+        assertTrue(Action.FLASHLIGHT.inSequence)
+        for (action in listOf(Action.SEQUENCE, Action.NONE, Action.ANSWER, Action.END_CALL)) assertFalse(action.name, action.inSequence)
     }
 }

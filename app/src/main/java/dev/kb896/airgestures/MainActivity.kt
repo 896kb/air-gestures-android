@@ -338,6 +338,16 @@ class MainActivity : Screen() {
     private fun setHand(hand: String) {
         BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
         render(BandService.state.value)
+        // Judgement 16: a wrist this band has no palm positions for asks to calibrate (once a band is known).
+        val band = Prefs(this).bandAddress ?: return
+        if ((hand == "left" || hand == "right") && Calibrations.get(this, band, hand).palm == null) {
+            val until = if (hand == "left") "every gesture on the left wrist counts as palm down" else "the right wrist uses positions measured on another hand"
+            confirm(
+                "Calibrate your $hand wrist?",
+                "Palm positions are measured per band and wrist. Until you do, $until.",
+                "Calibrate",
+            ) { open<PalmCalibrationActivity>() }
+        }
     }
 
     /** What writing in a text field does, and the gestures meanwhile (the ? by its switch). */

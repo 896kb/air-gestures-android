@@ -16,12 +16,18 @@ import android.view.accessibility.AccessibilityEvent
  * package name only). It performs gestures only; it reads nothing on screen.
  */
 class TouchService : AccessibilityService() {
+    private val padDelegate = lazy { DrawPad(this) }
+
+    /** The draw pad over the app in front (BandService shows draw sessions on it). */
+    val pad by padDelegate
+
     override fun onServiceConnected() {
         instance = this
     }
 
     override fun onDestroy() {
         picker?.cancel()
+        if (padDelegate.isInitialized()) pad.hide()
         instance = null
         // Without the service nothing says which app is in front: no app's profile applies.
         BandService.foreground(this, null)
@@ -30,6 +36,7 @@ class TouchService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         picker?.cancel()
+        if (padDelegate.isInitialized()) pad.hide()
         instance = null
         BandService.foreground(this, null)
         return super.onUnbind(intent)

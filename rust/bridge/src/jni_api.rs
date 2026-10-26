@@ -3,7 +3,7 @@
 //! errors become IOException.
 
 use jni::JNIEnv;
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JString};
 use jni::sys::{jboolean, jbyteArray, jdouble, jint, jlong, jstring};
 
 use crate::Connection;
@@ -37,32 +37,19 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_open<'local>(
     owner_key: JByteArray<'local>,
     scheme_guess: jint,
     paused: jboolean,
-    dial: JString<'local>,
-    mapping: JString<'local>,
+    profiles: JString<'local>,
 ) -> jlong {
-    let strings = env.get_string(&dial).map(String::from).and_then(|dial| {
-        env.get_string(&mapping)
-            .map(|mapping| (dial, String::from(mapping)))
-    });
-    let (dial, mapping) = match strings {
-        Ok(strings) => strings,
-        Err(error) => {
-            throw(&mut env, &error.to_string());
+    let profiles = match get_string(&mut env, &profiles) {
+        Ok(profiles) => profiles,
+        Err(message) => {
+            throw(&mut env, &message);
             return 0;
         }
     };
     let opened = env
         .convert_byte_array(&owner_key)
         .map_err(|e| e.to_string())
-        .and_then(|key| {
-            Connection::new(
-                &key,
-                scheme_guess.max(0) as usize,
-                paused != 0,
-                &dial,
-                &mapping,
-            )
-        });
+        .and_then(|key| Connection::new(&key, scheme_guess.max(0) as usize, paused != 0, &profiles));
     match opened {
         Ok(connection) => Box::into_raw(Box::new(connection)) as jlong,
         Err(message) => {
@@ -162,38 +149,24 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPaused<'local>(
     unsafe { connection(handle) }.set_paused(paused != 0, now);
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setBandVibration<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    handle: jlong,
-    enabled: jboolean,
-) -> jbyteArray {
-    let result = unsafe { connection(handle) }.set_band_vibration(enabled != 0);
-    bytes_out(&mut env, result)
+macro_rules! haptics_method {
+    ($name:ident, $method:ident, $arg:ty, $convert:expr) => {
+        #[unsafe(no_mangle)]
+        pub extern "system" fn $name<'local>(
+            mut env: JNIEnv<'local>,
+            _class: JClass<'local>,
+            handle: jlong,
+            value: $arg,
+        ) -> jbyteArray {
+            bytes_out(&mut env, unsafe { connection(handle) }.$method(($convert)(value)))
+        }
+    };
 }
 
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_controlsHaptics<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    handle: jlong,
-    paused: jboolean,
-) -> jbyteArray {
-    let result = unsafe { connection(handle) }.controls_haptics(paused != 0);
-    bytes_out(&mut env, result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_syncControlsHaptics<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    handle: jlong,
-    paused: jboolean,
-) -> jbyteArray {
-    let result = unsafe { connection(handle) }.sync_controls_haptics(paused != 0);
-    bytes_out(&mut env, result)
-}
+haptics_method!(Java_dev_kb896_airgestures_Bridge_setBandVibration, set_band_vibration, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_controlsHaptics, controls_haptics, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_syncControlsHaptics, sync_controls_haptics, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_profileHaptics, profile_haptics, jboolean, |value| value != 0);
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_volumeDetent<'local>(
@@ -201,44 +174,243 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_volumeDetent<'local>(
     _class: JClass<'local>,
     handle: jlong,
 ) -> jbyteArray {
-    let result = unsafe { connection(handle) }.volume_detent();
-    bytes_out(&mut env, result)
+    bytes_out(&mut env, unsafe { connection(handle) }.volume_detent())
 }
 
+/// New profiles, hand and call layer as JSON (see `profiles::parse`); bad JSON throws.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileHaptics<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProfiles<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
-    previous: jboolean,
-) -> jbyteArray {
-    let result = unsafe { connection(handle) }.profile_haptics(previous != 0);
-    bytes_out(&mut env, result)
-}
-
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setDial<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    handle: jlong,
-    dial: JString<'local>,
+    json: JString<'local>,
 ) {
-    match env.get_string(&dial) {
-        Ok(dial) => unsafe { connection(handle) }.set_dial(&String::from(dial)),
-        Err(error) => throw(&mut env, &error.to_string()),
+    let result = get_string(&mut env, &json).and_then(|json| unsafe { connection(handle) }.set_profiles(&json));
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+/// The app in front (`""`: none known).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setForeground<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    app: JString<'local>,
+) {
+    let result = get_string(&mut env, &app).and_then(|app| unsafe { connection(handle) }.set_foreground(&app));
+    if let Err(message) = result {
+        throw(&mut env, &message);
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setMapping<'local>(
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setInCall<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    in_call: jboolean,
+) {
+    unsafe { connection(handle) }.set_in_call(in_call != 0);
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPractice<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    practice: jboolean,
+) {
+    unsafe { connection(handle) }.set_practice(practice != 0);
+}
+
+/// The drawings draw sessions match against, as JSON (see `teach::library`); bad JSON throws
+/// and keeps the ones before.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setLibrary<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
-    mapping: JString<'local>,
+    json: JString<'local>,
 ) {
-    match env.get_string(&mapping) {
-        Ok(mapping) => unsafe { connection(handle) }.set_mapping(&String::from(mapping)),
-        Err(error) => throw(&mut env, &error.to_string()),
+    let result = get_string(&mut env, &json).and_then(|json| unsafe { connection(handle) }.set_library(&json));
+    if let Err(message) = result {
+        throw(&mut env, &message);
+    }
+}
+
+/// Open a draw session from the app (`@draw-started`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_startDrawing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) {
+    if let Err(message) = unsafe { connection(handle) }.start_drawing(now) {
+        throw(&mut env, &message);
+    }
+}
+
+/// The pad's close button (`@draw-cancelled`; nothing with no session).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_cancelDrawing<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    if let Err(message) = unsafe { connection(handle) }.cancel_drawing() {
+        throw(&mut env, &message);
+    }
+}
+
+/// Teaching drawings: sessions report their strokes and match nothing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setTeaching<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) {
+    unsafe { connection(handle) }.set_teaching(on != 0);
+}
+
+/// Teaching drags: pinches report `@drag-sample` and nothing acts; on cancels an open drawing.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setDragTeaching<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    on: jboolean,
+) {
+    if let Err(message) = unsafe { connection(handle) }.set_drag_teaching(on != 0) {
+        throw(&mut env, &message);
+    }
+}
+
+/// The palm and roll right now, as JSON (see `Connection::palm_now`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_palmNow<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    now: jdouble,
+) -> jstring {
+    let json = unsafe { connection(handle) }.palm_now(now);
+    string_out(&mut env, json)
+}
+
+/// What the screens show about a profiles JSON (see `report::report`); invalid JSON: `{}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_profileReport<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    json: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &json) {
+        Ok(json) => string_out(&mut env, crate::report::report(&json)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Where a band control could go and what it would pause (see `report::band_choices`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_bandChoices<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    json: JString<'local>,
+    control: JString<'local>,
+    palm: JString<'local>,
+) -> jstring {
+    let strings = get_string(&mut env, &json)
+        .and_then(|json| Ok((json, get_string(&mut env, &control)?, get_string(&mut env, &palm)?)));
+    match strings {
+        Ok((json, control, palm)) => string_out(&mut env, crate::report::band_choices(&json, &control, &palm)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+fn doubles(env: &mut JNIEnv, array: &JDoubleArray) -> Result<Vec<f64>, String> {
+    let length = env.get_array_length(array).map_err(|e| e.to_string())?;
+    let mut values = vec![0.0; length.max(0) as usize];
+    env.get_double_array_region(array, 0, &mut values).map_err(|e| e.to_string())?;
+    Ok(values)
+}
+
+/// A palm calibration from rolls held still palm down and palm up (see
+/// `teach::palm_calibration`): `{"down", "up"}` or `{"error"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_palmCalibration<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    down: JDoubleArray<'local>,
+    up: JDoubleArray<'local>,
+) -> jstring {
+    let rolls = doubles(&mut env, &down).and_then(|down| Ok((down, doubles(&mut env, &up)?)));
+    match rolls {
+        Ok((down, up)) => string_out(&mut env, crate::teach::palm_calibration(&down, &up)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Taught drags from their samples (see `teach::drag_prototypes`): the prototypes or `{"error"}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_dragPrototypes<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    samples: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &samples) {
+        Ok(samples) => string_out(&mut env, crate::teach::drag_prototypes(&samples)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Whether these tries can teach a drawing (see `teach::check_tries`): `""` or why not.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_checkTries<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    tries: JString<'local>,
+) -> jstring {
+    match get_string(&mut env, &tries) {
+        Ok(tries) => string_out(&mut env, crate::teach::check_tries(&tries)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The drawing in the library these tries look like: `{"like": name | null}`, or
+/// `{"error": "bad-library" | "bad-tries"}` (see `teach::looks_like`).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_looksLike<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    library: JString<'local>,
+    tries: JString<'local>,
+) -> jstring {
+    let strings = get_string(&mut env, &library).and_then(|library| Ok((library, get_string(&mut env, &tries)?)));
+    match strings {
+        Ok((library, tries)) => string_out(&mut env, crate::teach::looks_like(&library, &tries)),
+        Err(message) => {
+            throw(&mut env, &message);
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -331,7 +503,8 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>
     json_out(&mut env, result)
 }
 
-/// The band's handwriting into the text field in front, on or off; bytes to write.
+/// The band's handwriting into the text field in front, on or off; bytes to write. On throws
+/// while the controls are off.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
     mut env: JNIEnv<'local>,

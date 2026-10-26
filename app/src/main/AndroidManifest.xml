@@ -66,8 +66,17 @@
 
         <activity android:name=".GesturesActivity" android:exported="false" />
         <activity android:name=".ProfileActivity" android:exported="false" />
+        <activity android:name=".BandControlActivity" android:exported="false" />
+        <activity android:name=".CallsActivity" android:exported="false" />
+        <activity android:name=".GestureActivity" android:exported="false" />
+        <activity android:name=".DragsActivity" android:exported="false" />
+        <activity android:name=".PalmCalibrationActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+        <activity android:name=".TeachDragsActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
+        <activity android:name=".DrawingsActivity" android:exported="false" />
+        <activity android:name=".TeachDrawingActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SequenceActivity" android:exported="false" />
+        <activity android:name=".HomeDevicesActivity" android:exported="false" />
 
         <receiver
             android:name=".SequenceRunner"

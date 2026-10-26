@@ -25,7 +25,9 @@ import android.view.accessibility.AccessibilityNodeInfo
  * (so other hand movement types nothing); writing ".." or a double tap puts it down again, with
  * a buzz each way. Gestures edit instead of running their actions (see [gestures]): suggestions
  * for a word on a swipe up, the cursor and selections with swipes and taps. Password fields are
- * left alone. It reads and changes only the focused field's text.
+ * left alone. It reads and changes only the focused field's text. Only while the controls are on:
+ * turning them off (from the band's middle hold too) goes back to gestures, and turning them on
+ * with a text field focused writes into it again.
  */
 class WriteService : AccessibilityService() {
     private val main = Handler(Looper.getMainLooper())
@@ -39,15 +41,27 @@ class WriteService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) = leave("the screen went off")
     }
 
+    /** Unlocked: the controls that came on under the lock screen write into the field in focus now. */
+    private val unlocked = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (reenterUnlocked && !controlsOff) reenter()
+        }
+    }
+
     override fun onServiceConnected() {
         instance = this
         registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_PRESENT))
         Words.load(this)
+        controlsOff = BandService.state.value.paused
+        BandService.state.observe(controls)
     }
 
     override fun onDestroy() {
+        BandService.state.remove(controls)
         leave("the service stopped")
         runCatching { unregisterReceiver(screenOff) }
+        runCatching { unregisterReceiver(unlocked) }
         instance = null
         super.onDestroy()
     }
@@ -67,29 +81,65 @@ class WriteService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
-                // The keyboard, system pop-ups and our own popup come up over the field: they don't end it.
-                if (field != null && from != app && from != packageName && from != "com.android.systemui" &&
-                    !from.contains("inputmethod") && !from.contains("keyboard")) {
-                    leave("$from came up")
+                if (field != null && FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) {
+                    leave(if (from == packageName) "a screen of this app came up" else "$from came up")
                 }
             }
         }
     }
 
-    /** A text field has the focus: write into it, if the setting is on and the band can. */
+    /** Whether [name] is one of our screens (a lesson, say), not a pop-up or pad of ours over the field. */
+    private fun activity(name: CharSequence?) =
+        name != null && runCatching { android.app.Activity::class.java.isAssignableFrom(Class.forName(name.toString())) }.getOrDefault(false)
+
+    /** The controls as last seen: off, then on again, writes into the field in focus. */
+    private var controlsOff = false
+
+    private val controls: (BandService.State) -> Unit = { state ->
+        if (state.paused != controlsOff) {
+            controlsOff = state.paused
+            main.post {
+                if (controlsOff) {
+                    reenterUnlocked = false
+                    leave("the controls went off")
+                } else {
+                    reenter()
+                }
+            }
+        }
+    }
+
+    /** The controls came on with the phone locked: [reenter] once it's unlocked. */
+    private var reenterUnlocked = false
+
+    /**
+     * The controls came back on: write into the text field in focus, with the screen on and
+     * unlocked only (a chat box under the lock screen isn't the band's); else once unlocked.
+     */
+    private fun reenter() {
+        val awake = getSystemService(android.os.PowerManager::class.java)?.isInteractive == true
+        val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked != false
+        reenterUnlocked = !awake || locked
+        if (reenterUnlocked) return
+        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
+            ?.let { enter(it, it.packageName?.toString()) }
+    }
+
+    /** A text field has the focus: write into it, if the setting is on, the controls are and the band can. */
     private fun enter(node: AccessibilityNodeInfo, from: String?) {
-        if (!Prefs(this).writeInFields) return
+        if (FieldWriting.refusal(Prefs(this).writeInFields, BandService.state.value) != null) return
         val service = BandService.instance ?: return
-        val state = BandService.state.value
-        if (state.phase != Phase.CONNECTED || state.otaBusy || service.bandWrites() != true) return
+        if (service.bandWrites() != true) return
         val same = field?.let { it == node } == true
+        // Moving to another field: the menu or word choices shown in the last one go first.
+        if (!same) dropInline()
         field = node
         app = from
         lastWritten = SystemClock.uptimeMillis()
         if (same) return
         restart(service, node)
         // Gestures edit the field meanwhile instead of running their actions.
-        service.startPractice(gestures)
+        service.field = gestures
         pen = true
         log("handwriting: writing into a field in $from")
         main.removeCallbacks(tick)
@@ -149,21 +199,40 @@ class WriteService : AccessibilityService() {
         service.setFieldTyping(true, look.text.substring(0, look.end))
     }
 
-    /** Back to gestures. */
-    private fun leave(why: String) {
+    /** Take the menu or word choices out of the current field, and close the popup. */
+    private fun dropInline() {
         menu = null
+        choosing = false
+        anchor = null
         field?.let { if (inline.isNotEmpty()) runCatching { setInline(it, "") } }
         inline = ""
+        popup.hide()
+    }
+
+    /** A lesson or a teach screen takes the band's gestures: back to them (main thread). */
+    fun lessonStarted() = leave("a lesson started")
+
+    /** Back to gestures. */
+    private fun leave(why: String) {
+        // Word choices shown in the field go back to the word, and the last edits go in (the
+        // bridge's, also when it ended the field itself as the controls went off).
+        field?.let { node ->
+            BandService.instance?.let { service ->
+                service.fieldChooseCancel()
+                val edits = service.fieldEdits()?.optJSONArray("edits")
+                for (i in 0 until (edits?.length() ?: 0)) edits!!.getJSONObject(i).let { apply(node, it.optInt("delete"), it.optString("insert")) }
+            }
+        }
+        dropInline()
         expected = null
         main.removeCallbacks(lookAgain)
-        popup.hide()
         if (field == null) return
         field = null
         app = null
         main.removeCallbacks(tick)
         BandService.instance?.let {
             it.setFieldTyping(false)
-            if (it.practice === gestures) it.endPractice()
+            if (it.field === gestures) it.field = null
         }
         log("handwriting: back to gestures ($why)")
     }
@@ -181,10 +250,9 @@ class WriteService : AccessibilityService() {
      *   (or goes back from the list);
      * - a double tap puts the pen down.
      */
-    private val gestures = object : BandService.Practice {
+    private val gestures = object : BandService.Field {
         override fun gesture(label: String) = main.post { onGesture(label) }.let {}
-        override fun action(id: String) = Unit
-        override fun held() = Unit
+        override fun ended() = main.post { leave("the controls went off") }.let {}
     }
 
     /** Choosing among a word's suggestions (a swipe up), and where a selection is anchored. */
@@ -363,14 +431,10 @@ class WriteService : AccessibilityService() {
     private val tick: Runnable = object : Runnable {
         override fun run() {
             val node = field ?: return
-            val service = BandService.instance
-            val state = BandService.state.value
-            when {
-                service == null || state.phase != Phase.CONNECTED -> return leave("the band disconnected")
-                !Prefs(this@WriteService).writeInFields -> return leave("the setting was turned off")
-                SystemClock.uptimeMillis() - lastWritten > IDLE_MS -> return leave("nothing written for a while")
-            }
-            val answer = service!!.fieldEdits() ?: return leave("the band disconnected")
+            val service = BandService.instance ?: return leave("the band disconnected")
+            FieldWriting.refusal(Prefs(this@WriteService).writeInFields, BandService.state.value)?.let { return leave(it) }
+            if (SystemClock.uptimeMillis() - lastWritten > IDLE_MS) return leave("nothing written for a while")
+            val answer = service.fieldEdits() ?: return leave("the band disconnected")
             val edits = answer.optJSONArray("edits")
             // Edits made for a field someone else has since changed would land in the wrong
             // place: dropped, and writing starts afresh where the cursor now is.
@@ -388,8 +452,12 @@ class WriteService : AccessibilityService() {
                     apply(node, edit.optInt("delete"), edit.optString("insert"))
                 }
             }
-            // Until the bridge has started this field's typing (it's asked from another thread).
-            if (!answer.optBoolean("active")) return run { main.postDelayed(this, POLL_MS) }
+            // Until the bridge has started this field's typing (it's asked from another thread);
+            // it refuses with the controls off.
+            if (!answer.optBoolean("active")) {
+                if (answer.optBoolean("off")) return leave("the controls are off")
+                return run { main.postDelayed(this, POLL_MS) }
+            }
             choosing = answer.optBoolean("choosing")
             val list = answer.optJSONArray("suggestions")
             if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {
@@ -478,5 +546,29 @@ class WriteService : AccessibilityService() {
             val on = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
             return on.split(':').any { it.endsWith("/.WriteService") || it.endsWith("/dev.kb896.airgestures.WriteService") }
         }
+    }
+}
+
+/** When the band may write into text fields. Free of Android, so it's unit-tested. */
+object FieldWriting {
+    /** Why it can't now ([setting]: Write in text fields), or null when it can. */
+    fun refusal(setting: Boolean, state: BandService.State): String? = when {
+        !setting -> "the setting was turned off"
+        state.phase != Phase.CONNECTED -> "the band disconnected"
+        state.otaBusy -> "the band is updating"
+        state.paused -> "the controls are off"
+        else -> null
+    }
+
+    /**
+     * Whether a window of [from] coming up ends writing into a field of [app]: another app's, or
+     * a screen of ours ([own]: our package; [ownScreen]: an activity, a lesson say, whose gestures
+     * aren't the field's); not the keyboard, system pop-ups, or our pop-up and pads over the field.
+     */
+    fun leaves(from: String, app: String?, own: String, ownScreen: Boolean): Boolean = when (from) {
+        app -> false
+        own -> ownScreen
+        "com.android.systemui" -> false
+        else -> "inputmethod" !in from && "keyboard" !in from
     }
 }

@@ -28,13 +28,13 @@ class BandService : Service(), BandLink.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        actions = Actions(this, ::volumeDetent, ::onLog)
+        actions = Actions(this, ::onLog, ::volumeDetent)
         link = BandLink(this, this)
         // Unlocking the phone: the band is likely near and about to be used.
         registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
         showProfile()
         // A call starting or ending swaps the During calls layer in or out.
-        calls = CallWatch(this) { link.setMapping(prefs.mapping()) }.also { it.start() }
+        calls = CallWatch(this) { remap() }.also { it.start() }
         // The app's Companion (the CDM link), not this class's companion object.
         dev.kb896.airgestures.Companion.observe(this)
         val notifications = getSystemService(NotificationManager::class.java)
@@ -49,11 +49,6 @@ class BandService : Service(), BandLink.Listener {
         instance = this
         main.post(updateCheck)
         Alerts.scheduleReminder(this)
-        // A lesson the app never closed (it was killed): the controls go back as they were.
-        if (prefs.practising) {
-            prefs.practising = false
-            prefs.paused = prefs.practiceWasPaused
-        }
     }
 
     /** Look for a newer release now and then while the band is kept connected. */
@@ -95,13 +90,12 @@ class BandService : Service(), BandLink.Listener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    fun setPaused(paused: Boolean, feedback: Boolean = true) {
-        // Asked for (button, tile, widget, notification, a lesson): not a middle hold.
-        commandedAt = android.os.SystemClock.uptimeMillis()
+    /** From the app (button, tile, widget, notification); the band's own switch comes as `@controls`. */
+    fun setPaused(paused: Boolean) {
         val changed = paused != state.value.paused
         prefs.paused = paused
         link.setPaused(paused)
-        if (changed && feedback && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
+        if (changed && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
         else link.syncControlsHaptics(paused)
         pausedChanged(paused)
     }
@@ -111,20 +105,17 @@ class BandService : Service(), BandLink.Listener {
         link.setBandVibration(enabled)
     }
 
+    fun typingHaptics(down: Boolean) {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous = !down)
+    }
+
     private fun volumeDetent() {
-        if (prefs.bandVibration) link.volumeDetent()
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.volumeDetent()
     }
 
-    /** Use the existing connected session for the handwriting service's pen cue. */
-    fun typingHaptics(down: Boolean): Boolean {
-        if (!prefs.bandVibration || state.value.phase != Phase.CONNECTED) return false
-        // Reuse the verified one/two profile cue patterns for pen down/up.
-        link.profileHaptics(previous = !down)
-        return true
+    fun feedbackHaptics(previous: Boolean = false) {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous)
     }
-
-    /** When the controls were last switched by the app rather than by the band. */
-    private var commandedAt = 0L
 
     /** Record the controls' state; the status notification shows it. */
     private fun pausedChanged(paused: Boolean) {
@@ -151,9 +142,11 @@ class BandService : Service(), BandLink.Listener {
         }
     }
 
-    /** Send the mapping in force to the band again (a profile, call or setting changed). */
+    /** Send the profiles, the call state and the app in front to the band again (any of them changed). */
     fun remap() {
-        link.setMapping(prefs.mapping())
+        link.setProfiles(prefs.profilesJson())
+        link.setInCall(CallWatch.inCall)
+        link.setForeground(Profiles.foreground ?: "")
         showProfile()
     }
 
@@ -167,26 +160,37 @@ class BandService : Service(), BandLink.Listener {
         }
     }
 
-    /** A triple tap: the next (+1) or previous (−1) profile, unless the app in front has its own. */
-    fun profileStep(by: Int): String? {
-        if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        switched(Profiles.update(this) { it.step(by) }.active(Profiles.foreground), back = by < 0)
-        return null
-    }
-
-    /** The widget's picker chose a profile: like a triple tap, but straight to [id]. */
+    /** The widget's picker chose a profile: the band gets it, and the user is told. */
     fun pick(id: String): String? {
         if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        switched(Profiles.update(this) { it.picking(id) }.active(Profiles.foreground))
+        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
+        remap()
+        announce(now)
         return null
     }
 
-    /** Another profile is in force: the band gets it, and the user is told which. */
-    private fun switched(profile: Profile, back: Boolean = false) {
+    /** The band moved to another profile (a gesture with Next or Previous profile): store the pick, then tell the user. */
+    private fun bandSwitched(index: Int, step: Int) {
+        val id = Profiles.load(this).profiles.getOrNull(index)?.id ?: return
+        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
+        // Again to the band: a remap sent meanwhile (e.g. a call starting) carried the old pick.
         remap()
+        announce(now, back = step < 0)
+    }
+
+    /** The band turned the controls on or off (a gesture with Controls on/off). */
+    private fun bandToggled(on: Boolean) {
+        prefs.paused = !on
+        link.controlsHaptics(paused = !on)
+        pausedChanged(!on)
+    }
+
+    /** Another profile is in force: tell the user which. */
+    private fun announce(profile: Profile, back: Boolean = false) {
+        showProfile()
         Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
         if (Profiles.speak(this)) actions.announce(profile.name)
-        if (Profiles.vibrate(this) && prefs.bandVibration) link.profileHaptics(previous = back)
+        if (Profiles.vibrate(this)) feedbackHaptics(previous = back)
         onLog("profile: ${profile.name}")
     }
 
@@ -242,12 +246,14 @@ class BandService : Service(), BandLink.Listener {
     /** Set the band to this wrist now and on every later connection. */
     fun setHand(hand: String) {
         prefs.hand = hand
-        link.setMapping(prefs.mapping())
+        link.setProfiles(prefs.profilesJson())
     }
 
     // BandLink.Listener: called from Bluetooth and link threads.
 
     override fun onPhase(phase: Phase, band: String?) = main.post {
+        // A disconnect ends an open draw session without a word from band-core: close the pad.
+        if (phase != Phase.CONNECTED) pad.cancelled()
         state.update {
             val back = phase == Phase.CONNECTED && install?.stage == "restarting"
             copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
@@ -258,21 +264,9 @@ class BandService : Service(), BandLink.Listener {
     }.let {}
 
     override fun onStatus(status: JSONObject) = main.post {
-        val pausedBefore = state.value.paused
-        var paused = status.optBoolean("paused")
-        val lesson = practice
-        // A flip to off within a moment of the app switching the controls is that switch
-        // (or a late report of it), not the middle hold.
-        val ours = android.os.SystemClock.uptimeMillis() - commandedAt < 1_500
-        if (lesson != null && paused && !ours) {
-            // The middle hold in a lesson: it counts, but the controls stay on.
-            lesson.held()
-            link.setPaused(false)
-            link.setBandVibration(prefs.bandVibration)
-            paused = false
-        }
+        // Mirrored as the bridge has it (right after a reconnect too); `@controls` says it first.
+        val paused = status.optBoolean("paused")
         if (paused != prefs.paused) prefs.paused = paused
-        if (paused != pausedBefore && lesson == null && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
         if (paused != state.value.paused) pausedChanged(paused)
         val before = state.value
         state.update {
@@ -281,7 +275,6 @@ class BandService : Service(), BandLink.Listener {
                 battery = if (status.isNull("battery")) null else status.getInt("battery"),
                 charging = status.optBoolean("charging"),
                 hand = status.optString("hand").takeUnless { status.isNull("hand") },
-                dial = status.optString("dial", dial),
                 lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
                 gestures = status.optLong("gestures"),
                 firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
@@ -301,7 +294,6 @@ class BandService : Service(), BandLink.Listener {
         val now = state.value
         if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
         if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
-        if (lesson != null && now.gestures > before.gestures) lesson.gesture(now.lastGesture.orEmpty())
         val level = now.battery
         if (level != null && (level != before.battery || now.charging != before.charging)) {
             Alerts.battery(this, now.band, level, now.charging)
@@ -339,44 +331,158 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onActions(actions: List<String>) = main.post {
-        val profile = Profiles.active(this)
-        // In a lesson nothing runs; the lesson sees what would have.
-        practice?.let { lesson -> actions.forEach(lesson::action) } ?: actions.forEach { action ->
-            this.actions.run(action, profile)?.let(::onLog)
+        for (line in actions) {
+            if (!line.startsWith("@")) {
+                // In a lesson nothing runs (the bridge sends `@practiced` instead).
+                if (practice == null) this.actions.run(line)?.let(::onLog)
+                continue
+            }
+            val kind = line.removePrefix("@").substringBefore(' ')
+            val rest = line.substringAfter(' ', "")
+            when (kind) {
+                // The Activity screen's line: the gesture, its palm and what it did, in the app's words.
+                "activity" -> ActivityLine.format(
+                    rest,
+                    label = { id -> ActivityLine.label(id, device = { Profiles.devices(this).get(it)?.name }) { Labels.action(this, it) } },
+                    profile = { Profiles.load(this).profiles.getOrNull(it)?.name },
+                )?.let(::onLog)
+                "gesture" -> practice?.gesture(rest)
+                "practiced" -> practice?.action(rest)
+                "field-gesture" -> field?.gesture(rest)
+                "field" -> if (rest == "off") field?.ended()
+                "controls" -> bandToggled(rest == "on")
+                "profile" -> rest.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }
+                    ?.let { (index, step) -> bandSwitched(index, step) }
+                "held" -> {
+                    Toast.makeText(this, "This app has its own profile", Toast.LENGTH_SHORT).show()
+                    onLog("profile: this app has its own profile")
+                }
+                // In a lesson Draw only shows it's there: the session (a hold can't cancel it) closes again.
+                "draw-started" -> if (practice != null && drawing == null) link.cancelDrawing() else pad.started()
+                "pen" -> pad.pen(rest == "down")
+                "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
+                    val stroke = s.toIntOrNull() ?: return@let
+                    pad.point(stroke, x.toFloatOrNull() ?: return@let, y.toFloatOrNull() ?: return@let)
+                }
+                "draw-finished" -> pad.finished(rest)
+                "drawn" -> pad.drawn(rest)
+                "not-drawn" -> {
+                    pad.notDrawn()
+                    feedbackHaptics(previous = true)
+                }
+                "draw-cancelled" -> pad.cancelled()
+                "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->
+                    val numbers = w.drop(1).map { it.toDoubleOrNull() ?: return@let }
+                    dragTeaching?.sample(w[0], doubleArrayOf(numbers[0], numbers[1], numbers[2]), numbers[3])
+                }
+            }
         }
     }.let {}
 
     /** Run one action as a gesture would (e.g. a sequence's Try it); a failure goes to the log. */
-    fun runAction(action: String) = actions.run(action, Profiles.active(this))?.let(::onLog)
+    fun runAction(action: String) = actions.run(action)?.let(::onLog)
 
-    /** What a practice lesson hears from the band while it's open. */
+    /** What a practice lesson hears from the band while it's open: each gesture's label, and what it would run. */
     interface Practice {
         fun gesture(label: String)
         fun action(id: String)
-        fun held()
     }
 
     /** Set while a lesson is open: gestures are reported to it and run nothing. */
     var practice: Practice? = null
         private set
+
     /**
-     * Start a lesson: the controls go on (the band reports more), and come back as they were
-     * after. How they were is kept in the prefs, so a service restarted mid-lesson keeps it.
+     * Start a lesson: the band's layer goes into practice (gestures are reported, nothing runs,
+     * the built-ins don't act), whether the controls are on or off.
      */
     fun startPractice(lesson: Practice) {
-        if (!prefs.practising) {
-            prefs.practiceWasPaused = state.value.paused
-            prefs.practising = true
-        }
+        // A field being written into would take the lesson's gestures (writing wins over practice).
+        WriteService.instance?.lessonStarted()
         practice = lesson
-        if (state.value.paused) setPaused(false, feedback = false)
+        link.setPractice(true)
     }
 
     fun endPractice() {
         practice = null
-        if (!prefs.practising) return
-        prefs.practising = false
-        if (state.value.paused != prefs.practiceWasPaused) setPaused(prefs.practiceWasPaused, feedback = false)
+        link.setPractice(false)
+    }
+
+    /**
+     * The text field the band writes into (WriteService): the gestures made for it (the band's
+     * own actions don't run meanwhile; Controls on/off does), and the controls going off, which
+     * ended it in the bridge.
+     */
+    interface Field {
+        fun gesture(label: String)
+        fun ended()
+    }
+
+    /** Set while the band writes into a text field (with [setFieldTyping]). */
+    var field: Field? = null
+
+    /** A draw session's listener: a teach screen while one is open, else the pad over the app in front (or toasts). */
+    interface Drawing {
+        fun started() {}
+        /** The pen went down (the next point starts its stroke; a dropped stroke's number comes again: draw it afresh) or up. */
+        fun pen(down: Boolean) {}
+        fun point(stroke: Int, x: Float, y: Float) {}
+        /** The session's strokes (DrawingLibrary.strokes reads them). */
+        fun finished(strokes: String) {}
+        fun drawn(name: String) {}
+        fun notDrawn() {}
+        fun cancelled() {}
+    }
+
+    /** Teach your drags' listener. */
+    fun interface DragTeaching {
+        fun sample(finger: String, direction: DoubleArray, roll: Double)
+    }
+
+    var drawing: Drawing? = null
+        private set
+    private var dragTeaching: DragTeaching? = null
+
+    /** Results without a pad (no accessibility service, judgement 9): toasts. */
+    private val toasts = object : Drawing {
+        override fun drawn(name: String) = toast(DrawPad.result(this@BandService, name))
+        override fun notDrawn() = toast("Not one of your drawings")
+    }
+    /** Where a draw session shows: a teach screen while one is open, else the pad over the app in front, else toasts. */
+    private val pad: Drawing get() = drawing ?: TouchService.instance?.pad ?: toasts
+
+    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+
+    /** Teach a drawing: practice (nothing runs) and teaching (sessions report their strokes). */
+    fun startTeachingDrawing(listener: Drawing) {
+        drawing = listener
+        startPractice(object : Practice { override fun gesture(label: String) = Unit; override fun action(id: String) = Unit })
+        link.setTeaching(true)
+    }
+    /** One try: a draw session the screen opened. */
+    fun drawTry() = link.startDrawing()
+    fun endTeachingDrawing() {
+        link.cancelDrawing()
+        link.setTeaching(false)
+        endPractice()
+        drawing = null
+    }
+    fun startDragTeaching(listener: DragTeaching) {
+        dragTeaching = listener
+        link.setDragTeaching(true)
+    }
+    fun endDragTeaching() {
+        link.setDragTeaching(false)
+        dragTeaching = null
+    }
+    fun cancelDrawing() = link.cancelDrawing()
+    fun palmNow() = link.palmNow()
+    /** The drawings changed: the band matches against the new ones. */
+    fun drawingsChanged() {
+        val library = Drawings.load(this)
+        // Never pruned from an unreadable file: its drawings are only in drawings.broken now.
+        if (Drawings.readable(this)) Profiles.pruneDrawingActions(this, library.names.toSet())
+        link.setLibrary(library.toJson())
     }
 
     /**
@@ -464,7 +570,6 @@ class BandService : Service(), BandLink.Listener {
         val battery: Int? = null,
         val charging: Boolean = false,
         val hand: String? = null,
-        val dial: String = "volume",
         val lastGesture: String? = null,
         val gestures: Long = 0,
         val log: List<String> = emptyList(),
@@ -595,14 +700,35 @@ class BandService : Service(), BandLink.Listener {
 
         private fun front(context: Context, change: () -> Unit) {
             val list = Profiles.load(context)
-            val before = list.active(Profiles.foreground)
+            val app = Profiles.foreground
+            val before = list.active(app)
             change()
             val after = list.active(Profiles.foreground)
-            if (after.id != before.id) instance?.switched(after)
+            val service = instance ?: return
+            if (after.id != before.id) {
+                service.remap()
+                service.announce(after)
+            } else if (Profiles.foreground != app) {
+                // The band's layer follows the app in front too (its own profile; whether next and previous may switch).
+                service.link.setForeground(Profiles.foreground ?: "")
+            }
         }
 
-        fun setDial(context: Context, profile: String, dial: DialChoice) {
+        /** Store what the index finger's pinch and turn does in [profile] (a [DialChoice] key, or automation for a device). */
+        fun setDial(context: Context, profile: String, dial: String) {
             Prefs(context).setDial(profile, dial)
+            instance?.remap()
+        }
+
+        /** Store what the middle finger's pinch and turn does in [profile], live on the band when the service runs. */
+        fun setMiddleDial(context: Context, profile: String, dial: String) {
+            Profiles.update(context) { it.withMiddleDial(profile, dial) }
+            instance?.remap()
+        }
+
+        /** Store a finger's drags (gestures or sliders) in [profile], live on the band when the service runs. */
+        fun setDrags(context: Context, profile: String, part: Part, drags: Drags) {
+            Profiles.update(context) { it.withDrags(profile, part, drags) }
             instance?.remap()
         }
     }

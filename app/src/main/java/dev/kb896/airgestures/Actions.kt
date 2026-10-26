@@ -25,10 +25,10 @@ import android.view.KeyEvent
 /** Runs the bridge's action names on the phone. */
 class Actions(
     private val context: Context,
-    /** A successful media volume adjustment gets a short Band detent. */
-    private val volumeDetent: () -> Unit = {},
     /** Where a sequence's failing steps are told (the activity log). */
     private val log: (String) -> Unit = {},
+    /** A successful volume step can be echoed as a Band detent. */
+    private val volumeDetent: () -> Unit = {},
 ) {
     private val audio = context.getSystemService(AudioManager::class.java)
     /** Where the last seek aimed, so fast dial steps add up before the player reports back. */
@@ -94,15 +94,18 @@ class Actions(
             "nav.select" -> return navigate { it.select() }
             "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }
             "nav.scroll_back" -> return navigate { it.scroll(forward = false) }
-            "profile.next" -> return BandService.instance?.profileStep(+1)
-            "profile.previous" -> return BandService.instance?.profileStep(-1)
-            else -> return when {
-                action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
-                action.startsWith(Tap.PREFIX) -> tap(action)
-                action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
-                action.startsWith(Sequences.PREFIX) -> sequence(action.removePrefix(Sequences.PREFIX), profile)
-                action.startsWith("${Mappings.AUTOMATION}:") -> automation(action.substringAfter(':'))
-                else -> "unknown action $action"
+            else -> {
+                val sent = Mappings.sent(action)
+                return when {
+                    action.startsWith(APP_PREFIX) -> open(action.removePrefix(APP_PREFIX))
+                    action.startsWith(Tap.PREFIX) -> tap(action)
+                    action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
+                    action.startsWith(Sequences.PREFIX) -> Sequences.started(action).let { (id, automationProfile) ->
+                        sequence(id, automationProfile, profile)
+                    }
+                    sent != null -> automation(sent)
+                    else -> "unknown action $action"
+                }
             }
         }
         return null
@@ -210,9 +213,10 @@ class Actions(
 
     /**
      * Run a sequence's steps in order: actions, and waits between them. Steps without a wait
-     * get a short pause, so the screen can catch up (an app opening, a list scrolling).
+     * get a short pause, so the screen can catch up (an app opening, a list scrolling). A Send
+     * to automation step sends the sequence's name, from [profile] (null: Try it, no gesture).
      */
-    private fun sequence(id: String, profile: Profile): String? {
+    private fun sequence(id: String, automationProfile: String?, profile: Profile): String? {
         val sequence = Profiles.sequences(context).get(id) ?: return "that sequence is gone"
         if (running != null) return "$runningName is still running"
         running = id
@@ -224,7 +228,8 @@ class Actions(
             }
             val step = sequence.steps[at]
             val wait = Sequences.waitMs(step)
-            if (wait == null) run(step, profile)?.let { log("${sequence.name}, step ${at + 1}: $it") }
+            val sent = Sequences.stepAutomation(sequence.name, automationProfile, step)
+            if (sent != null) send(sent) else if (wait == null) run(step, profile)?.let { log("${sequence.name}, step ${at + 1}: $it") }
             main.postDelayed({ step(at + 1) }, wait ?: (STEP_PAUSE_MS + busyMs(step)))
         }
         step(0)
@@ -349,48 +354,60 @@ class Actions(
         return null
     }
 
-    /** For Tasker, MacroDroid, Home Assistant…: the gesture's name, nothing else. */
-    private fun automation(gesture: String): String? {
-        when (gesture) {
-            "dial_up" -> dialStep(+1)
-            "dial_down" -> dialStep(-1)
-            else -> context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", gesture))
-        }
+    /**
+     * For Tasker, MacroDroid, Home Assistant…: what made it ([Mappings.sent]), nothing else:
+     * `gesture=<key>` (plus `palm` for an override), a dial or slider's steps, or
+     * `gesture=drawing` with its `name`; each with its `profile`, and `device` when it has one.
+     */
+    private fun automation(made: Mappings.Automation): String? {
+        if (made is Mappings.Automation.Step) dialStep(made) else send(made)
         return null
     }
 
-    private val dialBatch = StepBatch(DIAL_BATCH_MS)
-    private var dialFlush = false
+    /** [made]'s broadcast; its device by the name it has now (a rename reaches every gesture). */
+    private fun send(made: Mappings.Automation, steps: Int? = null) {
+        val device = Profiles.devices(context).get(made.device)?.name
+        context.sendBroadcast(Intent(AUTOMATION_ACTION).apply {
+            for ((key, value) in Mappings.extras(made, device, steps)) {
+                if (value is Int) putExtra(key, value) else putExtra(key, value.toString())
+            }
+        })
+    }
+
+    /**
+     * One batch per dial or slider (`dial`, `middle_dial`, `index_left_right`, …), device and
+     * profile ([Mappings.Automation.Step.key]), and whether its flush is posted.
+     */
+    private val dialBatches = mutableMapOf<Mappings.Automation.Step, StepBatch>()
+    private val dialFlushes = mutableSetOf<Mappings.Automation.Step>()
     private val main = Handler(Looper.getMainLooper())
 
     /**
-     * A dial step for automation: sent as `gesture=dial` with the net `steps` (+ up, − down),
-     * at most once per [DIAL_BATCH_MS], so a smart light follows a quick turn smoothly.
+     * A dial or slider step for automation: sent as `gesture=<name>` with the net `steps` (+ up,
+     * − down), at most once per [DIAL_BATCH_MS] per batch, so a smart light follows a quick turn smoothly.
      */
-    private fun dialStep(step: Int) {
+    private fun dialStep(step: Mappings.Automation.Step) {
+        val key = step.key
+        val batch = dialBatches.getOrPut(key) { StepBatch(DIAL_BATCH_MS) }
         val now = SystemClock.uptimeMillis()
-        val sent = dialBatch.add(step, now)
+        val sent = batch.add(step.step, now)
         if (sent != null) {
-            sendDial(sent)
-        } else if (!dialFlush) {
-            dialFlush = true
+            sendDial(key, sent)
+        } else if (dialFlushes.add(key)) {
             main.postAtTime({
-                dialFlush = false
-                sendDial(dialBatch.take(SystemClock.uptimeMillis()))
-            }, dialBatch.due())
+                dialFlushes.remove(key)
+                sendDial(key, batch.take(SystemClock.uptimeMillis()))
+            }, batch.due())
         }
     }
 
-    private fun sendDial(steps: Int) {
-        if (steps != 0) context.sendBroadcast(Intent(AUTOMATION_ACTION).putExtra("gesture", "dial").putExtra("steps", steps))
+    private fun sendDial(key: Mappings.Automation.Step, steps: Int) {
+        if (steps != 0) send(key, steps)
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */
-    private fun volume(direction: Int) {
-        val before = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
-        if (direction != AudioManager.ADJUST_TOGGLE_MUTE && audio.getStreamVolume(AudioManager.STREAM_MUSIC) != before) volumeDetent()
-    }
+    private fun volume(direction: Int) =
+        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI).also { volumeDetent() }
 
     /**
      * Screen brightness in 5% steps (as the desktop). Needs "Modify system
@@ -417,7 +434,7 @@ class Actions(
         /** One dial step of playback position. */
         const val SEEK_STEP = 5_000L
 
-        /** The broadcast "Send to automation" sends, with the gesture's name in `gesture`. */
+        /** The broadcast "Send to automation" sends, with the gesture's name in `gesture` (see [Mappings.extras]). */
         const val AUTOMATION_ACTION = "dev.kb896.airgestures.GESTURE"
 
         /** The pause after a sequence step that has no wait of its own. */

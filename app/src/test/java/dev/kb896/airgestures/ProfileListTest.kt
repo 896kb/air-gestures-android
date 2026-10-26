@@ -22,6 +22,13 @@ class ProfileListTest {
         assertEquals("seek", list.active(null).dial)
     }
 
+    @Test fun `a new profile's and a fresh install's middle dial is brightness, the old mapping's nothing`() {
+        assertEquals("brightness", ProfileList.migrated(map, "volume").added(map, "volume").second.middleDial)
+        assertEquals("brightness", ProfileList.fresh(map, "volume").active(null).middleDial)
+        assertEquals("volume", ProfileList.fresh(map, "volume").active(null).dial)
+        assertEquals("none", ProfileList.migrated(map, "volume").active(null).middleDial)
+    }
+
     @Test fun `new profiles get the next free number`() {
         val list = three()
         assertEquals(listOf("p1", "p2", "p3"), list.profiles.map { it.id })
@@ -81,7 +88,8 @@ class ProfileListTest {
     }
 
     @Test fun `it round-trips through JSON`() {
-        val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1)
+        val list = three().renamed("p2", "Reading").assigned("app", "p2")
+            .withMusicBluetoothOnly("p2", true).step(+1)
         val json = list.toJson()
         assertEquals(list, ProfileList.fromJson(json.first, json.second, list.picked))
     }
@@ -98,11 +106,49 @@ class ProfileListTest {
         assertEquals(list, list.picking("nope"))
     }
 
-    @Test fun `Bluetooth only setting survives profile serialization and defaults off`() {
-        val list = three().withMusicBluetoothOnly("p2", true)
+    @Test fun `palm overrides, at most two, removing the last drops the gesture`() {
+        var list = three()
+        list = list.withOverride("p1", "index_tap", Palm.UP, "media.next").withOverride("p1", "index_tap", Palm.SIDE, "")
+        assertEquals(mapOf("up" to "media.next", "sideways" to ""), list.profile("p1")!!.palm["index_tap"])
+        assertEquals(list, list.withOverride("p1", "index_tap", Palm.DOWN, "x"))
+        list = list.withoutOverride("p1", "index_tap", Palm.UP).withoutOverride("p1", "index_tap", Palm.SIDE)
+        assertFalse("index_tap" in list.profile("p1")!!.palm)
+    }
+
+    @Test fun `the dev build's built-in actions leave every profile`() {
+        val list = ProfileList(
+            listOf(Profile("p1", "A", mapOf("middle_hold" to "controls.toggle", "swipe_left" to "profile.next", "index_tap" to "media.next"), "volume",
+                palm = mapOf("index_tap" to mapOf("up" to "profile.previous")))),
+            "p1", emptyMap(),
+        ).withoutBuiltins()
+        assertEquals(mapOf("index_tap" to "media.next"), list.profile("p1")!!.map)
+        assertTrue(list.profile("p1")!!.palm.isEmpty())
+        assertEquals(setOf("index_double"), ProfileList.builtinCalls(mapOf("index_double" to "controls.toggle", "middle_double" to "-")))
+    }
+
+    @Test fun `the new profile fields round-trip and 0_7_7's profiles read with their defaults`() {
+        val made = Profile("p1", "A", mapOf("swipe_up" to "media.next"), "seek",
+            palm = mapOf("index_tap" to mapOf("up" to "media.next")), middleDial = "brightness",
+            middleDrags = Drags(sliders = true, targets = listOf("volume", "none", "none")), drawings = mapOf("Bulb" to "torch.toggle"))
+        val list = ProfileList(listOf(made), "p1", emptyMap())
         val (profiles, apps) = list.toJson()
-        val restored = ProfileList.fromJson(profiles, apps, list.picked)
-        assertFalse(restored.profile("p1")!!.musicBluetoothOnly)
-        assertTrue(restored.profile("p2")!!.musicBluetoothOnly)
+        assertEquals(list, ProfileList.fromJson(profiles, apps, "p1"))
+        val old = ProfileList.fromJson("""[{"id":"p1","name":"A","map":{},"dial":"volume"}]""", "{}", "p1").profile("p1")!!
+        assertEquals("none", old.middleDial)
+        assertEquals(Drags(), old.indexDrags)
+        assertFalse(old.musicBluetoothOnly)
+        assertTrue(old.palm.isEmpty() && old.drawings.isEmpty())
+    }
+
+    @Test fun `a bad palm entry or a null is skipped, not the whole list`() {
+        val list = ProfileList.fromJson(
+            """[{"id":"p1","name":"A","map":{"swipe_up":null,"index_tap":"media.next"},"dial":"volume",
+                "palm":{"index_tap":null,"swipe_up":3,"middle_tap":{"up":null,"down":"x"}},"drawings":{"Bulb":null,"Z":"y"}}]""",
+            "{}", "p1",
+        )
+        val p = list.profile("p1")!!
+        assertEquals(mapOf("index_tap" to "media.next"), p.map)
+        assertEquals(mapOf("middle_tap" to mapOf("down" to "x")), p.palm)
+        assertEquals(mapOf("Z" to "y"), p.drawings)
     }
 }

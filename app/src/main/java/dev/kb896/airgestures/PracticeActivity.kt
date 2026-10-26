@@ -25,7 +25,6 @@ class PracticeActivity : Screen() {
     private val lesson = object : BandService.Practice {
         override fun gesture(label: String) = heard(gesture = label)
         override fun action(id: String) = heard(action = id)
-        override fun held() = heard(held = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,7 +32,18 @@ class PracticeActivity : Screen() {
         // A rotation or a fold keeps the lesson where it was.
         at = savedInstanceState?.getInt("step") ?: 0
         val active = Profiles.active(this)
-        steps = Lessons.steps(Profiles.load(this).profiles.size, dial = DialChoice.of(active.dial) != DialChoice.NONE)
+        steps = Lessons.steps(
+            Profiles.load(this).profiles.size,
+            dial = DialChoice.of(active.dial) != DialChoice.NONE,
+            map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
+            band = Profiles.band(this),
+            // A middle dial on the index dial's actions can't be told apart from an index turn: no lesson then.
+            middleDial = Lessons.middleDialLesson(
+                Mappings.dial(active.dial, "dial", active.name)?.toList().orEmpty().toSet(),
+                Mappings.dial(active.middleDial, "middle_dial", active.name)?.toList().orEmpty().toSet(),
+            ),
+            sliders = listOf(Part.INDEX, Part.MIDDLE).filter { active.drags(it).sliders }.toSet(),
+        )
         count = Cb.label(this, "")
         title = Cb.text(this, 24f, R.font.geist_semibold, Cb.INK_900, -.02f)
         how = Cb.text(this, 15f, color = Cb.INK_500).apply { setLineSpacing(0f, 1.3f) }
@@ -109,11 +119,14 @@ class PracticeActivity : Screen() {
     }
 
     /** The band reported something: does it finish the step on screen? */
-    private fun heard(gesture: String? = null, action: String? = null, held: Boolean = false) {
+    private fun heard(gesture: String? = null, action: String? = null) {
         val step = steps.getOrNull(at) ?: return
         if (done) return
-        val dial = DialChoice.of(Profiles.active(this).dial).let { setOf(it.up, it.down) - "" }
-        if (step.done.matches(gesture, action, held, dial)) {
+        // The names the bridge reports for each dial's steps (automation's carry the dial's name).
+        val active = Profiles.active(this)
+        val dial = Mappings.dial(active.dial, "dial", active.name)?.toList().orEmpty().toSet()
+        val middleDial = Mappings.dial(active.middleDial, "middle_dial", active.name)?.toList().orEmpty().toSet()
+        if (step.done.matches(gesture, action, dial, middleDial)) {
             done = true
             render()
         }
@@ -123,18 +136,32 @@ class PracticeActivity : Screen() {
     private fun would(step: Lessons.Step): String {
         val list = Profiles.load(this)
         val profile = list.active(Profiles.foreground)
-        return when (val finish = step.done) {
-            is Lessons.Done.Gesture -> {
-                val id = Prefs(this).actionId(step.gesture ?: return "", profile.id)
-                val action = Action.of(id)
-                "${if (action == Action.OPEN_APP) "Open an app" else action.label} (${profile.name})"
+        return when (step.done) {
+            is Lessons.Done.Gesture, Lessons.Done.Hold -> {
+                val gesture = step.gesture ?: return ""
+                // The band controls come first (lessons are palm down).
+                when (val builtin = Profiles.band(this).on(gesture, Palm.DOWN)) {
+                    Builtin.CONTROLS -> "turn the controls off (band control)"
+                    Builtin.DRAW -> "open the drawing pad (band control; it closes again in a lesson)"
+                    // The band's own switch: where it would go (an app's own profile stays).
+                    Builtin.NEXT, Builtin.PREVIOUS -> if (list.locked(Profiles.foreground) || list.profiles.size < 2) {
+                        "nothing here"
+                    } else {
+                        "switch to ${list.step(if (builtin == Builtin.NEXT) 1 else -1).active(null).name}"
+                    }
+                    null -> {
+                        val id = Prefs(this).actionId(gesture, profile.id)
+                        when (val action = Action.of(id)) {
+                            Action.OPEN_APP -> "Open an app (${profile.name})"
+                            // With its Home device, as the dials.
+                            Action.AUTOMATION -> "${Labels.action(this, id)} (${profile.name})"
+                            else -> "${action.label} (${profile.name})"
+                        }
+                    }
+                }
             }
-            Lessons.Done.Dial -> "${DialChoice.of(profile.dial).label} (${profile.name})"
-            Lessons.Done.Hold -> "controls off and on"
-            is Lessons.Done.Action -> {
-                val next = list.step(if (finish.action == "profile.next") 1 else -1).active(null)
-                "switch to ${next.name}"
-            }
+            Lessons.Done.Dial -> "${Labels.dial(this, profile.dial)} (${profile.name})"
+            Lessons.Done.MiddleDial -> "${Labels.dial(this, profile.middleDial)} (${profile.name})"
         }
     }
 }

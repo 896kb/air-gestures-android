@@ -65,10 +65,76 @@ import kotlin.concurrent.thread
  *
  *     ... --ez signin true
  *
+ * The draw pad, played without a band (the accessibility service must be on): a pen-down
+ * circle, then `drawn` with the name given, `not-drawn` for "", or left open for `open`:
+ *
+ *     ... --es pad Lightbulb
+ *
+ * One try on the Teach a drawing screen in front, without a band: a circle, a zigzag, or a
+ * tiny one (`small`), as a draw session's strokes:
+ *
+ *     ... --es teach circle
+ *
+ * An Activity screen line from the bridge's `@activity` JSON (see ActivityLine), without a band:
+ *
+ *     ... --es activity '{"what":"index tap","palm":"up","calibrated":true,"run":"media.next"}'
+ *
  * Guarded by the DUMP permission, which adb's shell has and apps can't get.
  */
 class DebugActions : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        intent.getStringExtra("activity")?.let { json ->
+            val line = ActivityLine.format(
+                json,
+                label = { id -> ActivityLine.label(id, device = { Profiles.devices(context).get(it)?.name }) { Labels.action(context, it) } },
+                profile = { Profiles.load(context).profiles.getOrNull(it)?.name },
+            ) ?: return
+            BandService.state.update { copy(log = (log + line).takeLast(60)) }
+            return
+        }
+        intent.getStringExtra("teach")?.let { shape ->
+            val screen = TeachDrawingActivity.listening ?: run {
+                Log.i("AirGestures", "debug teach: no Teach a drawing screen in front")
+                return
+            }
+            val points = when (shape) {
+                "zigzag" -> listOf(0.0 to 20.0, 20.0 to 20.0, 0.0 to 0.0, 20.0 to 0.0)
+                "small" -> listOf(0.0 to 0.0, 0.5 to 0.5, 1.0 to 0.0)
+                else -> (0..40).map { i -> val a = i / 40.0 * 2 * Math.PI; 10 * Math.cos(a) to 10 * Math.sin(a) }
+            }
+            val json = DrawingLibrary.tryJson(listOf(points)).toString()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                screen.started()
+                screen.pen(true)
+                for ((x, y) in points) screen.point(0, x.toFloat(), y.toFloat())
+                screen.pen(false)
+                screen.finished(json)
+            }
+            return
+        }
+        intent.getStringExtra("pad")?.let { name ->
+            val pad = TouchService.instance?.pad ?: run {
+                Log.i("AirGestures", "debug pad: the accessibility service is off")
+                return
+            }
+            val main = android.os.Handler(android.os.Looper.getMainLooper())
+            main.post { pad.started() }
+            main.postDelayed({ pad.pen(true) }, 400)
+            for (i in 0..36) {
+                val a = i / 36.0 * 2 * Math.PI
+                main.postDelayed({ pad.point(0, (10 * Math.cos(a)).toFloat(), (10 * Math.sin(a)).toFloat()) }, 450L + i * 40)
+            }
+            // A second stroke: the bulb's base.
+            main.postDelayed({ pad.pen(true) }, 2100)
+            for (i in 0..5) main.postDelayed({ pad.point(1, -4f + i * 1.6f, -13f) }, 2150L + i * 40)
+            main.postDelayed({ pad.pen(false) }, 2500)
+            when (name) {
+                "open" -> Unit
+                "" -> main.postDelayed({ pad.notDrawn() }, 2700)
+                else -> main.postDelayed({ pad.drawn(name) }, 2700)
+            }
+            return
+        }
         intent.getStringExtra("probe")?.let { probe ->
             val prefs = Prefs(context)
             prefs.probe = probe.trim()

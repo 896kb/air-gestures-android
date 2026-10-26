@@ -17,7 +17,6 @@ import android.os.Looper
 import android.os.SystemClock
 import org.json.JSONObject
 import java.io.File
-import java.util.ArrayDeque
 import java.util.UUID
 import kotlin.concurrent.thread
 
@@ -53,7 +52,6 @@ class BandLink(
     private var socket: BluetoothSocket? = null
     private var handle = 0L
     private var lastStatus = ""
-    private val hapticCommands = ArrayDeque<PendingHaptic>()
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
     @Volatile private var pending = false
     @Volatile private var wanted = false
@@ -89,15 +87,75 @@ class BandLink(
     fun setBandVibration(enabled: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.BandVibration(enabled)) }
     fun controlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.Controls(paused)) }
     fun syncControlsHaptics(paused: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.SyncControls(paused)) }
-    fun profileHaptics(previous: Boolean) = synchronized(lock) { enqueueHaptics(HapticCommand.Profile(previous)) }
+    fun profileHaptics(previous: Boolean = false) = synchronized(lock) { enqueueHaptics(HapticCommand.Profile(previous)) }
     fun volumeDetent() = synchronized(lock) { enqueueHaptics(HapticCommand.VolumeDetent) }
 
+    private val hapticCommands = java.util.ArrayDeque<HapticCommand>()
+
     private fun enqueueHaptics(command: HapticCommand) {
-        if (handle != 0L) hapticCommands.addLast(PendingHaptic(generation, command))
+        if (handle != 0L) hapticCommands.addLast(command)
     }
 
-    fun setMapping(mapping: String) = synchronized(lock) {
-        if (handle != 0L) Bridge.setMapping(handle, mapping)
+    /** New profiles, hand or call layer (Prefs.profilesJson); the next connection reads them anyway. */
+    fun setProfiles(json: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setProfiles(handle, json)
+    }
+
+    /** The app in front ("": none known). */
+    fun setForeground(app: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setForeground(handle, app)
+    }
+
+    fun setInCall(inCall: Boolean) = synchronized(lock) {
+        if (handle != 0L) Bridge.setInCall(handle, inCall)
+    }
+
+    /** A lesson is listening: gestures are reported, nothing runs. Kept for the next connection. */
+    fun setPractice(on: Boolean) = synchronized(lock) {
+        practice = on
+        if (handle != 0L) Bridge.setPractice(handle, on)
+    }
+
+    /** What [setPractice] last said. */
+    private var practice = false
+
+    /** Teaching drawings: draw sessions report their strokes and match nothing. Kept for the next connection. */
+    fun setTeaching(on: Boolean) = synchronized(lock) {
+        teaching = on
+        if (handle != 0L) Bridge.setTeaching(handle, on)
+    }
+
+    /** What [setTeaching] last said. */
+    private var teaching = false
+
+    /** Teaching drags: pinches report `@drag-sample`, nothing acts. Kept for the next connection. */
+    fun setDragTeaching(on: Boolean) = synchronized(lock) {
+        dragTeaching = on
+        if (handle != 0L) Bridge.setDragTeaching(handle, on)
+    }
+
+    /** What [setDragTeaching] last said. */
+    private var dragTeaching = false
+
+    /** The drawings draw sessions match against (DrawingLibrary JSON); the next connection reads them anyway. */
+    fun setLibrary(json: String) = synchronized(lock) {
+        if (handle != 0L) Bridge.setLibrary(handle, json)
+    }
+
+    /** Open a draw session from the app (a teach screen's try). */
+    fun startDrawing() = synchronized(lock) {
+        if (handle != 0L) Bridge.startDrawing(handle, now())
+    }
+
+    /** Close the open draw session, if any (`@draw-cancelled`). */
+    fun cancelDrawing() = synchronized(lock) {
+        if (handle != 0L) Bridge.cancelDrawing(handle)
+    }
+
+    /** `{"palm", "roll"}` right now (nulls: no fresh reading); null when not connected. */
+    fun palmNow(): JSONObject? = synchronized(lock) {
+        if (handle == 0L) return null
+        JSONObject(Bridge.palmNow(handle, now()))
     }
 
     /**
@@ -126,9 +184,15 @@ class BandLink(
         debugSend { Bridge.otaStart(it, mode, dir, now()) }
     }
 
-    /** The band's handwriting into a text field, on or off (see Bridge.setFieldTyping). */
+    /**
+     * The band's handwriting into a text field, on or off (see Bridge.setFieldTyping): one after
+     * another on [fieldSends], so an on and the off after it land in that order.
+     */
     fun setFieldTyping(on: Boolean, before: String = "", popup: Boolean = true) =
-        debugSend { Bridge.setFieldTyping(it, on, before, popup, now()) }
+        fieldSends.execute { send("handwriting") { Bridge.setFieldTyping(it, on, before, popup, now()) } }
+
+    /** Field typing's own thread (see [setFieldTyping]). */
+    private val fieldSends = java.util.concurrent.Executors.newSingleThreadExecutor { Thread(it, "band-field") }
 
     /** The field's edits since the last call and the pen; null when not connected. */
     fun fieldEdits(): org.json.JSONObject? = synchronized(lock) {
@@ -161,14 +225,17 @@ class BandLink(
     }
 
     /** Send what [request] returns for the open session, off the main thread; problems go to the log. */
-    private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") {
+    private fun debugSend(request: (Long) -> ByteArray) = thread(name = "band-debug") { send("debug", request) }
+
+    /** Ask the bridge for bytes and write them to the band, here; failures go to the log after [what]. */
+    private fun send(what: String, request: (Long) -> ByteArray) {
         try {
             val out = synchronized(lock) { if (handle == 0L) null else request(handle) }
             val stream = socket?.outputStream
-            if (out == null || stream == null) log("debug: not connected") else synchronized(stream) { stream.write(out) }
+            if (out == null || stream == null) log("$what: not connected") else synchronized(stream) { stream.write(out) }
             drain()
         } catch (e: Exception) {
-            log("debug: ${e.message}")
+            log("$what: ${e.message}")
         }
     }
 
@@ -183,6 +250,8 @@ class BandLink(
         }
         val bonded = bondedBand
         if (bonded != null) {
+            // Calibrations are kept per band.
+            if (prefs.bandAddress != bonded.address) prefs.bandAddress = bonded.address
             listener.onPhase(Phase.SEARCHING, bonded.name)
             // Directly when the band is probably near (fast); else Android's background
             // reconnect, which waits as long as it takes but can be slow to notice the band.
@@ -213,10 +282,10 @@ class BandLink(
         linkUp = false
         live = false
         synchronized(lock) {
-            hapticCommands.clear()
             if (handle != 0L) Bridge.close(handle)
             handle = 0L
             lastStatus = ""
+            hapticCommands.clear()
         }
     }
 
@@ -304,9 +373,14 @@ class BandLink(
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
             synchronized(lock) {
-                handle = Bridge.open(key.readBytes(), guess, prefs.paused, "", prefs.mapping())
-                // Seed feedback on the new session before any connection handshake/status.
+                handle = Bridge.open(key.readBytes(), guess, prefs.paused, prefs.profilesJson())
                 Bridge.setBandVibration(handle, prefs.bandVibration)
+                Bridge.setForeground(handle, Profiles.foreground ?: "")
+                Bridge.setInCall(handle, CallWatch.inCall)
+                Bridge.setPractice(handle, practice)
+                Bridge.setLibrary(handle, Drawings.load(context).toJson())
+                Bridge.setTeaching(handle, teaching)
+                Bridge.setDragTeaching(handle, dragTeaching)
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")
@@ -347,11 +421,11 @@ class BandLink(
                     try {
                         synchronized(lock) {
                             if (attempt == generation && handle != 0L) {
-                                Bridge.tick(handle, now()).takeIf { it.isNotEmpty() }?.let(write)
-                                drain()
+                                Bridge.tick(handle, now()).let(write)
                                 flushHapticsLocked(write, attempt)
                             }
                         }
+                        drain()
                     } catch (e: Exception) {
                         if (attempt == generation) log("link: ${e.message}")
                         break
@@ -364,11 +438,11 @@ class BandLink(
                 if (count < 0) break
                 synchronized(lock) {
                     if (attempt == generation && handle != 0L) {
-                        Bridge.feed(handle, buffer.copyOf(count), now()).takeIf { it.isNotEmpty() }?.let(write)
-                        drain()
+                        Bridge.feed(handle, buffer.copyOf(count), now()).let(write)
                         flushHapticsLocked(write, attempt)
                     }
                 }
+                drain()
             }
             if (attempt == generation) log("the band closed the input channel")
         } catch (e: Exception) {
@@ -396,6 +470,28 @@ class BandLink(
         synchronized(lock) { publishStatus() }
     }
 
+    /** Execute queued haptic requests in the same order as band writes. Caller holds [lock]. */
+    private fun flushHapticsLocked(write: (ByteArray) -> Unit, attempt: Int) {
+        while (attempt == generation && handle != 0L && hapticCommands.isNotEmpty()) {
+            val bytes = when (val command = hapticCommands.removeFirst()) {
+                is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
+                is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
+                is HapticCommand.SyncControls -> Bridge.syncControlsHaptics(handle, command.paused)
+                is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
+                HapticCommand.VolumeDetent -> Bridge.volumeDetent(handle)
+            }
+            write(bytes)
+        }
+    }
+
+    private sealed interface HapticCommand {
+        data class BandVibration(val enabled: Boolean) : HapticCommand
+        data class Controls(val paused: Boolean) : HapticCommand
+        data class SyncControls(val paused: Boolean) : HapticCommand
+        data class Profile(val previous: Boolean) : HapticCommand
+        data object VolumeDetent : HapticCommand
+    }
+
     /** Call with `lock` held. */
     private fun publishStatus() {
         if (handle == 0L) return
@@ -405,31 +501,6 @@ class BandLink(
         val status = JSONObject(json)
         if (status.optBoolean("connected")) listener.onPhase(Phase.CONNECTED, gatt?.device?.name)
         listener.onStatus(status)
-    }
-
-    /** JNI and writes share the active generation and writer under lock. */
-    private fun flushHapticsLocked(write: (ByteArray) -> Unit, attempt: Int) {
-        while (attempt == generation && handle != 0L && hapticCommands.isNotEmpty()) {
-            val pending = hapticCommands.removeFirst()
-            if (pending.generation != attempt) continue
-            val bytes = when (val command = pending.command) {
-                is HapticCommand.BandVibration -> Bridge.setBandVibration(handle, command.enabled)
-                is HapticCommand.Controls -> Bridge.controlsHaptics(handle, command.paused)
-                is HapticCommand.SyncControls -> Bridge.syncControlsHaptics(handle, command.paused)
-                is HapticCommand.Profile -> Bridge.profileHaptics(handle, command.previous)
-                HapticCommand.VolumeDetent -> Bridge.volumeDetent(handle)
-            }
-            if (bytes.isNotEmpty()) write(bytes)
-        }
-    }
-
-    private data class PendingHaptic(val generation: Int, val command: HapticCommand)
-    private sealed interface HapticCommand {
-        data class BandVibration(val enabled: Boolean) : HapticCommand
-        data class Controls(val paused: Boolean) : HapticCommand
-        data class SyncControls(val paused: Boolean) : HapticCommand
-        data class Profile(val previous: Boolean) : HapticCommand
-        data object VolumeDetent : HapticCommand
     }
 
     private fun log(line: String) = listener.onLog(line)

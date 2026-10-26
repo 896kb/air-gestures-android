@@ -24,6 +24,7 @@ private const val RESTORE = 7
 /** Setup: the owner key, the permissions and the system settings the band needs. */
 class SetupActivity : Screen() {
     private lateinit var steps: LinearLayout
+    private lateinit var bandVibration: LinearLayout
     /** The claim state the steps were last drawn for. */
     private var drawnClaiming = false
     private val watch: (BandService.State) -> Unit = { state -> if (state.claiming != drawnClaiming) render() }
@@ -36,7 +37,9 @@ class SetupActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         steps = column(gap = 14f)
+        bandVibration = column()
         val band = column().apply {
+            addView(bandVibration)
             addView(navRow(R.drawable.ic_zap, "Band firmware updates") { open<FirmwareActivity>() })
             addView(navRow(R.drawable.ic_pencil, "Personal words") { open<PersonalWordsActivity>() })
             addView(navRow(R.drawable.ic_info, "Licenses") { open<LicensesActivity>() })
@@ -45,6 +48,7 @@ class SetupActivity : Screen() {
             addView(card(null, steps))
             addView(card(null, band))
         }, title = "Setup")
+        renderBandVibration()
     }
 
     override fun onResume() {
@@ -63,17 +67,22 @@ class SetupActivity : Screen() {
     private fun render() {
         drawnClaiming = BandService.state.value.claiming
         steps.removeAllViews()
-        val bandVibration = Prefs(this).bandVibration
-        steps.addView(settingRow(
+        Setup.steps(this).forEach { steps.addView(stepRow(it)) }
+    }
+
+    private fun renderBandVibration() {
+        bandVibration.removeAllViews()
+        val enabled = Prefs(this).bandVibration
+        bandVibration.addView(settingRow(
             "Band vibration",
-            "Use the Band for controls, profile feedback and volume detents",
-            pill(if (bandVibration) "On" else "Off") {
-                BandService.instance?.setBandVibration(!bandVibration)
-                    ?: Prefs(this).let { it.bandVibration = !bandVibration }
-                render()
+            "Use the band's haptics for app feedback",
+            pill(if (enabled) "On" else "Off") {
+                val next = !Prefs(this).bandVibration
+                Prefs(this).bandVibration = next
+                BandService.instance?.setBandVibration(next)
+                renderBandVibration()
             }.first,
         ))
-        Setup.steps(this).forEach { steps.addView(stepRow(it)) }
     }
 
     private fun stepRow(step: Step) = row(gap = 12f).apply {
@@ -201,27 +210,44 @@ class SetupActivity : Screen() {
         val prefs = Prefs(this)
         return Backup.Settings(
             Profiles.load(this),
-            Gesture.entries.associate { it.key to prefs.callActionId(it) },
+            prefs.calls(),
             prefs.hand,
             Profiles.speak(this),
             Profiles.vibrate(this),
             Profiles.sequences(this),
-            Prefs(this).bandVibration,
+            Profiles.band(this),
+            Profiles.sharedDrawings(this),
+            Drawings.load(this),
+            drawingsFrame = DrawingLibrary.FRAME,
+            drawingsReteach = Drawings.toReteach(this),
+            devices = Profiles.devices(this),
+            bandVibration = prefs.bandVibration,
         )
     }
 
     /** Replace the settings with a backup's, and give the band the new mapping. */
     private fun apply(settings: Backup.Settings) {
         val prefs = Prefs(this)
-        Profiles.update(applicationContext) { settings.profiles }
-        for (gesture in Gesture.entries) settings.calls[gesture.key]?.let { prefs.setCallAction(gesture, it) }
+        // The drawings first (their file is the source of truth), then the profiles and the shared
+        // drawings' actions in one edit, so the two never disagree.
+        // Drawings taught in the old frame (or from a backup that didn't say) go on the re-teach note.
+        settings.drawings?.let { restored ->
+            Drawings.replace(applicationContext, restored, DrawingLibrary.restoredReteach(settings.drawingsFrame, restored.names, settings.drawingsReteach))
+        }
+        Profiles.updateDrawingActions(applicationContext) { _, shared -> settings.profiles to (settings.sharedDrawings ?: shared) }
+        // Every gesture: the backup's call action, else its default (not what was set before).
+        for ((key, id) in Backup.restoredCalls(settings.calls)) Gesture.of(key)?.let { prefs.setCallAction(it, id) }
         prefs.hand = settings.hand
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
-        settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         prefs.bandVibration = settings.bandVibration
-        BandService.instance?.remap()
         BandService.instance?.setBandVibration(settings.bandVibration)
+        settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
+        settings.devices?.let { restored -> Profiles.updateDevices(applicationContext) { restored } }
+        Profiles.updateBand(applicationContext) { settings.band }
+        BandService.instance?.drawingsChanged()
+        BandService.instance?.remap()
+        renderBandVibration()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()
     }
@@ -306,7 +332,7 @@ class SetupActivity : Screen() {
                 val n = settings.profiles.profiles.size
                 confirm(
                     "Restore settings?",
-                    "Replace your profiles, During calls, wrist and switches with this backup's " +
+                    "Replace your profiles, During calls, wrist, switches and Band vibration setting with this backup's " +
                         "$n ${if (n == 1) "profile" else "profiles"}. The owner key stays as it is.",
                     "Restore",
                 ) { apply(settings) }

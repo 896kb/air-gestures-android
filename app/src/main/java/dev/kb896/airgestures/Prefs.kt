@@ -39,23 +39,15 @@ class Prefs(context: Context) {
         get() = prefs.getString("hand", "band") ?: "band"
         set(value) = prefs.edit().putString("hand", value).apply()
 
-    /** What pinch and turn does in the profile in force. */
-    val dial: DialChoice
-        get() = DialChoice.of(Profiles.active(context).dial)
+    /** The band's Bluetooth address, as BandLink last connected to it: calibrations are kept per band. */
+    var bandAddress: String?
+        get() = prefs.getString("band.address", null)
+        set(value) = prefs.edit().putString("band.address", value).apply()
 
-    /** What pinch and turn does in [profile]. */
-    fun dial(profile: String): DialChoice = DialChoice.of(Profiles.load(context).profile(profile)?.dial)
+    /** The wrist band-core reads gestures for: the band's, else the one it's set to (as the bridge's `Setup::hand_in_use`). */
+    fun handInUse(): String? = BandService.state.value.hand ?: hand.takeIf { it != "band" }
 
-    fun setDial(profile: String, dial: DialChoice) = Profiles.update(context) { it.withDial(profile, dial.key) }
-
-    /** A practice lesson is open (its controls state is [practiceWasPaused]). */
-    var practising: Boolean
-        get() = prefs.getBoolean("practice.on", false)
-        set(value) = prefs.edit().putBoolean("practice.on", value).apply()
-
-    var practiceWasPaused: Boolean
-        get() = prefs.getBoolean("practice.was_paused", false)
-        set(value) = prefs.edit().putBoolean("practice.was_paused", value).apply()
+    fun setDial(profile: String, dial: String) = Profiles.update(context) { it.withDial(profile, dial) }
 
     /** The service should keep the band connected. */
     var running: Boolean
@@ -69,8 +61,6 @@ class Prefs(context: Context) {
         return chosen?.map?.get(gesture.key) ?: gesture.default.id
     }
 
-    fun action(gesture: Gesture, profile: String? = null): Action = Action.of(actionId(gesture, profile))
-
     fun setAction(profile: String, gesture: Gesture, id: String) =
         Profiles.update(context) { it.withAction(profile, gesture.key, id) }
 
@@ -81,38 +71,38 @@ class Prefs(context: Context) {
     fun setCallAction(gesture: Gesture, id: String) =
         prefs.edit().putString("call.${gesture.key}", id).apply()
 
-    /**
-     * `gesture=action;…` plus `dial_up`/`dial_down` for the bridge: the profile in force, with
-     * the call layer while in a call, and `triples=profiles` once there are profiles to move between.
-     */
-    fun mapping(inCall: Boolean = CallWatch.inCall): String {
-        val list = Profiles.load(context)
-        val active = list.active(Profiles.foreground)
-        val dial = DialChoice.of(active.dial)
-        return Mappings.effective(
-            Gesture.entries.associateTo(LinkedHashMap()) { it.key to (active.map[it.key] ?: it.default.id) },
-            Gesture.entries.associate { it.key to callActionId(it) },
-            dial.up,
-            dial.down,
-            hand,
-            inCall,
-        ) + if (list.profiles.size >= 2) ";triples=profiles" else ""
-    }
+    /** The During calls layer: gesture key → action id, [Mappings.AS_USUAL] or [Mappings.NOTHING]. */
+    fun calls() = Gesture.entries.associate { it.key to callActionId(it) }
+
+    /** Everything the bridge needs to know about gestures, as JSON (see [Mappings.profilesJson]). */
+    fun profilesJson(): String = Mappings.profilesJson(Mappings.Input(
+        Profiles.load(context),
+        Profiles.band(context),
+        calls(),
+        Profiles.sharedDrawings(context),
+        listOf("left", "right").associateWith { Calibrations.get(context, bandAddress, it) },
+        hand,
+    ))
 
     /**
-     * Every action id a gesture can run, in any profile and during calls, with the steps of the
-     * sequences a gesture is set to (one no gesture uses doesn't make Setup ask for anything).
+     * Every action id a gesture can run, in any profile (palm overrides and drawings too) and
+     * during calls, with the shared drawings' and the steps of the sequences a gesture is set to
+     * (one no gesture uses doesn't make Setup ask for anything).
      */
     private fun allIds(): List<String> {
         val ids = Profiles.load(context).profiles.flatMap { profile ->
-            Gesture.entries.map { profile.map[it.key] ?: it.default.id }
-        } + Gesture.entries.map { callActionId(it) }
+            Gesture.entries.map { profile.map[it.key] ?: it.default.id } +
+                profile.palm.values.flatMap { it.values } + profile.drawings.values
+        } + Gesture.entries.map { callActionId(it) } + Profiles.sharedDrawings(context).values
         val used = ids.filter { it.startsWith(Sequences.PREFIX) }.map { it.removePrefix(Sequences.PREFIX) }.toSet()
         return ids + Profiles.sequences(context).sequences.filter { it.id in used }.flatMap { it.steps }
     }
 
-    /** Every profile's dial. */
-    private fun dials() = Profiles.load(context).profiles.map { DialChoice.of(it.dial) }
+    /** Every profile's dials: the index dial, the middle dial and the sliders' targets (only while a finger's drags are sliders). */
+    private fun dials() = Profiles.load(context).profiles.flatMap { profile ->
+        val sliders = listOf(profile.indexDrags, profile.middleDrags).filter { it.sliders }.flatMap { it.targets }
+        (listOf(profile.dial, profile.middleDial) + sliders).map { DialChoice.of(it) }
+    }
 
     /**
      * Something needs the accessibility service: a screen gesture, a tap, an app or the voice
