@@ -19,6 +19,7 @@ class ActivityLineTest {
         assertEquals("swipe up · sideways → nothing (controls off)", line("""{"what":"swipe up","palm":"sideways","calibrated":true,"off":true}"""))
         assertEquals("index tap · palm down → teaching drags", line("""{"what":"index tap","palm":"down","calibrated":true,"teaching":true}"""))
         assertEquals("swipe up · palm up → drawing", line("""{"what":"swipe up","palm":"up","calibrated":true,"drawing":true}"""))
+        assertEquals("swipe left · palm down → editing the text field", line("""{"what":"swipe left","palm":"down","calibrated":true,"writing":true}"""))
         assertEquals("swipe up · palm down → nothing (too soon after the last)", line("""{"what":"swipe up","palm":"down","calibrated":true,"too_soon":true}"""))
     }
 

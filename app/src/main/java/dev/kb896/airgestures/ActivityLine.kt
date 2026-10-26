@@ -41,6 +41,8 @@ object ActivityLine {
             // While teaching drags, or a drawing is open: gestures do nothing else.
             o.optBoolean("teaching") -> "teaching drags"
             o.optBoolean("drawing") -> "drawing"
+            // Writing in a text field: the field's (see WriteService).
+            o.optBoolean("writing") -> "editing the text field"
             else -> "nothing"
         }
         return "$head → $did"

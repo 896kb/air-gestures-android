@@ -54,8 +54,11 @@ fn the_report_flags_invalid_settings_and_warns() {
         r["invalid"],
         json!([{"kind":"binding","place":0,"gesture":"swipe_up"},{"kind":"band","control":"next"}])
     );
-    let r = parsed(&report(r#"{"band":{"controls":{"gesture":"middle_hold"},"draw":{"gesture":"index_hold"}}}"#));
+    let r = parsed(&report(r#"{"band":{"controls":{"gesture":"middle_hold"},"draw":{"gesture":"index_triple"}}}"#));
     assert_eq!(r["invalid"], json!([{"kind":"draw-cant-cancel"}]));
+    // On a hold (the standard Draw) it's fine.
+    let r = parsed(&report(r#"{"band":{"controls":{"gesture":"middle_hold"},"draw":{"gesture":"index_hold"}}}"#));
+    assert_eq!(r["invalid"], json!([]));
     assert_eq!(report("{"), r#"{"error":"bad-json"}"#);
 }
 

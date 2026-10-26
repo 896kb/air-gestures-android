@@ -7,7 +7,8 @@
 //! `"steps": [[id, n], …]`, `"band": "controls", "result": "on"|"off"`, `"band": "next"|"previous",
 //! "profile": index`, `"band": …, "held": app`, `"band": "draw", "result": "opened"|"cancelled"`,
 //! `"paused": control`, `"off": true` (the controls were off), `"too_soon": true`,
-//! `"teaching": true` (teaching drags), `"drawing": true` (a draw session open), `"nothing": true`;
+//! `"teaching": true` (teaching drags), `"drawing": true` (a draw session open), `"writing": true`
+//! (for the text field being written in), `"nothing": true`;
 //! a pinch's `steps` carry `"practiced": true` in practice (what they would have done); a drawing is `{"drawn": name}` with its `run` / `practiced`, or
 //! `{"not_drawn": true}`.
 
@@ -101,6 +102,7 @@ pub fn lines(outputs: &[Output<String>], ctx: &Context) -> Vec<String> {
                 Unused::Paused(builtin) => did(&mut pending, &mut lines, "paused", json!(builtin_key(*builtin)), None),
                 Unused::Teaching => did(&mut pending, &mut lines, "teaching", json!(true), None),
                 Unused::Drawing => did(&mut pending, &mut lines, "drawing", json!(true), None),
+                Unused::Writing => did(&mut pending, &mut lines, "writing", json!(true), None),
             },
             Output::Controls { enabled } => did(&mut pending, &mut lines, "band", json!("controls"), Some(("result", json!(if *enabled { "on" } else { "off" })))),
             Output::Profile { index, step } => {
@@ -164,6 +166,7 @@ mod tests {
         assert_eq!(why(Unused::Paused(Builtin::Draw))["paused"], json!("draw"));
         assert_eq!(why(Unused::Teaching)["teaching"], json!(true));
         assert_eq!(why(Unused::Drawing)["drawing"], json!(true));
+        assert_eq!(why(Unused::Writing)["writing"], json!(true));
     }
 
     #[test]
