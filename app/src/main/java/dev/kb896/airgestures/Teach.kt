@@ -184,6 +184,26 @@ class DrawTeach {
     companion object {
         const val TRIES = 3
 
+        /**
+         * Why Save can't be tapped yet, or null when it can (a new drawing has a name from the
+         * start: [defaultName]). [problem]: the drawings file can't be read.
+         */
+        fun saveBlocked(tries: Int, alike: Boolean, checkFailed: Boolean, name: String, free: Boolean, problem: String?): String? = when {
+            problem != null -> problem
+            tries < TRIES -> (TRIES - tries).let { "Draw it $it more ${if (it == 1) "time" else "times"} to save." }
+            checkFailed -> "Save waits until the drawings can be checked: Start again to retry."
+            !alike -> "Save waits until three tries look alike."
+            name.isBlank() -> "A drawing needs a name: type one in Name."
+            !free -> "Another drawing is called ${name.trim()}: pick another name."
+            else -> null
+        }
+
+        /** A new drawing's name: "Drawing #N", the lowest N from 1 no drawing has (ignoring case). */
+        fun defaultName(names: Collection<String>): String {
+            val taken = names.map { it.lowercase() }.toSet()
+            return generateSequence(1) { it + 1 }.map { "Drawing #$it" }.first { it.lowercase() !in taken }
+        }
+
         /** A name no other drawing has, ignoring case ([own]: the one being renamed or taught again, which may change only its case). */
         fun nameFree(name: String, names: Collection<String>, own: String?): Boolean {
             val clean = name.trim()

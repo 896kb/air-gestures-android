@@ -29,6 +29,8 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     private var own = false
     private var message: String? = null
     private var alike = false
+    /** The look-alike check couldn't run: Save waits. */
+    private var checkFailed = false
     /** The session ended with nothing drawn: wait for the user's Draw. */
     private var waiting = false
     private val live = sortedMapOf<Int, MutableList<Pair<Float, Float>>>()
@@ -55,7 +57,8 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         forProfile = extra
         profileId = extra ?: list.picked
         own = extra != null
-        name = editing.orEmpty()
+        // Teaching again keeps its name; a new one starts as "Drawing #N" (editable), so Save works once the tries are alike.
+        name = editing ?: DrawTeach.defaultName(Drawings.load(this).names)
         action = editing?.let { e ->
             (if (own) list.profile(profileId)?.drawings?.get(e)?.takeIf { it.isNotEmpty() } else null) ?: Profiles.sharedDrawings(this)[e]
         }.orEmpty()
@@ -131,6 +134,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
             main.postDelayed({ service?.drawTry() }, NEXT_MS)
             return render()
         }
+        checkFailed = false
         message = teach.refused(Bridge.checkTries(teach.json())) ?: lookalike()
         alike = message == null
         if (!teach.full) main.postDelayed({ service?.drawTry() }, NEXT_MS)
@@ -142,8 +146,10 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
         // Not knowing is no "alike": Save waits until the check works.
         val failed = "Couldn't check against your drawings: Save waits until it can. Start again to retry."
         val answer = runCatching { JSONObject(Bridge.looksLike(Drawings.load(this).except(editing).toJson(), teach.json())) }.getOrNull()
-            ?: return failed
-        if (answer.optString("error").isNotEmpty()) return failed
+        if (answer == null || answer.optString("error").isNotEmpty()) {
+            checkFailed = true
+            return failed
+        }
         if (answer.isNull("like")) return null
         val like = answer.optString("like")
         teach.tries.clear()
@@ -151,6 +157,8 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     }
 
     override fun cancelled() {
+        // The three tries are in: a session ending now (the screen closing) changes nothing.
+        if (teach.full) return
         // Ten seconds without a stroke (or the band's close): wait for the user.
         waiting = true
         message = "Draw when you're ready."
@@ -160,6 +168,7 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
     private fun startAgain() {
         teach.tries.clear()
         alike = false
+        checkFailed = false
         message = null
         waiting = false
         service?.drawTry()
@@ -221,10 +230,13 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
             })
         }))
 
-        val nameOk = DrawTeach.nameFree(name, Drawings.load(this).names, own = editing)
-        if (name.isNotEmpty() && !nameOk) body.addView(note("Another drawing is called $name: pick another name."))
+        // Why Save is grey, if it is: one reason, the first that holds.
+        val free = DrawTeach.nameFree(name, Drawings.load(this).names, own = editing)
+        val blocked = DrawTeach.saveBlocked(teach.tries.size, alike, checkFailed, name, free, Drawings.problem(this))
+        // The refusal's own message already shows above; this says what Save waits for.
+        if (blocked != null && blocked != message) body.addView(note(blocked))
         body.addView(row(gap = 10f).apply {
-            val ready = teach.full && alike && nameOk
+            val ready = blocked == null
             addView(pill("Save", R.drawable.ic_check) { if (ready) save() }.first.apply {
                 isEnabled = ready
                 alpha = if (ready) 1f else .4f

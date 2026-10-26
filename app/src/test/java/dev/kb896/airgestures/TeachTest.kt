@@ -94,4 +94,24 @@ class TeachTest {
         assertTrue(DrawTeach.nameFree("bulb", listOf("Bulb", "Zed"), own = "Bulb"))
         assertFalse(DrawTeach.nameFree("zed", listOf("Bulb", "Zed"), own = "Bulb"))
     }
+
+    @Test fun `a new drawing is called Drawing #N, the lowest number free`() {
+        assertEquals("Drawing #1", DrawTeach.defaultName(emptyList()))
+        assertEquals("Drawing #1", DrawTeach.defaultName(listOf("Bulb", "Drawing #2")))
+        assertEquals("Drawing #3", DrawTeach.defaultName(listOf("Drawing #1", "drawing #2")))
+        assertEquals("Drawing #2", DrawTeach.defaultName(listOf("Drawing #1", "Drawing #3")))
+    }
+
+    @Test fun `Save says what it waits for`() {
+        fun blocked(tries: Int = 3, alike: Boolean = true, checkFailed: Boolean = false, name: String = "Bulb", free: Boolean = true, problem: String? = null) =
+            DrawTeach.saveBlocked(tries, alike, checkFailed, name, free, problem)
+        assertNull(blocked())
+        assertEquals("A drawing needs a name: type one in Name.", blocked(name = " "))
+        assertEquals("Draw it 2 more times to save.", blocked(tries = 1))
+        assertEquals("Draw it 1 more time to save.", blocked(tries = 2))
+        assertEquals("Save waits until three tries look alike.", blocked(alike = false))
+        assertEquals("Save waits until the drawings can be checked: Start again to retry.", blocked(alike = false, checkFailed = true))
+        assertEquals("Another drawing is called Bulb: pick another name.", blocked(free = false))
+        assertEquals("broken", blocked(problem = "broken"))
+    }
 }
