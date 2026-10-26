@@ -131,7 +131,7 @@ class MappingsTest {
             Mappings.extras(Mappings.Automation.Sequence("Goodnight", null, null), device = null))
     }
 
-    @Test fun `a sequence carries the profile that started it, the shared drawings none`() {
+    @Test fun `a sequence carries the profile that started it, a shared drawing's too`() {
         val seq = ProfileList(
             listOf(Profile("p1", "Music", mapOf("index_tap" to "seq:s1"), "volume",
                 palm = mapOf("middle_tap" to mapOf("up" to "seq:s1")), drawings = mapOf("Moon" to "seq:s1")),
@@ -146,9 +146,10 @@ class MappingsTest {
         assertEquals("seq:s1/Music", music.getJSONObject("palm").getJSONObject("middle_tap").getString("up"))
         assertEquals("seq:s1/Music", music.getJSONObject("drawings").getString("Moon"))
         assertEquals("seq:s1/During+calls", json.getJSONObject("calls").getString("swipe_up"))
+        // The shared list stays plain; each profile gets its own named copy, as for automation.
         assertEquals("seq:s1", json.getJSONObject("drawings").getString("Star"))
-        // A shared drawing's sequence isn't copied into each profile (only automation is).
-        assertFalse(music.getJSONObject("drawings").has("Star"))
+        assertEquals("seq:s1/Music", music.getJSONObject("drawings").getString("Star"))
+        assertEquals("seq:s1/Caf%C3%A9%3A+night%2F2", json.getJSONArray("profiles").getJSONObject(1).getJSONObject("drawings").getString("Star"))
         val cafe = json.getJSONArray("profiles").getJSONObject(1).getJSONObject("map").getString("index_tap")
         assertEquals("s1" to "Café: night/2", Sequences.started(cafe))
         assertEquals("s1" to "During calls", Sequences.started(json.getJSONObject("calls").getString("swipe_up")))

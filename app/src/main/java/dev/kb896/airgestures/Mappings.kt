@@ -98,11 +98,12 @@ object Mappings {
         JSONObject(map.filterValues { it.isNotEmpty() }.mapValues { (name, id) -> named(id, "$DRAWING$name", profile) })
 
     /**
-     * [profile]'s own drawings, and the shared ones that send to automation where it has none
-     * of its own: band-core would run the shared action, which can't say which profile it's in.
+     * [profile]'s own drawings, and the shared ones that send to automation or run a sequence
+     * (whose automation steps send the profile) where it has none of its own: band-core would
+     * run the shared action, which can't say which profile it's in.
      */
     private fun drawingsOf(profile: Profile, shared: Map<String, String>) =
-        shared.filterValues(::isAutomation) + profile.drawings.filterValues { it.isNotEmpty() }
+        shared.filterValues { isAutomation(it) || it.startsWith(Sequences.PREFIX) } + profile.drawings.filterValues { it.isNotEmpty() }
 
     fun profilesJson(input: Input): String {
         val list = input.list
