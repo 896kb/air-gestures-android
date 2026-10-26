@@ -686,14 +686,15 @@ class BandService : Service(), BandLink.Listener {
             }
         }
 
-        fun setDial(context: Context, profile: String, dial: DialChoice) {
+        /** Store what the index finger's pinch and turn does in [profile] (a [DialChoice] key, or automation for a device). */
+        fun setDial(context: Context, profile: String, dial: String) {
             Prefs(context).setDial(profile, dial)
             instance?.remap()
         }
 
         /** Store what the middle finger's pinch and turn does in [profile], live on the band when the service runs. */
-        fun setMiddleDial(context: Context, profile: String, dial: DialChoice) {
-            Profiles.update(context) { it.withMiddleDial(profile, dial.key) }
+        fun setMiddleDial(context: Context, profile: String, dial: String) {
+            Profiles.update(context) { it.withMiddleDial(profile, dial) }
             instance?.remap()
         }
 

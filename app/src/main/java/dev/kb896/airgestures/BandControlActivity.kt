@@ -211,7 +211,7 @@ class BandControlActivity : GestureScreen() {
                 val profile = list.profiles.getOrNull(s.profile) ?: continue
                 val target = profile.drags(s.part).targets.getOrNull(s.pair) ?: DialChoice.NONE.key
                 val pair = Drags.PAIRS.getOrNull(s.pair)?.first?.lowercase().orEmpty()
-                addView(place("${profile.name} · ${s.part.label} $pair slider", DialChoice.of(target).label, report.isNew(s)))
+                addView(place("${profile.name} · ${s.part.label} $pair slider", Labels.dial(context, target), report.isNew(s)))
             }
             addView(note("They stay saved and come back if you move ${builtin.label} to another gesture."))
         }

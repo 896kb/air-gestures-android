@@ -86,7 +86,7 @@ class DebugActions : BroadcastReceiver() {
         intent.getStringExtra("activity")?.let { json ->
             val line = ActivityLine.format(
                 json,
-                label = { id -> ActivityLine.label(id) { Labels.action(context, it) } },
+                label = { id -> ActivityLine.label(id, device = { Profiles.devices(context).get(it)?.name }) { Labels.action(context, it) } },
                 profile = { Profiles.load(context).profiles.getOrNull(it)?.name },
             ) ?: return
             BandService.state.update { copy(log = (log + line).takeLast(60)) }

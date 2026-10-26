@@ -422,8 +422,8 @@ abstract class Screen : Activity() {
             true
         }
 
-    /** Ask for a line of text (a profile's name): the field starts with [initial]. */
-    fun ask(title: String, initial: String, action: String, onDone: (String) -> Unit) {
+    /** Ask for a line of text (a profile's name): the field starts with [initial]; [note] under it. */
+    fun ask(title: String, initial: String, action: String, note: String? = null, onDone: (String) -> Unit) {
         val field = android.widget.EditText(this).apply {
             setText(initial)
             setSelection(initial.length)
@@ -435,7 +435,11 @@ abstract class Screen : Activity() {
             setPadding(dpi(14f), dpi(12f), dpi(14f), dpi(12f))
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
         }
-        val dialog = sheet(title, field, action) {
+        val body = if (note == null) field else column(gap = 10f).apply {
+            addView(field)
+            addView(this@Screen.note(note))
+        }
+        val dialog = sheet(title, body, action) {
             onDone(field.text.toString())
             true
         }

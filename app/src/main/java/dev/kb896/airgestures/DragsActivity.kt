@@ -66,17 +66,24 @@ class DragsActivity : GestureScreen() {
         }
         for ((pair, names) in Drags.PAIRS.withIndex()) {
             val (name, detail) = names
-            val target = DialChoice.of(drags.targets.getOrNull(pair))
+            val key = drags.targets.getOrNull(pair)
+            val target = DialChoice.of(key)
             val paused = report.pausedSlider(index, part, pair)
             val tags = listOfNotNull(paused?.let { "${it.control.label} is on a drag of this pair" to false })
             val hint = listOfNotNull(pausedWhere(paused?.positions), detail).joinToString(" · ")
-            rows.addView(gestureRow(target.icon, name, target.label, target == DialChoice.NONE, paused = paused != null, tags = tags, hint = hint) {
+            rows.addView(gestureRow(target.icon, name, Labels.dial(this, key), target == DialChoice.NONE, paused = paused != null, tags = tags, hint = hint) {
                 val choices = dialChoices
                 choose(name, choices.map { Option(it.label, it == target, it.icon) }, heading = "${part.label} slider") { i ->
-                    val targets = drags.targets.toMutableList().also { it[pair] = choices[i].key }
-                    BandService.setDrags(applicationContext, profileId, part, drags.copy(targets = targets))
-                    render()
-                    if (choices[i] == DialChoice.AUTOMATION) automationGuide(firstTime = true)
+                    fun set(chosen: String) {
+                        val targets = drags.targets.toMutableList().also { it[pair] = chosen }
+                        BandService.setDrags(applicationContext, profileId, part, drags.copy(targets = targets))
+                        render()
+                    }
+                    if (choices[i] != DialChoice.AUTOMATION) return@choose set(choices[i].key)
+                    pickDevice(key.orEmpty()) { device ->
+                        set(Mappings.automationId(device))
+                        automationGuide(firstTime = true)
+                    }
                 }
             })
         }

@@ -42,7 +42,7 @@ class Prefs(context: Context) {
     /** The wrist band-core reads gestures for: the band's, else the one it's set to (as the bridge's `Setup::hand_in_use`). */
     fun handInUse(): String? = BandService.state.value.hand ?: hand.takeIf { it != "band" }
 
-    fun setDial(profile: String, dial: DialChoice) = Profiles.update(context) { it.withDial(profile, dial.key) }
+    fun setDial(profile: String, dial: String) = Profiles.update(context) { it.withDial(profile, dial) }
 
     /** The service should keep the band connected. */
     var running: Boolean

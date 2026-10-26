@@ -77,6 +77,7 @@
         <activity android:name=".TeachDrawingActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />
         <activity android:name=".PracticeActivity" android:exported="false" />
         <activity android:name=".SequenceActivity" android:exported="false" />
+        <activity android:name=".HomeDevicesActivity" android:exported="false" />
 
         <receiver
             android:name=".SequenceRunner"

@@ -69,7 +69,7 @@ class ProfileActivity : GestureScreen() {
         for (part in listOf(Part.INDEX, Part.MIDDLE)) {
             val dial = DialChoice.of(profile.dialOf(part))
             val guide = if (dial == DialChoice.AUTOMATION) ({ automationGuide() }) else null
-            dials.addView(gestureRow(dial.icon, "${part.label} dial", dial.label, dial == DialChoice.NONE, info = guide) {
+            dials.addView(gestureRow(dial.icon, "${part.label} dial", Labels.dial(this, profile.dialOf(part)), dial == DialChoice.NONE, info = guide) {
                 pickDial(profileId, part)
             })
         }
