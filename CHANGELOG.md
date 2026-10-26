@@ -4,7 +4,7 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
-## 0.7.8
+## 0.9.17
 
 - An app can say it's in front itself, for when the screen can't tell: broadcast
   `dev.kb896.airgestures.SET_PROFILE` with extra `profile` = its package name as it comes
@@ -16,10 +16,10 @@ fails without one.
   a lost connection.
 - **Band controls:** Controls on/off, Next profile, Previous profile and the new Draw sit
   above the profiles, one gesture each (by default the middle hold, the index and middle
-  triple taps; Draw on nothing), the same in every profile, in apps' own profiles and during
-  calls. Each can be limited to palm positions. A profile's action on a band-control gesture
-  is kept and shown as paused, and runs again once the band control moves; picking a used
-  gesture says what will pause.
+  triple taps, and Draw on the middle tap), the same in every profile, in apps' own profiles
+  and during calls. Each can be limited to palm positions. A profile's action on a
+  band-control gesture is kept and shown as paused, and runs again once the band control
+  moves; picking a used gesture says what will pause.
 - **The pinch:** index and middle each have a hold, a dial (pinch and turn) and six drags
   (left, right, toward, away, up, down) as gestures or sliders. With a dial or drags, a
   finger's hold acts when you let go.
@@ -27,7 +27,12 @@ fails without one.
   to two positions); calibrate per band and wrist.
 - **Drawings:** pinch and draw in the air or on a table, matched against the drawings you
   teach (three tries each); shared or per-profile actions; a pad shows what you draw.
-- **Teach your drags** for your own wrist.
+- **Draw is on the middle tap** by default. Coming from 0.7.7, it stays off if the middle
+  tap already does something (in any profile, or during calls): that tap keeps doing it.
+- **The middle dial** (pinch and turn with the middle finger) is brightness in new
+  profiles; your existing profiles keep theirs.
+- **Teach your drags** for your own wrist. Turning drags or sliders on before you have
+  says so, with a link: untaught, away and right can mix up.
 - **Automation:** overrides carry `palm`; the middle dial, sliders and drawings have their
   own names.
 - The settings backup is version 2 (band controls and drawings); version 1 backups still
