@@ -56,6 +56,9 @@ pub struct Connection {
     field_ended: bool,
     /// What the band wrote isn't typed (the controls off): said once in the log, till it types again.
     untyped_said: bool,
+    /// The last edits of a field typing ended (its word choices taken back out of it): the next
+    /// `field_edits` gives them.
+    left_edits: Vec<fieldtext::Edit>,
     /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
     roll: palmlive::LiveRoll,
 }
@@ -115,6 +118,7 @@ impl Connection {
             field: None,
             field_ended: false,
             untyped_said: false,
+            left_edits: Vec::new(),
             roll: palmlive::LiveRoll::default(),
         })
     }
@@ -371,6 +375,12 @@ impl Connection {
         }
         self.field_ended = false;
         self.controls.set_writing(on);
+        if on {
+            // A fresh start: what was left is for the text as it was.
+            self.left_edits.clear();
+        } else {
+            self.finish_field();
+        }
         self.field = on.then(|| {
             let mut field = fieldtext::FieldTyping::new(before, now);
             field.set_popup(popup);
@@ -382,13 +392,24 @@ impl Connection {
     /// The controls went off while typing into a field: it goes, the controls stop writing and
     /// the band goes back to gestures (see `field_ended_bytes`); `@field off` tells the app.
     fn end_field(&mut self) {
-        if self.field.take().is_none() {
+        if self.field.is_none() {
             return;
         }
+        self.finish_field();
         self.controls.set_writing(false);
         self.field_ended = true;
         self.actions.push("@field off".into());
         self.log.push("handwriting: back to gestures, the controls went off".into());
+    }
+
+    /// The field goes; word choices shown in it go back to the word, and what it hadn't given yet
+    /// is left for the next `field_edits` (the app applies it as it leaves).
+    fn finish_field(&mut self) {
+        let Some(mut field) = self.field.take() else { return };
+        let words = words::dictionary();
+        // The time only says when it was last sure of a letter: nothing, for a field that's going.
+        field.choose_cancel(words.as_deref(), 0.0);
+        self.left_edits.extend(field.take_edits());
     }
 
     /// The band back to gestures after `end_field`, once there's a `feed` or `tick` to write it.
@@ -411,10 +432,11 @@ impl Connection {
     /// The edits for the text field since the last call, and whether the pen is down, as JSON:
     /// `{"active": true, "edits": [{"delete", "insert"}], "pen": bool, …}`; with no field
     /// typed into, `{"active": false, …, "off": bool}` (`off`: the controls are off, so
-    /// none will be till they're on).
+    /// none will be till they're on), its edits the last of the field that ended, once.
     pub fn field_edits(&mut self, now: f64) -> String {
         let Some(field) = self.field.as_mut() else {
-            return serde_json::json!({"active": false, "edits": [], "pen": false, "off": self.controls.status().paused}).to_string();
+            let edits = std::mem::take(&mut self.left_edits);
+            return serde_json::json!({"active": false, "edits": edits, "pen": false, "off": self.controls.status().paused}).to_string();
         };
         field.tick(now);
         let choices = field.choices();
