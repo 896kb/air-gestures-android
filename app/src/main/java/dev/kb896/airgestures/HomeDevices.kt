@@ -16,12 +16,15 @@ data class HomeDevices(val devices: List<HomeDevice> = emptyList()) {
 
     private fun named(name: String) = devices.firstOrNull { it.name.equals(name, ignoreCase = true) }
 
-    /** A new device called [name], or the one already called that; null for a blank name. */
-    fun added(name: String): Pair<HomeDevices, HomeDevice>? {
+    /**
+     * A new device called [name], or the one already called that; null for a blank name. Its id
+     * is above every device's and every one still [referenced] in the mappings (see
+     * [HomeDevices.referenced]), so it never takes over another's stored uses.
+     */
+    fun added(name: String, referenced: Collection<String> = emptySet()): Pair<HomeDevices, HomeDevice>? {
         val clean = clean(name) ?: return null
         named(clean)?.let { return this to it }
-        // Above every id in use, so a deleted device's id isn't handed out while the list has a higher one.
-        val n = (devices.mapNotNull { it.id.removePrefix("d").toIntOrNull() }.maxOrNull() ?: 0) + 1
+        val n = ((devices.map { it.id } + referenced).mapNotNull { it.removePrefix("d").toIntOrNull() }.maxOrNull() ?: 0) + 1
         val made = HomeDevice("d$n", clean)
         return copy(devices = devices + made) to made
     }
@@ -58,6 +61,10 @@ data class HomeDevices(val devices: List<HomeDevice> = emptyList()) {
         /** How many stored actions and dial choices are for [device]: in the profiles, During calls ([calls]) and the [shared] drawings. */
         fun uses(device: String, list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
             (list.ids() + calls.values + shared.values).count { Mappings.deviceOf(it) == device }
+
+        /** Every device id the profiles, During calls ([calls]) and the [shared] drawings send for, shown or not. */
+        fun referenced(list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
+            (list.ids() + calls.values + shared.values).mapNotNull(Mappings::deviceOf).toSet()
 
         /** [map] with [device]'s automation sending without a device. */
         fun withoutDevice(map: Map<String, String>, device: String) = map.mapValues { (_, id) -> Mappings.withoutDevice(id, device) }

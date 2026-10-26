@@ -200,7 +200,8 @@ object Profiles {
 
     /** A new device called [name], or the one already called that; null for a blank name. */
     fun addDevice(context: Context, name: String): HomeDevice? = synchronized(this) {
-        val (list, device) = devices(context).added(name) ?: return null
+        val referenced = HomeDevices.referenced(load(context), Prefs(context).calls(), sharedDrawings(context))
+        val (list, device) = devices(context).added(name, referenced) ?: return null
         updateDevices(context) { list }
         device
     }

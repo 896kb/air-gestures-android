@@ -71,6 +71,14 @@ class HomeDevicesTest {
         assertEquals(0, HomeDevices.uses("d9", list, calls, shared))
     }
 
+    @Test fun `a new device's id is above every id still in the mappings`() {
+        // d5 is only During calls', d6 only a shared drawing's: a new device never inherits them.
+        val used = HomeDevices.referenced(list, calls + ("swipe_up" to "automation@d5"), shared + ("Star" to "automation@d6"))
+        assertEquals(setOf("d1", "d2", "d5", "d6"), used)
+        assertEquals("d7", HomeDevices().added("Fan", used)!!.second.id)
+        assertEquals("d3", two.added("Fan", setOf("d1", "x"))!!.second.id)
+    }
+
     @Test fun `deleting a device leaves its uses sending without one`() {
         val cleared = list.withoutDevice("d1")
         val music = cleared.profile("p1")!!
