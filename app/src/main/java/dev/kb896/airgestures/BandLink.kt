@@ -18,6 +18,7 @@ import android.os.SystemClock
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.concurrent.thread
 
 /** Where the link is. */
@@ -50,6 +51,8 @@ class BandLink(
     private val lock = Any()
     private var gatt: BluetoothGatt? = null
     @Volatile private var socket: BluetoothSocket? = null
+    /** Frames built for [socket], in build order, waiting to be written (see [writeBandBytes]). */
+    @Volatile private var writes = ConcurrentLinkedQueue<ByteArray>()
     private var handle = 0L
     private var lastStatus = ""
     /** This connection uses owner.pending.key: confirm it once the band accepts it. */
@@ -235,9 +238,10 @@ class BandLink(
     private fun send(what: String, request: (Long) -> ByteArray) {
         try {
             val channel = socket
+            val queue = writes
             val stream = channel?.outputStream
-            if (stream == null) log("$what: not connected") else writeBandBytes(lock, stream) {
-                if (handle == 0L || socket !== channel) byteArrayOf() else request(handle)
+            if (stream == null) log("$what: not connected") else writeBandBytes(lock, stream, queue) {
+                if (handle == 0L || socket !== channel || writes !== queue) byteArrayOf() else request(handle)
             }
             drain()
         } catch (e: Exception) {
@@ -292,6 +296,7 @@ class BandLink(
             handle = 0L
             lastStatus = ""
             hapticCommands.clear()
+            writes.clear()
         }
     }
 
@@ -415,11 +420,13 @@ class BandLink(
             main.post { if (attempt == generation) retry(3000) }
             return
         }
+        val pending = ConcurrentLinkedQueue<ByteArray>()
+        writes = pending
         socket = channel
         val input = channel.inputStream
         val output = channel.outputStream
         val write = { build: () -> ByteArray ->
-            writeBandBytes(lock, output) {
+            writeBandBytes(lock, output, pending) {
                 if (attempt == generation && handle != 0L) build() else byteArrayOf()
             }
         }
