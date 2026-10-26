@@ -261,7 +261,7 @@ impl Connection {
         { return Ok(Vec::new()); }
         self.last_step_detent = now;
         self.haptics_queue.push_back(HapticStep {
-            command: HapticsCommand::Vibrate { duration_ms: DETENT_PULSE_MS, amplitude: 128 },
+            command: HapticsCommand::Vibrate { duration_ms: DETENT_PULSE_MS, amplitude: 255 },
             wait_after: 0.0, duration_ms: DETENT_PULSE_MS, priority: HapticPriority::Detent,
         });
         self.pump_haptics(now)
