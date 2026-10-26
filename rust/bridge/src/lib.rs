@@ -59,6 +59,8 @@ pub struct Connection {
     haptics_queue: VecDeque<HapticStep>,
     haptics_flight: Option<HapticFlight>,
     haptics_next_at: f64,
+    /// The band left out the detailed haptics status: said once in the log for this connection.
+    haptics_status_said: bool,
     last_clock: f64,
     last_step_detent: f64,
     last_notification: f64,
@@ -140,6 +142,7 @@ impl Connection {
             haptics_queue: VecDeque::new(),
             haptics_flight: None,
             haptics_next_at: 0.0,
+            haptics_status_said: false,
             last_clock: 0.0,
             last_step_detent: f64::NEG_INFINITY,
             last_notification: f64::NEG_INFINITY,
@@ -788,8 +791,11 @@ impl Connection {
                 if let Some(flight) = self.haptics_flight.as_mut() && flight.sequence == *sequence {
                     flight.acknowledged = true;
                     if !rpc_success { self.log.push("Band haptics RPC failed".into()); }
-                    else if haptics_success != &Some(true) {
-                        self.log.push("Band omitted or rejected detailed haptics status".into());
+                    else if haptics_success == &Some(false) { self.log.push("Band rejected the haptics".into()); }
+                    else if haptics_success.is_none() && !self.haptics_status_said {
+                        // Some firmware never sends it: once per connection is enough.
+                        self.haptics_status_said = true;
+                        self.log.push("Band omitted detailed haptics status".into());
                     }
                 }
             }
@@ -1010,6 +1016,26 @@ mod tests {
         assert!(connection.notification_haptics().unwrap().is_empty());
         assert!(connection.step_detent().unwrap().is_empty());
         assert!(connection.haptics_queue.is_empty());
+    }
+
+    #[test]
+    fn a_missing_haptics_status_is_logged_once_and_failures_every_time() {
+        use band_core::events::Event;
+        let mut connection = live_connection();
+        connection.notification_haptics().unwrap();
+        let sequence = connection.haptics_flight.unwrap().sequence;
+        connection.log.clear();
+        for (rpc_success, haptics_success) in [(true, None), (true, None), (true, Some(false)), (true, Some(false)), (false, None), (false, None)] {
+            let finished = Event::HapticsFinished { sequence, rpc_success, haptics_success };
+            connection.on_event(&finished, 106.0).unwrap();
+        }
+        assert_eq!(connection.log, [
+            "Band omitted detailed haptics status",
+            "Band rejected the haptics",
+            "Band rejected the haptics",
+            "Band haptics RPC failed",
+            "Band haptics RPC failed",
+        ]);
     }
 
     #[test]
