@@ -60,15 +60,15 @@ data class HomeDevices(val devices: List<HomeDevice> = emptyList()) {
 
         /**
          * How many actions and dial choices the user can see are for [device]: in the profiles,
-         * During calls ([calls]) and the [shared] drawings; not a slider's target kept while its
-         * finger's drags are gestures (deleting the device clears those too).
+         * During calls ([calls]), the [shared] drawings and the [sequences]' steps; not a slider's
+         * target kept while its finger's drags are gestures (deleting the device clears those too).
          */
-        fun uses(device: String, list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
-            (list.ids(shown = true) + calls.values + shared.values).count { Mappings.deviceOf(it) == device }
+        fun uses(device: String, list: ProfileList, calls: Map<String, String>, shared: Map<String, String>, sequences: Sequences.Library) =
+            (list.ids(shown = true) + calls.values + shared.values + sequences.steps()).count { Mappings.deviceOf(it) == device }
 
-        /** Every device id the profiles, During calls ([calls]) and the [shared] drawings send for, shown or not. */
-        fun referenced(list: ProfileList, calls: Map<String, String>, shared: Map<String, String>) =
-            (list.ids() + calls.values + shared.values).mapNotNull(Mappings::deviceOf).toSet()
+        /** Every device id the profiles, During calls ([calls]), the [shared] drawings and the [sequences] send for, shown or not. */
+        fun referenced(list: ProfileList, calls: Map<String, String>, shared: Map<String, String>, sequences: Sequences.Library) =
+            (list.ids() + calls.values + shared.values + sequences.steps()).mapNotNull(Mappings::deviceOf).toSet()
 
         /** [map] with [device]'s automation sending without a device. */
         fun withoutDevice(map: Map<String, String>, device: String) = map.mapValues { (_, id) -> Mappings.withoutDevice(id, device) }

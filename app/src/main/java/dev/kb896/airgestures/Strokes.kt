@@ -138,6 +138,14 @@ object Sequences {
 
         fun deleted(id: String) = copy(sequences = sequences.filter { it.id != id })
 
+        /** Every sequence's steps, in order. */
+        fun steps() = sequences.flatMap { it.steps }
+
+        /** Every step that sent for [device] sending without one ([Mappings.withoutDevice]). */
+        fun withoutDevice(device: String) = copy(sequences = sequences.map { sequence ->
+            sequence.copy(steps = sequence.steps.map { Mappings.withoutDevice(it, device) })
+        })
+
         private fun change(id: String, how: (Sequence) -> Sequence) = copy(sequences = sequences.map { if (it.id == id) how(it) else it })
 
         fun toJson(): String = JSONObject().apply {

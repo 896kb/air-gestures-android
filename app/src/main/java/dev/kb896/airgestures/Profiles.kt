@@ -200,15 +200,15 @@ object Profiles {
 
     /** A new device called [name], or the one already called that; null for a blank name. */
     fun addDevice(context: Context, name: String): HomeDevice? = synchronized(this) {
-        val referenced = HomeDevices.referenced(load(context), Prefs(context).calls(), sharedDrawings(context))
+        val referenced = HomeDevices.referenced(load(context), Prefs(context).calls(), sharedDrawings(context), sequences(context))
         val (list, device) = devices(context).added(name, referenced) ?: return null
         updateDevices(context) { list }
         device
     }
 
-    /** How many actions and dials send for device [id], in every profile, During calls and the shared drawings. */
+    /** How many actions and dials send for device [id], in every profile, During calls, the shared drawings and the sequences. */
     fun deviceUses(context: Context, id: String) =
-        HomeDevices.uses(id, load(context), Prefs(context).calls(), sharedDrawings(context))
+        HomeDevices.uses(id, load(context), Prefs(context).calls(), sharedDrawings(context), sequences(context))
 
     /** Device [id] gone; whatever sent for it sends without a device. */
     fun deleteDevice(context: Context, id: String) = synchronized(this) {
@@ -218,6 +218,7 @@ object Profiles {
             val call = prefs.callActionId(gesture)
             if (Mappings.withoutDevice(call, id) != call) prefs.setCallAction(gesture, Mappings.AUTOMATION)
         }
+        updateSequences(context) { it.withoutDevice(id) }
         updateDevices(context) { it.deleted(id) }
     }
 

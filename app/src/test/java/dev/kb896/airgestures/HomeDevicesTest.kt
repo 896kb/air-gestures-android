@@ -65,18 +65,22 @@ class HomeDevicesTest {
     )
     private val calls = mapOf("middle_tap" to "automation@d1", "index_double" to "call.answer")
     private val shared = mapOf("Bulb" to "automation@d1", "Star" to "torch.toggle")
+    private val sequences = Sequences.Library(listOf(
+        Sequences.Sequence("q1", "Goodnight", listOf("torch.toggle", "automation@d1", "wait:1000", "automation@d8", "automation")),
+    ))
+    private val none = Sequences.Library(emptyList())
 
     @Test fun `a device's uses are counted everywhere`() {
         // Gesture, override, index dial, slider and drawing in Music; the middle dial in Reading; a call; a shared drawing.
-        assertEquals(8, HomeDevices.uses("d1", list, calls, shared))
-        assertEquals(3, HomeDevices.uses("d2", list, calls, shared))
-        assertEquals(0, HomeDevices.uses("d9", list, calls, shared))
-        assertEquals(0, HomeDevices.uses("d7", list, calls, shared))
+        assertEquals(8, HomeDevices.uses("d1", list, calls, shared, none))
+        assertEquals(3, HomeDevices.uses("d2", list, calls, shared, none))
+        assertEquals(0, HomeDevices.uses("d9", list, calls, shared, none))
+        assertEquals(0, HomeDevices.uses("d7", list, calls, shared, none))
     }
 
     @Test fun `a new device's id is above every id still in the mappings`() {
         // d7 is only a kept slider target, d5 only During calls', d6 only a shared drawing's: a new device never inherits them.
-        val used = HomeDevices.referenced(list, calls + ("swipe_up" to "automation@d5"), shared + ("Star" to "automation@d6"))
+        val used = HomeDevices.referenced(list, calls + ("swipe_up" to "automation@d5"), shared + ("Star" to "automation@d6"), none)
         assertEquals(setOf("d1", "d2", "d5", "d6", "d7"), used)
         assertEquals("d8", HomeDevices().added("Fan", used)!!.second.id)
         assertEquals("d3", two.added("Fan", setOf("d1", "x"))!!.second.id)
@@ -96,11 +100,26 @@ class HomeDevicesTest {
         assertEquals("automation", cleared.profile("p2")!!.middleDial)
         assertEquals("automation@d2", cleared.profile("p2")!!.map["swipe_up"])
         assertEquals(mapOf("middle_tap" to "automation", "index_double" to "call.answer"), HomeDevices.withoutDevice(calls, "d1"))
-        assertEquals(0, HomeDevices.uses("d1", cleared, HomeDevices.withoutDevice(calls, "d1"), HomeDevices.withoutDevice(shared, "d1")))
+        assertEquals(0, HomeDevices.uses("d1", cleared, HomeDevices.withoutDevice(calls, "d1"), HomeDevices.withoutDevice(shared, "d1"), none))
     }
 
     @Test fun `a rename changes no mapping, they keep the id`() {
         val renamed = two.renamed("d1", "Ceiling")
         assertEquals("Ceiling", renamed.get(Mappings.deviceOf(list.profile("p1")!!.map["middle_tap"]))!!.name)
+    }
+
+    @Test fun `a sequence's steps count as uses and keep their device's id taken`() {
+        assertEquals(9, HomeDevices.uses("d1", list, calls, shared, sequences))
+        assertEquals(1, HomeDevices.uses("d8", list, calls, shared, sequences))
+        // d8 is only in a sequence: a new device doesn't take it over.
+        val used = HomeDevices.referenced(list, calls, shared, sequences)
+        assertTrue("d8" in used)
+        assertEquals("d9", HomeDevices().added("Lamp", used)!!.second.id)
+    }
+
+    @Test fun `deleting a device leaves a sequence's steps sending without one`() {
+        val cleared = sequences.withoutDevice("d1")
+        assertEquals(listOf("torch.toggle", "automation", "wait:1000", "automation@d8", "automation"), cleared.get("q1")!!.steps)
+        assertEquals(0, HomeDevices.uses("d1", list.withoutDevice("d1"), HomeDevices.withoutDevice(calls, "d1"), HomeDevices.withoutDevice(shared, "d1"), cleared))
     }
 }
