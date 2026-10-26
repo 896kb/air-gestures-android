@@ -4,6 +4,23 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
+## Unreleased
+
+- **Band vibration** (thanks to Tudor Palasan): the band buzzes for the app. A Band
+  vibration switch in Setup, on by default; cues when the controls go on and off, for the
+  next and previous profile and for handwriting; a tick on every dial and drag step; and
+  optional notification vibration, off by default. With the controls off, the band's own
+  gesture buzz is silenced too.
+- Notification vibration only buzzes for notifications the phone would alert for: not
+  silent or low-importance ones, not during Do Not Disturb, and not when a player or a
+  progress bar updates its notification (pausing music with a gesture no longer buzzes).
+- Vibration no longer stops until a reconnect when the band doesn't answer a firmware
+  status request: it waits 5 s at most.
+- Firmware updates are no longer slowed by vibration writes: the band's replies are read
+  while a write is still going.
+- A band that leaves out the detailed vibration status is noted once in the log per
+  connection, not after every buzz.
+
 ## 0.9.18
 
 - An app can say it's in front itself, for when the screen can't tell: broadcast
