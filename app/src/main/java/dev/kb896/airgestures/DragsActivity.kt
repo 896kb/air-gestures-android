@@ -16,6 +16,7 @@ class DragsActivity : GestureScreen() {
     private lateinit var gestures: TextView
     private lateinit var sliders: TextView
     private lateinit var rows: LinearLayout
+    private lateinit var teach: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,6 +25,7 @@ class DragsActivity : GestureScreen() {
         gestures = segment("Gestures") { setSliders(false) }
         sliders = segment("Sliders") { setSliders(true) }
         rows = column(gap = 4f)
+        teach = column()
         show(pageColumn().apply {
             addView(row().apply { addView(segmented(gestures, sliders)) })
             addView(card(null, rows))
@@ -31,7 +33,7 @@ class DragsActivity : GestureScreen() {
                 text = "Drags read the same with the palm down, up or sideways."
                 setLineSpacing(0f, 1.3f)
             })
-            addView(navRow(R.drawable.ic_move_up_right, "Mixed up? Teach your drags") { open<TeachDragsActivity>() })
+            addView(teach)
         }, title = "${part.label} drags")
     }
 
@@ -56,6 +58,7 @@ class DragsActivity : GestureScreen() {
         val drags = profile.drags(part)
         markSegment(gestures, !drags.sliders)
         markSegment(sliders, drags.sliders)
+        showTeach(drags.sliders || Gesture.drags(part).any(profile::does))
         rows.removeAllViews()
         if (!drags.sliders) {
             for (gesture in Gesture.drags(part)) rows.addView(profileRow(profile, index, gesture, report))
@@ -76,6 +79,24 @@ class DragsActivity : GestureScreen() {
                     if (choices[i] == DialChoice.AUTOMATION) automationGuide(firstTime = true)
                 }
             })
+        }
+    }
+
+    /**
+     * Drags or sliders on ([on]) but none taught for this band and wrist (an unknown wrist
+     * counts as untaught): teach them first, the measured ones are another hand's.
+     */
+    private fun showTeach(on: Boolean) {
+        val prefs = Prefs(this)
+        val taught = prefs.handInUse()?.let { Calibrations.get(this, prefs.bandAddress, it).drags != null } == true
+        teach.removeAllViews()
+        if (on && !taught) {
+            teach.addView(card(null, column(gap = 10f).apply {
+                addView(note("Teach your drags first: untaught, away and right can mix up."))
+                addView(row().apply { addView(pill("Teach your drags") { open<TeachDragsActivity>() }.first) })
+            }))
+        } else {
+            teach.addView(navRow(R.drawable.ic_move_up_right, "Mixed up? Teach your drags") { open<TeachDragsActivity>() })
         }
     }
 
