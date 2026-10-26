@@ -275,7 +275,10 @@ impl Connection {
             || now - self.last_notification < 1.0
         { return Ok(Vec::new()); }
         self.last_notification = now;
+        let paused = self.controls.status().paused;
+        if paused { self.push_pattern(1); }
         self.push_vibration(OFF_PULSE_MS, 0.0, HapticPriority::Notification);
+        if paused { self.push_pattern(2); }
         self.pump_haptics(now)
     }
 
@@ -495,7 +498,9 @@ impl Connection {
     pub fn ota_start(&mut self, mode: &str, dir: &str, now: f64) -> Result<Vec<u8>, String> {
         use band_core::ota::{OtaMode, OtaPlan};
         self.retire_completed_haptics(now);
-        if self.haptics_flight.is_some() {
+        if self.haptics_flight.is_some()
+            || (!self.session.ota_progress().1 && !self.haptics_queue.is_empty())
+        {
             return Err("Wait for Band feedback to finish before starting an update.".into());
         }
         let mode = match mode {
@@ -957,6 +962,35 @@ mod tests {
         assert_eq!(flight.priority, HapticPriority::Notification);
         assert!(connection.notification_haptics().unwrap().is_empty());
         assert!(connection.haptics_queue.is_empty());
+    }
+
+    #[test]
+    fn a_notification_with_controls_off_enables_pulses_and_restores_vibration_off() {
+        let mut connection = live_connection();
+        connection.controls.pause();
+        assert!(!connection.notification_haptics().unwrap().is_empty());
+        assert!(connection.controls.status().paused);
+        assert_eq!(connection.haptics_flight.unwrap().priority, HapticPriority::State);
+        assert_eq!(connection.haptics_queue.iter().map(|step| step.command).collect::<Vec<_>>(), [
+            HapticsCommand::Vibrate { duration_ms: 80, amplitude: 255 },
+            HapticsCommand::Perform { pattern_id: 2 },
+        ]);
+        // Even between requests, an update must wait until the off pattern is restored.
+        connection.haptics_flight.as_mut().unwrap().acknowledged = true;
+        assert!(connection.ota_start("cancel", "", 106.0).is_err());
+        assert!(!connection.session.ota_progress().1);
+    }
+
+    #[test]
+    fn a_controls_change_replaces_a_notifications_pending_restore_pattern() {
+        let mut connection = live_connection();
+        connection.controls.pause();
+        connection.notification_haptics().unwrap();
+        connection.controls.resume(106.0);
+        connection.sync_controls_haptics(false).unwrap();
+        assert_eq!(connection.haptics_queue.iter().map(|step| step.command).collect::<Vec<_>>(), [
+            HapticsCommand::Perform { pattern_id: 1 },
+        ]);
     }
 
     #[test]
