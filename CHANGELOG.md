@@ -41,7 +41,7 @@ fails without one.
   dials, sliders and drawings alike. Its broadcast then carries `device` with the device's
   name. Renaming a device renames it everywhere (update your rules too); deleting one
   leaves its gestures sending without a device. The settings backup includes them.
-- Sequences can send to automation: mix phone actions and Home Assistant in one gesture
+- **Sequences can send to automation:** mix phone actions and Home Assistant in one gesture
   (`gesture=sequence`, `name`, `device`, `profile`).
 - The settings backup is version 3 (band controls, drawings and Home devices); version 1
   and 2 backups still restore.
