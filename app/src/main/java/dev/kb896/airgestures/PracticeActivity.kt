@@ -149,14 +149,19 @@ class PracticeActivity : Screen() {
                     } else {
                         "switch to ${list.step(if (builtin == Builtin.NEXT) 1 else -1).active(null).name}"
                     }
-                    null -> when (val action = Action.of(Prefs(this).actionId(gesture, profile.id))) {
-                        Action.OPEN_APP -> "Open an app (${profile.name})"
-                        else -> "${action.label} (${profile.name})"
+                    null -> {
+                        val id = Prefs(this).actionId(gesture, profile.id)
+                        when (val action = Action.of(id)) {
+                            Action.OPEN_APP -> "Open an app (${profile.name})"
+                            // With its Home device, as the dials.
+                            Action.AUTOMATION -> "${Labels.action(this, id)} (${profile.name})"
+                            else -> "${action.label} (${profile.name})"
+                        }
                     }
                 }
             }
-            Lessons.Done.Dial -> "${DialChoice.of(profile.dial).label} (${profile.name})"
-            Lessons.Done.MiddleDial -> "${DialChoice.of(profile.middleDial).label} (${profile.name})"
+            Lessons.Done.Dial -> "${Labels.dial(this, profile.dial)} (${profile.name})"
+            Lessons.Done.MiddleDial -> "${Labels.dial(this, profile.middleDial)} (${profile.name})"
         }
     }
 }
