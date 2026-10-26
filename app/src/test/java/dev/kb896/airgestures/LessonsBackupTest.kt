@@ -90,6 +90,12 @@ class LessonsBackupTest {
         assertNull(restored.drawings)
     }
 
+    @Test fun `a version 1 backup whose middle tap does something restores with Draw off`() {
+        val v1 = """{"version":1,"profiles":[{"id":"p1","name":"A","map":{"middle_tap":"screen.home"},"dial":"volume"}],
+            "picked":"p1","apps":{},"calls":{},"hand":"band"}"""
+        assertEquals(BandControls.standard().with(Builtin.DRAW, null), Backup.read(v1)!!.band)
+    }
+
     @Test fun `a restore sets every call action, the ones the backup lacks to their defaults`() {
         val calls = Backup.restoredCalls(mapOf("index_double" to "call.answer", "swipe_up" to "-"))
         assertEquals(Gesture.entries.size, calls.size)

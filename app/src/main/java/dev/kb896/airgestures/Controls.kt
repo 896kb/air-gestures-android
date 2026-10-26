@@ -62,12 +62,26 @@ data class BandControls(val at: Map<Builtin, BandControl> = emptyMap()) {
     }
 
     companion object {
-        /** Today's gestures: middle hold, index triple tap, middle triple tap; no Draw. */
+        /** Today's gestures: middle hold, index triple tap, middle triple tap; Draw on the middle tap. */
         fun standard() = BandControls(mapOf(
             Builtin.CONTROLS to BandControl(Gesture.MIDDLE_HOLD),
             Builtin.NEXT to BandControl(Gesture.INDEX_TRIPLE),
             Builtin.PREVIOUS to BandControl(Gesture.MIDDLE_TRIPLE),
+            Builtin.DRAW to BandControl(Gesture.MIDDLE_TAP),
         ))
+
+        /**
+         * The first band controls for settings from before them (0.7.7 had today's gestures
+         * fixed, and no Draw): the standard ones, but Draw stays off when the middle tap does
+         * something already, in any profile or palm position or During calls ([calls]: gesture
+         * key → action id, [Mappings.AS_USUAL] or [Mappings.NOTHING]), so it keeps doing it.
+         */
+        fun migrated(list: ProfileList, calls: Map<String, String>): BandControls {
+            val tap = Gesture.MIDDLE_TAP
+            val call = calls[tap.key]
+            val used = list.uses(tap) || (call != null && call != Mappings.AS_USUAL && call != Mappings.NOTHING)
+            return if (used) standard().with(Builtin.DRAW, null) else standard()
+        }
 
         /**
          * Unknown gestures are no gesture, unknown positions are skipped, and no position or all

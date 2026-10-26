@@ -114,7 +114,8 @@ object Lessons {
 /**
  * The settings backup file: everything but the owner key (that has its own export) and the
  * calibrations (they belong to a band). Version 2 adds the band controls and the drawings;
- * version 1 still restores, with today's band controls and without the built-in actions.
+ * version 1 still restores, with today's band controls (as an upgrade gets them) and without
+ * the built-in actions.
  */
 object Backup {
     const val VERSION = 2
@@ -180,7 +181,8 @@ object Backup {
             json.optBoolean("speak", false),
             json.optBoolean("vibrate", false),
             json.opt("sequences")?.let { Sequences.Library.fromJson(it.toString()) },
-            band = json.optJSONObject("band")?.let { BandControls.fromJson(it.toString()) } ?: BandControls.standard(),
+            band = json.optJSONObject("band")?.let { BandControls.fromJson(it.toString()) }
+                ?: BandControls.migrated(profiles.withoutBuiltins(), calls - ProfileList.builtinCalls(calls)),
             sharedDrawings = if (version == 1) null else
                 shared?.keys()?.asSequence()?.mapNotNull { key -> (shared.opt(key) as? String)?.let { key to it } }?.toMap().orEmpty(),
             drawings = json.optJSONArray("drawings")?.let { DrawingLibrary.fromJson(it.toString()) },

@@ -35,6 +35,10 @@ data class Profile(
 ) {
     fun dialOf(part: Part) = if (part == Part.MIDDLE) middleDial else dial
     fun drags(part: Part) = if (part == Part.MIDDLE) middleDrags else indexDrags
+
+    /** Whether [gesture] does something here: its action (its default when never stored) or a palm override's. */
+    fun does(gesture: Gesture) =
+        (map[gesture.key] ?: gesture.default.id).isNotEmpty() || palm[gesture.key].orEmpty().values.any { it.isNotEmpty() }
 }
 
 /**
@@ -61,6 +65,9 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
 
     /** [id] becomes the manual profile (the widget's picker); an unknown id changes nothing. */
     fun picking(id: String) = if (profile(id) == null) this else copy(picked = id)
+
+    /** Whether any profile does something on [gesture] (see [Profile.does]). */
+    fun uses(gesture: Gesture) = profiles.any { it.does(gesture) }
 
     /** A new profile at the end, with the lowest free number for its id and name. */
     fun added(map: Map<String, String>, dial: String): Pair<ProfileList, Profile> {

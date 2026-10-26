@@ -70,16 +70,19 @@ object Profiles {
     /**
      * Once: built-in action ids (the first controls dev build stored them in profiles and During
      * calls) go, their gestures back to their defaults; the band controls start on today's
-     * gestures (0.7.7 had them fixed there, so its profiles keep doing what they did).
+     * gestures (0.7.7 had them fixed there, so its profiles keep doing what they did), with
+     * Draw on the middle tap unless something uses it ([BandControls.migrated]; a fresh
+     * install's defaults don't).
      */
     private fun migrated(context: Context, list: ProfileList): ProfileList {
         val prefs = prefs(context)
         if (prefs.getInt(VERSION_KEY, 0) >= VERSION) return list
         val clean = list.withoutBuiltins()
         val calls = Gesture.entries.associate { it.key to (prefs.getString("call.${it.key}", null) ?: "") }
+        val builtinCalls = ProfileList.builtinCalls(calls)
         prefs.edit().apply {
-            for (key in ProfileList.builtinCalls(calls)) remove("call.$key")
-            if (!prefs.contains(BAND)) putString(BAND, BandControls.standard().toJson().toString())
+            for (key in builtinCalls) remove("call.$key")
+            if (!prefs.contains(BAND)) putString(BAND, BandControls.migrated(clean, calls - builtinCalls).toJson().toString())
             putInt(VERSION_KEY, VERSION)
         }.apply()
         if (clean != list) write(context, clean)
@@ -104,6 +107,8 @@ object Profiles {
 
     /** The band controls; today's gestures until changed (or when unreadable). */
     fun band(context: Context): BandControls = band ?: synchronized(this) {
+        // The first read stores an upgrade's own (see migrated): not today's before it.
+        load(context)
         band ?: (prefs(context).getString(BAND, null)?.let { runCatching { BandControls.fromJson(it) }.getOrNull() }
             ?: BandControls.standard()).also { band = it }
     }
