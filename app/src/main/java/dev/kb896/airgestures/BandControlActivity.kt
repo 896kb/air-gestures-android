@@ -63,7 +63,7 @@ class BandControlActivity : GestureScreen() {
         }
         if (builtin == Builtin.DRAW) {
             if ("draw-cant-cancel" in report.invalid) {
-                notes.addView(note("Draw on a hold, a triple tap or a drag can't cancel its drawing: it ends by itself, or with the pad's close button."))
+                notes.addView(note("Draw on a triple tap or a drag can't cancel its drawing: it ends by itself, or with the pad's close button."))
             }
             if ("draw-on-tap" in report.warnings) {
                 notes.addView(note("Draw is on a single tap: while drawing, a short pinch is that tap, and it cancels the drawing."))

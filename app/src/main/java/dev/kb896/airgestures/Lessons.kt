@@ -86,7 +86,7 @@ object Lessons {
             add(
                 Step(
                     "Hold your index finger",
-                    "Keep your thumb on your index finger for a second, without moving your wrist.",
+                    "Keep your thumb on your index finger for a second, without moving your wrist. It runs what the index hold does (by default Draw, a band control).",
                     Done.Gesture("index hold"),
                     Gesture.INDEX_HOLD,
                 ),

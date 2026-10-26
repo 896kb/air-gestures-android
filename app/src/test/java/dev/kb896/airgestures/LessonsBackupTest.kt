@@ -11,14 +11,16 @@ class LessonsBackupTest {
 
     @Test fun `one profile and a working dial leave out the triple taps`() {
         val steps = Lessons.steps(profiles = 1, dial = true, map = defaults, band = BandControls.standard())
-        assertEquals(10, steps.size)
+        assertEquals(11, steps.size)
+        // Draw is on the index hold.
+        assertTrue(steps.any { it.gesture == Gesture.INDEX_HOLD })
         assertTrue(steps.any { it.done == Lessons.Done.Dial })
         assertFalse(steps.any { it.gesture == Gesture.INDEX_TRIPLE || it.gesture == Gesture.MIDDLE_TRIPLE })
     }
 
     @Test fun `two profiles add the triple taps and a dial set to nothing is left out`() {
         val steps = Lessons.steps(profiles = 2, dial = false, map = defaults, band = BandControls.standard())
-        assertEquals(11, steps.size)
+        assertEquals(12, steps.size)
         assertFalse(steps.any { it.done == Lessons.Done.Dial })
         assertEquals(
             listOf("index triple tap", "middle triple tap"),
@@ -91,8 +93,8 @@ class LessonsBackupTest {
         assertNull(restored.drawings)
     }
 
-    @Test fun `a version 1 backup whose middle tap does something restores with Draw off`() {
-        val v1 = """{"version":1,"profiles":[{"id":"p1","name":"A","map":{"middle_tap":"screen.home"},"dial":"volume"}],
+    @Test fun `a version 1 backup whose index hold does something restores with Draw off`() {
+        val v1 = """{"version":1,"profiles":[{"id":"p1","name":"A","map":{"index_hold":"screen.home"},"dial":"volume"}],
             "picked":"p1","apps":{},"calls":{},"hand":"band"}"""
         assertEquals(BandControls.standard().with(Builtin.DRAW, null), Backup.read(v1)!!.band)
     }

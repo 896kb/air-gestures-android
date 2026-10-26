@@ -16,7 +16,7 @@ fails without one.
   a lost connection.
 - **Band controls:** Controls on/off, Next profile, Previous profile and the new Draw sit
   above the profiles, one gesture each (by default the middle hold, the index and middle
-  triple taps, and Draw on the middle tap), the same in every profile, in apps' own profiles
+  triple taps, and Draw on the index hold), the same in every profile, in apps' own profiles
   and during calls. Each can be limited to palm positions. A profile's action on a
   band-control gesture is kept and shown as paused, and runs again once the band control
   moves; picking a used gesture says what will pause.
@@ -27,8 +27,8 @@ fails without one.
   to two positions); calibrate per band and wrist.
 - **Drawings:** pinch and draw in the air or on a table, matched against the drawings you
   teach (three tries each); shared or per-profile actions; a pad shows what you draw.
-- **Draw is on the middle tap** by default. Coming from 0.7.7, it stays off if the middle
-  tap already does something (in any profile, or during calls): that tap keeps doing it.
+- **Draw is on the index hold** by default. Coming from 0.7.7, it stays off if the index
+  hold already does something (in any profile, or during calls): that hold keeps doing it.
 - **The middle dial** (pinch and turn with the middle finger) is brightness in new
   profiles; your existing profiles keep theirs.
 - **Teach your drags** for your own wrist. Turning drags or sliders on before you have

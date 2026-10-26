@@ -76,7 +76,7 @@ object Profiles {
      * Once: built-in action ids (the first controls dev build stored them in profiles and During
      * calls) go, their gestures back to their defaults; the band controls start on today's
      * gestures (0.7.7 had them fixed there, so its profiles keep doing what they did), with
-     * Draw on the middle tap unless something uses it ([BandControls.migrated]; a fresh
+     * Draw on the index hold unless something uses it ([BandControls.migrated]; a fresh
      * install's defaults don't).
      */
     private fun migrated(context: Context, list: ProfileList): ProfileList {

@@ -5,31 +5,33 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ControlsTest {
-    @Test fun `the standard band controls are today's gestures, Draw on the middle tap`() {
+    @Test fun `the standard band controls are today's gestures, Draw on the index hold`() {
         val band = BandControls.standard()
         assertEquals(BandControl(Gesture.MIDDLE_HOLD), band[Builtin.CONTROLS])
         assertEquals(Gesture.INDEX_TRIPLE, band[Builtin.NEXT]?.gesture)
         assertEquals(Gesture.MIDDLE_TRIPLE, band[Builtin.PREVIOUS]?.gesture)
-        assertEquals(BandControl(Gesture.MIDDLE_TAP), band[Builtin.DRAW])
+        assertEquals(BandControl(Gesture.INDEX_HOLD), band[Builtin.DRAW])
     }
 
-    @Test fun `an upgrade gets Draw on the middle tap only when nothing uses it`() {
+    @Test fun `an upgrade gets Draw on the index hold only when nothing uses it`() {
         val defaults = Gesture.entries.associate { it.key to it.default.id }
         val list = { map: Map<String, String>, palm: Map<String, Map<String, String>> ->
             ProfileList(listOf(Profile("p1", "A", defaults, "volume"), Profile("p2", "B", map, "volume", palm = palm)), "p1", emptyMap())
         }
         val off = BandControls.standard().with(Builtin.DRAW, null)
-        // A fresh install's defaults, and a tap mapped to nothing or overridden with nothing.
+        // A fresh install's defaults, and a hold mapped to nothing or overridden with nothing.
         assertEquals(BandControls.standard(), BandControls.migrated(list(defaults, emptyMap()), emptyMap()))
-        assertEquals(BandControls.standard(), BandControls.migrated(list(mapOf("middle_tap" to ""), mapOf("middle_tap" to mapOf("up" to ""))), emptyMap()))
+        assertEquals(BandControls.standard(), BandControls.migrated(list(mapOf("index_hold" to ""), mapOf("index_hold" to mapOf("up" to ""))), emptyMap()))
         // Any profile's action, a palm override's, or During calls' keeps Draw off.
-        assertEquals(off, BandControls.migrated(list(mapOf("middle_tap" to "screen.home"), emptyMap()), emptyMap()))
-        assertEquals(off, BandControls.migrated(list(emptyMap(), mapOf("middle_tap" to mapOf("sideways" to "media.next"))), emptyMap()))
-        assertEquals(off, BandControls.migrated(list(defaults, emptyMap()), mapOf("middle_tap" to "call.end")))
+        assertEquals(off, BandControls.migrated(list(mapOf("index_hold" to "screen.home"), emptyMap()), emptyMap()))
+        assertEquals(off, BandControls.migrated(list(emptyMap(), mapOf("index_hold" to mapOf("sideways" to "media.next"))), emptyMap()))
+        assertEquals(off, BandControls.migrated(list(defaults, emptyMap()), mapOf("index_hold" to "call.end")))
         // As usual or Nothing during calls uses nothing there.
         for (call in listOf(Mappings.AS_USUAL, Mappings.NOTHING)) {
-            assertEquals(BandControls.standard(), BandControls.migrated(list(defaults, emptyMap()), mapOf("middle_tap" to call)))
+            assertEquals(BandControls.standard(), BandControls.migrated(list(defaults, emptyMap()), mapOf("index_hold" to call)))
         }
+        // The middle tap (the Navigate profile's Home) is no matter.
+        assertEquals(BandControls.standard(), BandControls.migrated(list(mapOf("middle_tap" to "screen.home"), emptyMap()), emptyMap()))
     }
 
     @Test fun `the one on a gesture follows the palm, Controls first`() {
@@ -48,7 +50,7 @@ class ControlsTest {
         // org.json's JVM JSONObject keeps no key order: compare fields, not strings.
         assertEquals("index_drag_left", json.getJSONObject("next").getString("gesture"))
         assertEquals("""["down","up"]""", json.getJSONObject("next").getJSONArray("palm").toString())
-        assertEquals("middle_tap", json.getJSONObject("draw").getString("gesture"))
+        assertEquals("index_hold", json.getJSONObject("draw").getString("gesture"))
         assertEquals(true, BandControls.standard().with(Builtin.DRAW, null).toJson().isNull("draw"))
         assertEquals(true, json.getJSONObject("controls").isNull("palm"))
         assertEquals(band, BandControls.fromJson(json.toString()))

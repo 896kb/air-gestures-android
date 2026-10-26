@@ -192,7 +192,7 @@ class GesturesActivity : GestureScreen() {
                     "$place: $gesture has more than two palm overrides, so its normal action never runs. Remove one."
                 }
                 "band" -> Builtin.of(words.getOrNull(1))?.let { "${it.label} is limited to no palm position or to all three: pick Any position or one or two." }
-                "draw-cant-cancel" -> "Draw on a hold, a triple tap or a drag can't cancel its drawing: it ends by itself, or with the pad's close button."
+                "draw-cant-cancel" -> "Draw on a triple tap or a drag can't cancel its drawing: it ends by itself, or with the pad's close button."
                 else -> null
             }
         }
