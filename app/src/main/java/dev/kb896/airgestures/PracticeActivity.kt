@@ -142,7 +142,7 @@ class PracticeActivity : Screen() {
                 // The band controls come first (lessons are palm down).
                 when (val builtin = Profiles.band(this).on(gesture, Palm.DOWN)) {
                     Builtin.CONTROLS -> "turn the controls off (band control)"
-                    Builtin.DRAW -> "open the drawing pad (band control)"
+                    Builtin.DRAW -> "open the drawing pad (band control; it closes again in a lesson)"
                     // The band's own switch: where it would go (an app's own profile stays).
                     Builtin.NEXT, Builtin.PREVIOUS -> if (list.locked(Profiles.foreground) || list.profiles.size < 2) {
                         "nothing here"

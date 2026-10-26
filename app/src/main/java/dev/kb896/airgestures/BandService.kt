@@ -347,7 +347,8 @@ class BandService : Service(), BandLink.Listener {
                     Toast.makeText(this, "This app has its own profile", Toast.LENGTH_SHORT).show()
                     onLog("profile: this app has its own profile")
                 }
-                "draw-started" -> pad.started()
+                // In a lesson Draw only shows it's there: the session (a hold can't cancel it) closes again.
+                "draw-started" -> if (practice != null && drawing == null) link.cancelDrawing() else pad.started()
                 "pen" -> pad.pen(rest == "down")
                 "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
                     val stroke = s.toIntOrNull() ?: return@let
