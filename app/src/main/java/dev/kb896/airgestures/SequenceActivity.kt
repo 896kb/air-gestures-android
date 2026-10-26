@@ -26,8 +26,10 @@ class SequenceActivity : GestureScreen() {
             addView(actions)
         }, title = Profiles.sequences(this).get(sequenceId)?.name ?: "Sequence")
         titleButton(R.drawable.ic_pencil, "Rename") {
-            val name = Profiles.sequences(this).get(sequenceId)?.name ?: return@titleButton
-            ask("Rename", name, "Save") { new ->
+            val sequence = Profiles.sequences(this).get(sequenceId) ?: return@titleButton
+            // Its automation steps send the name: rules matching it need the new one.
+            val note = if (sequence.steps.any(Mappings::isAutomation)) "Home Assistant matches this name; update your automations too." else null
+            ask("Rename", sequence.name, "Save", note) { new ->
                 Profiles.updateSequences(applicationContext) { it.renamed(sequenceId, new) }
                 render()
             }
@@ -97,7 +99,17 @@ class SequenceActivity : GestureScreen() {
         addView(Cb.text(context, 13f, R.font.geist_mono_medium, Cb.INK_400).apply { text = "${index + 1}" })
         val wait = Sequences.waitMs(step)
         addView(icon(if (wait != null) R.drawable.ic_hourglass else Action.of(step).icon, 16f))
-        addView(Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = stepLabel(step) }, weighted())
+        val label = Cb.text(context, 14f, R.font.geist_medium, Cb.INK_900).apply { text = stepLabel(step) }
+        if (Mappings.isAutomation(step)) {
+            // What Home Assistant gets: the sequence's name, not a gesture's.
+            val sends = "Sends gesture \"sequence\", name \"${sequence.name}\""
+            addView(column(gap = 2f).apply {
+                addView(label)
+                addView(Cb.text(context, 12f, color = Cb.INK_500).apply { text = sends })
+            }, weighted())
+        } else {
+            addView(label, weighted())
+        }
         fun small(iconRes: Int, description: String, enabled: Boolean, onClick: () -> Unit) = FrameLayout(context).apply {
             addView(icon(iconRes, 16f, if (enabled) Cb.INK_700 else Cb.INK_300), FrameLayout.LayoutParams(dpi(16f), dpi(16f), Gravity.CENTER))
             layoutParams = LinearLayout.LayoutParams(dpi(32f), dpi(32f))

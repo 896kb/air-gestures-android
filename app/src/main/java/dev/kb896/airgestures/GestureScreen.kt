@@ -228,13 +228,13 @@ abstract class GestureScreen : Screen() {
 
     /**
      * The action picker: [calls] adds As usual, Nothing and the call actions; [inSequence] leaves
-     * out what a sequence can't hold (another sequence, automation, nothing). Actions that need
-     * more (an app, a spot, a swipe, a sequence) ask for it before [onChosen] gets the id.
+     * out what a sequence can't hold ([Action.inSequence]). Actions that need more (an app, a
+     * spot, a swipe, a sequence, automation's device) ask for it before [onChosen] gets the id.
      */
     fun pickAction(title: String, current: String, calls: Boolean = false, inSequence: Boolean = false, onChosen: (String) -> Unit) {
         val actions = Action.entries.filter { action ->
             when {
-                inSequence -> action != Action.NONE && !action.callOnly && action != Action.SEQUENCE && action != Action.AUTOMATION
+                inSequence -> action.inSequence
                 calls -> action != Action.NONE
                 else -> !action.callOnly
             }
@@ -270,7 +270,8 @@ abstract class GestureScreen : Screen() {
                 Action.SEQUENCE -> pickSequence(current, onChosen)
                 Action.AUTOMATION -> pickDevice(current) { device ->
                     onChosen(Mappings.automationId(device))
-                    automationGuide(firstTime = true)
+                    // The guide is about gestures' names; a step's row says what it sends.
+                    if (!inSequence) automationGuide(firstTime = true)
                 }
                 else -> onChosen(action.id)
             }
@@ -437,12 +438,12 @@ abstract class GestureScreen : Screen() {
             })
             addView(text(14f, "With these extras:", Cb.INK_500))
             addView(text(14f, listOf(
-                "gesture: which one (swipe_left, middle_tap, …), dial for pinch and turn, middle_dial, a slider index_left_right and so on, or drawing",
+                "gesture: which one (swipe_left, middle_tap, …), dial for pinch and turn, middle_dial, a slider index_left_right and so on, drawing, or sequence",
                 "steps: for a dial or slider, how far it turned (+3, −2)",
                 "palm: for an override, the position (down, sideways, up)",
                 "profile: the profile it's in (During calls in a call)",
                 "device: the Home device it's for, if you picked one",
-                "name: for a drawing, its name",
+                "name: for a drawing or a sequence, its name",
             ).joinToString("\n") { "· $it" }, Cb.INK_500))
             addView(text(14f, "Any app on the phone can receive this broadcast, so device names are visible to them.", Cb.INK_500))
             addView(homeDevicesRow().also { guideDevices = it.getChildAt(2) as android.widget.TextView })
@@ -452,6 +453,8 @@ abstract class GestureScreen : Screen() {
             addView(text(14f, "Trigger: Intent Received, the same action. Tick the extras gesture, steps, profile and device to get them as variables."))
             addView(Cb.label(context, "Home Assistant"))
             addView(text(14f, "Needs the Home Assistant app 2026.8.4 or newer. In it: Settings, Companion app, Manage sensors, Last update trigger: enable it and turn on Add new intent, then check the new intent reads the line above (the switch saves the next broadcast it gets) and force-stop the app once. Automations then trigger on the event android.intent_received; the extras are in its data."))
+            addView(Cb.label(context, "From a sequence"))
+            addView(text(14f, "A sequence's Send to automation step sends gesture sequence, name (the sequence's), device and profile (the profile whose gesture started it), so phone actions and Home Assistant mix in one gesture. In Home Assistant: event android.intent_received with data gesture: sequence and name: Goodnight."))
             addView(row(gap = 10f).apply {
                 addView(pill("Send a test") {
                     // As from the profile in use, for the first device (if any), so a rule on either can be tried.

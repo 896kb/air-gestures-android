@@ -52,6 +52,9 @@ enum class Action(val id: String, val label: String, val icon: Int) {
     /** Whether it belongs to the During calls picker only. */
     val callOnly get() = this == ANSWER || this == END_CALL
 
+    /** Whether a sequence can hold it as a step: not nothing, another sequence or a call action. */
+    val inSequence get() = this != NONE && !callOnly && this != SEQUENCE
+
     companion object {
         fun of(id: String) = when {
             id.startsWith(APP_PREFIX) -> OPEN_APP

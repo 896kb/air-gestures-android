@@ -1,7 +1,9 @@
 package dev.kb896.airgestures
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StrokesTest {
@@ -69,5 +71,11 @@ class StrokesTest {
         )
         // Try it: no profile.
         assertEquals(Mappings.Automation.Sequence("Goodnight", null, "d1"), Sequences.stepAutomation("Goodnight", null, "automation@d1"))
+    }
+
+    @Test fun `a step can send to automation, but not be another sequence, nothing or a call action`() {
+        assertTrue(Action.AUTOMATION.inSequence)
+        assertTrue(Action.FLASHLIGHT.inSequence)
+        for (action in listOf(Action.SEQUENCE, Action.NONE, Action.ANSWER, Action.END_CALL)) assertFalse(action.name, action.inSequence)
     }
 }
