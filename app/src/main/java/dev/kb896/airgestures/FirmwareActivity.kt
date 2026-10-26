@@ -52,7 +52,7 @@ class FirmwareActivity : Screen() {
     private var drawnFor: List<Any?>? = null
 
     private fun drawKey(state: BandService.State) =
-        listOf(state.firmware, state.otaKek, activeVersion(), state.otaBusy || state.install?.stage.let { it == "restarting" || it == "checking" })
+        listOf(state.firmware, state.otaKek, Firmware.bandTag(), activeVersion(), state.otaBusy || state.install?.stage.let { it == "restarting" || it == "checking" })
 
     /** The build an update is (or was last) about. */
     private fun activeVersion(): String? = started
@@ -273,7 +273,7 @@ class FirmwareActivity : Screen() {
         drawnFor = drawKey(BandService.state.value)
         (updateBox.parent as? LinearLayout)?.removeView(updateBox)
         bandSlot.addView(updateBox)
-        val packages = Firmware.packages(this)
+        val packages = Firmware.packages(this, Firmware.bandTag())
         if (packages.isEmpty()) {
             downloads.addView(Cb.text(this, 13f, color = Cb.INK_500).apply { text = "Nothing downloaded yet." })
             return
@@ -306,8 +306,15 @@ class FirmwareActivity : Screen() {
             val bandKey = BandService.state.value.otaKek
             val need = pkg.kek
             fun note(text: String) = Cb.text(context, 13f, color = Cb.INK_700).apply { this.text = text; setLineSpacing(0f, 1.3f) }
+            // Meta wraps each key for one band: another band's download is no use to this one.
+            val keyMissing = need != null && bandKey != need && pkg.bandKey == null
             when {
                 need == null -> {}
+                keyMissing -> {
+                    addView(note("This firmware needs key $need on the band. Keys are made for each band, and this " +
+                        "band's hasn't been downloaded: tap Check with Meta to get it."))
+                    addView(row().apply { addView(pill("Check with Meta") { checkMeta() }.first) })
+                }
                 bandKey == null -> {
                     addView(note("This firmware needs key $need on the band. Tap Refresh status to see which key it has."))
                     addView(row().apply { addView(pill("Refresh status") { ask() }.first) })
@@ -318,8 +325,10 @@ class FirmwareActivity : Screen() {
                 }
                 else -> addView(note("Your band has key $need, which this firmware needs."))
             }
-            addView(note(if (need != null && bandKey != need) "Once the key is installed you can install the firmware." else "You can install the firmware."))
-            addView(row().apply { addView(pill("Install firmware") { update(pkg) }.first) })
+            if (!keyMissing) {
+                addView(note(if (need != null && bandKey != need) "Once the key is installed you can install the firmware." else "You can install the firmware."))
+                addView(row().apply { addView(pill("Install firmware") { update(pkg) }.first) })
+            }
         }
         if (pkg.version == activeVersion()) {
             (updateBox.parent as? LinearLayout)?.removeView(updateBox)

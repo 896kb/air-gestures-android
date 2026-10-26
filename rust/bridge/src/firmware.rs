@@ -5,8 +5,9 @@
 //! and installing it would also need the band's wrapped key (`kek_id`), which is fetched and
 //! kept alongside in case Meta stops serving it.
 //!
-//! Each check saves `<dir>/<target version>/`: `ota.zip`, `response.json` (the offer),
-//! `kek.json` (the wrapped key, when one is named) and `check.json` (what was asked, when).
+//! Each check saves `<dir>/<target version>/`: `ota.zip`, the same for every band, and in
+//! `bands/<band tag>/` what Meta gave this band: `response.json` (the offer), `kek.json` (the
+//! key, wrapped for this band alone, when one is named) and `check.json` (what was asked, when).
 
 use std::fs;
 use std::io::{Read, Write};
@@ -218,12 +219,20 @@ pub fn archive(session_json: &str, serial: &str, version: &str, dir: &str) -> Re
     Ok(json!({"offers": kept, "not_offered": tried}).to_string())
 }
 
-/// One offer into `<dir>/<target>/`; an archived package with the right checksum isn't fetched again.
+/// The folder name for one band's files: a hash of its serial, so files of different bands
+/// stay apart without the serial in a path.
+pub fn band_tag(serial: &str) -> String {
+    hex(&Sha256::digest(format!("air-gestures band {serial}").as_bytes()))[..16].to_owned()
+}
+
+/// One offer into `<dir>/<target>/` (this band's part in `bands/<tag>/`); an archived package
+/// with the right checksum isn't fetched again.
 fn keep(session: &MetaSession, serial: &str, dir: &str, response: &Value, offer: &Value, target: &str, asked: Value) -> Result<Value, String> {
     let folder = Path::new(dir).join(target);
-    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let band = folder.join("bands").join(band_tag(serial));
+    fs::create_dir_all(&band).map_err(|e| e.to_string())?;
     let save = |name: &str, value: &Value| {
-        fs::write(folder.join(name), serde_json::to_string_pretty(value).expect("JSON")).map_err(|e| e.to_string())
+        fs::write(band.join(name), serde_json::to_string_pretty(value).expect("JSON")).map_err(|e| e.to_string())
     };
     save("response.json", response)?;
     save("check.json", &asked)?;
@@ -330,6 +339,14 @@ mod tests {
             {"device_serial": "S", "firmware_update_info": {"file_uri": "u", "target_version": 9}}]}}});
         assert_eq!(text(&offer(&unified).unwrap()["target_version"]).unwrap(), "9");
         assert!(offer(&json!({"data": {"x": []}})).is_none());
+    }
+
+    #[test]
+    fn each_band_has_its_own_tag() {
+        assert_eq!(band_tag("A"), band_tag("A"));
+        assert_ne!(band_tag("A"), band_tag("B"));
+        assert_eq!(band_tag("A").len(), 16);
+        assert!(!band_tag("SERIAL1").contains("SERIAL1"));
     }
 }
 

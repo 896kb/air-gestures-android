@@ -726,7 +726,8 @@ impl Connection {
     }
 
     /// What the band said about itself (`{}` before it has): firmware, software, hardware,
-    /// serial, release branch. For the firmware archive; the serial isn't logged.
+    /// serial, release branch, and `tag` (the folder for this band's firmware keys, see
+    /// [`firmware::band_tag`]). For the firmware archive; the serial isn't logged.
     pub fn device_info(&self) -> String {
         self.session.device_info().map_or_else(
             || "{}".into(),
@@ -735,6 +736,7 @@ impl Connection {
                     "firmware": info.firmware, "software": info.software, "hardware": info.hardware,
                     "serial": info.serial, "release_branch": info.release_branch,
                     "models": info.models, "handwriting": info.handwriting(),
+                    "tag": firmware::band_tag(&info.serial),
                 })
                 .to_string()
             },
