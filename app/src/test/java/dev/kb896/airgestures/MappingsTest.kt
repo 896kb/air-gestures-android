@@ -124,6 +124,38 @@ class MappingsTest {
             Mappings.extras(Mappings.Automation.Step("middle_dial", -1, "Music", null), device = null, steps = -3))
     }
 
+    @Test fun `a sequence's automation step sends the sequence's name, its profile and device`() {
+        assertEquals(mapOf("gesture" to "sequence", "name" to "Goodnight", "profile" to "Music", "device" to "Curtains"),
+            Mappings.extras(Mappings.Automation.Sequence("Goodnight", "Music", "d1"), device = "Curtains"))
+        assertEquals(mapOf("gesture" to "sequence", "name" to "Goodnight"),
+            Mappings.extras(Mappings.Automation.Sequence("Goodnight", null, null), device = null))
+    }
+
+    @Test fun `a sequence carries the profile that started it, the shared drawings none`() {
+        val seq = ProfileList(
+            listOf(Profile("p1", "Music", mapOf("index_tap" to "seq:s1"), "volume",
+                palm = mapOf("middle_tap" to mapOf("up" to "seq:s1")), drawings = mapOf("Moon" to "seq:s1")),
+                Profile("p2", "Café: night/2", mapOf("index_tap" to "seq:s1"), "none")),
+            picked = "p1",
+            apps = emptyMap(),
+        )
+        val json = org.json.JSONObject(Mappings.profilesJson(Mappings.Input(seq, band, mapOf("swipe_up" to "seq:s1"),
+            mapOf("Star" to "seq:s1"), emptyMap(), "left")))
+        val music = json.getJSONArray("profiles").getJSONObject(0)
+        assertEquals("seq:s1/Music", music.getJSONObject("map").getString("index_tap"))
+        assertEquals("seq:s1/Music", music.getJSONObject("palm").getJSONObject("middle_tap").getString("up"))
+        assertEquals("seq:s1/Music", music.getJSONObject("drawings").getString("Moon"))
+        assertEquals("seq:s1/During+calls", json.getJSONObject("calls").getString("swipe_up"))
+        assertEquals("seq:s1", json.getJSONObject("drawings").getString("Star"))
+        // A shared drawing's sequence isn't copied into each profile (only automation is).
+        assertFalse(music.getJSONObject("drawings").has("Star"))
+        val cafe = json.getJSONArray("profiles").getJSONObject(1).getJSONObject("map").getString("index_tap")
+        assertEquals("s1" to "Café: night/2", Sequences.started(cafe))
+        assertEquals("s1" to "During calls", Sequences.started(json.getJSONObject("calls").getString("swipe_up")))
+        // Not automation, whatever the profile's name holds.
+        assertNull(Mappings.sent(cafe))
+    }
+
     @Test fun `the calls leave out as usual, nothing is a dash`() {
         val calls = json().getJSONObject("calls")
         assertEquals(setOf("index_double", "middle_double", "middle_tap"), calls.keys().asSequence().toSet())

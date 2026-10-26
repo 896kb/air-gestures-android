@@ -60,9 +60,16 @@ object Mappings {
      * what sends: `<stored>/<profile>:<name>`, e.g. `automation@d1/Music:index_tap:up` ([sent]
      * reads it back). [profile]: the name of the profile (or [CALLS]) it's in, URL-encoded so it
      * can hold anything; null for none (the shared drawings), `<stored>:<name>` as before profiles.
+     * A sequence carries its profile the same way, for its automation steps: `seq:<id>/<profile>`
+     * ([Sequences.started] reads it back).
      */
-    private fun named(id: String, name: String, profile: String?) =
-        if (isAutomation(id)) id + profile?.let { "/" + URLEncoder.encode(it, "UTF-8") }.orEmpty() + ":" + name else id
+    private fun named(id: String, name: String, profile: String?) = when {
+        isAutomation(id) -> id + encoded(profile) + ":" + name
+        id.startsWith(Sequences.PREFIX) -> id + encoded(profile)
+        else -> id
+    }
+
+    private fun encoded(profile: String?) = profile?.let { "/" + URLEncoder.encode(it, "UTF-8") }.orEmpty()
 
     /**
      * A dial's two actions (null: nothing); automation steps carry the dial's name (`dial` for the
@@ -147,6 +154,9 @@ object Mappings {
         }
 
         data class Drawing(val name: String, override val profile: String? = null, override val device: String? = null) : Automation()
+
+        /** A sequence's step: [name] is the sequence's; [profile] null when it wasn't a gesture that started it (Try it). */
+        data class Sequence(val name: String, override val profile: String? = null, override val device: String? = null) : Automation()
     }
 
     /** What an action name from the bridge sends ([named]), or null when it isn't automation. */
@@ -169,8 +179,8 @@ object Mappings {
     }
 
     /**
-     * The broadcast's extras for [made]: `gesture` (a dial or slider's name, or `drawing`), then
-     * `palm` (an override), `name` (a drawing), `steps` (a dial or slider's, when given), `profile`,
+     * The broadcast's extras for [made]: `gesture` (a dial or slider's name, `drawing` or `sequence`), then
+     * `palm` (an override), `name` (a drawing's or sequence's), `steps` (a dial or slider's, when given), `profile`,
      * and `device` = [device], the device's current name (left out without one).
      */
     fun extras(made: Automation, device: String?, steps: Int? = null): Map<String, Any> = buildMap {
@@ -184,6 +194,10 @@ object Mappings {
                 put("name", made.name)
             }
             is Automation.Step -> put("gesture", made.name)
+            is Automation.Sequence -> {
+                put("gesture", "sequence")
+                put("name", made.name)
+            }
         }
         steps?.let { put("steps", it) }
         made.profile?.let { put("profile", it) }

@@ -2,6 +2,7 @@ package dev.kb896.airgestures
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.URLDecoder
 import java.util.Locale
 import kotlin.math.roundToLong
 
@@ -85,6 +86,17 @@ object Sequences {
     fun wait(ms: Long) = "$WAIT$ms"
 
     fun waitMs(step: String) = step.removePrefix(WAIT).toLongOrNull()?.takeIf { step.startsWith(WAIT) && it > 0 }
+
+    /**
+     * A sequence action as the bridge reports it: its id, and the profile whose gesture started
+     * it (`seq:<id>/<URL-encoded profile>`, see Mappings.profilesJson); null for a plain `seq:<id>`.
+     */
+    fun started(action: String): Pair<String, String?> {
+        val rest = action.removePrefix(PREFIX)
+        if ('/' !in rest) return rest to null
+        val profile = rest.substringAfter('/')
+        return rest.substringBefore('/') to runCatching { URLDecoder.decode(profile, "UTF-8") }.getOrDefault(profile)
+    }
 
     data class Sequence(val id: String, val name: String, val steps: List<String>)
 

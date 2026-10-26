@@ -9,14 +9,17 @@ object Labels {
     fun action(context: Context, id: String): String = when {
         Sequences.waitMs(id) != null -> "Wait ${seconds(Sequences.waitMs(id)!!)}"
         id.startsWith(Strokes.PATH) -> "Drawn swipe"
-        id.startsWith(Sequences.PREFIX) ->
-            Profiles.sequences(context).get(id.removePrefix(Sequences.PREFIX))?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
+        id.startsWith(Sequences.PREFIX) -> sequence(Profiles.sequences(context), id)
         else -> when (val action = Action.of(id)) {
             Action.OPEN_APP -> "Open ${appName(context, id.removePrefix(APP_PREFIX))}"
             Action.AUTOMATION -> action.label + device(context, id)
             else -> action.label
         }
     }
+
+    /** A sequence action (stored, or as the bridge reports it with its profile) in words: Sequence: <name>. */
+    fun sequence(library: Sequences.Library, id: String) =
+        library.get(Sequences.started(id).first)?.let { "Sequence: ${it.name}" } ?: "Sequence (deleted)"
 
     /** A dial's or slider's choice in words: Volume, Send to automation · Yeelight… */
     fun dial(context: Context, key: String?) = DialChoice.of(key).label + device(context, key)

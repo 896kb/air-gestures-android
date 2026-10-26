@@ -54,4 +54,10 @@ class StrokesTest {
         assertEquals(listOf("wait:2000", "app:com.spotify.music", "tap:0.5000,0.4000"), library.moved("q1", 1, -1).get("q1")!!.steps)
         assertEquals(emptyList<Sequences.Sequence>(), library.deleted("q1").sequences)
     }
+
+    @Test fun `a started sequence reads its id and profile, a plain id has none`() {
+        assertEquals("q1" to null, Sequences.started("seq:q1"))
+        assertEquals("q1" to "Music", Sequences.started("seq:q1/Music"))
+        assertEquals("q12" to "Café: night/2", Sequences.started("seq:q12/Caf%C3%A9%3A+night%2F2"))
+    }
 }

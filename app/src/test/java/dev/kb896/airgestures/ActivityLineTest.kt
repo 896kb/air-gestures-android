@@ -54,4 +54,13 @@ class ActivityLineTest {
         assertEquals("index tap · palm up → Send to automation", line("""{"what":"index tap","palm":"up","calibrated":true,"run":"automation@d7/Music:index_tap:up"}"""))
         assertEquals("index dial · palm up → Automation down", line("""{"what":"index dial","palm":"up","calibrated":true,"steps":[["automation/Music:dial:dial:down",1]]}"""))
     }
+
+    @Test fun `a sequence started from a profile is named, not deleted`() {
+        val library = Sequences.Library(listOf(Sequences.Sequence("q1", "Goodnight", listOf("torch.toggle", "automation@d1"))))
+        val label = { id: String -> ActivityLine.label(id) { Labels.sequence(library, it) } }
+        assertEquals("Sequence: Goodnight", label("seq:q1/Music"))
+        assertEquals("Sequence: Goodnight", label("seq:q1/Caf%C3%A9%3A+night%2F2"))
+        assertEquals("Sequence: Goodnight", label("seq:q1"))
+        assertEquals("Sequence (deleted)", label("seq:q2/Music"))
+    }
 }
