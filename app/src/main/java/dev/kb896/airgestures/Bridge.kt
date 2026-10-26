@@ -81,9 +81,15 @@ object Bridge {
     @JvmStatic external fun setBandHandwriting(handle: Long, on: Boolean): ByteArray
     /** Debug: what it has sent: `{"on", "text", "tokens": [{"index", "symbol", "margin"}], "frames", ...}`. */
     @JvmStatic external fun bandHandwriting(handle: Long, clear: Boolean): String
-    /** The band's handwriting into the text field in front, on or off; bytes to write. */
+    /**
+     * The band's handwriting into the text field in front, on or off; bytes to write. On throws
+     * while the controls are off; turning them off ends it (`@field off`).
+     */
     @JvmStatic external fun setFieldTyping(handle: Long, on: Boolean, before: String, popup: Boolean, now: Double): ByteArray
-    /** The field's edits since the last call, and the pen: `{"edits": [{"delete", "insert"}], "pen"}`. */
+    /**
+     * The field's edits since the last call, and the pen: `{"active", "edits": [{"delete", "insert"}], "pen", …}`;
+     * with no field typed into, `"off"`: the controls are off.
+     */
     @JvmStatic external fun fieldEdits(handle: Long, now: Double): String
     /** A swipe up in a text field: the word's suggestions show in its place; false when none. */
     @JvmStatic external fun fieldChoose(handle: Long): Boolean

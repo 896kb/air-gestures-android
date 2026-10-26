@@ -475,7 +475,8 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_firmwareArchive<'local>
     json_out(&mut env, result)
 }
 
-/// The band's handwriting into the text field in front, on or off; bytes to write.
+/// The band's handwriting into the text field in front, on or off; bytes to write. On throws
+/// while the controls are off.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldTyping<'local>(
     mut env: JNIEnv<'local>,

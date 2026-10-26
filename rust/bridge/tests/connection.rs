@@ -377,3 +377,122 @@ fn turning_the_controls_off_from_the_app_closes_an_open_drawing() {
     connection.set_paused(true, 3.5);
     assert_eq!(taken(&mut connection).1, vec!["@draw-cancelled".to_owned()], "and no @controls: the app knows");
 }
+
+/// A letter the band wrote, sure of it.
+fn letter(c: char) -> band_core::handwriting::Written {
+    let index = (c as u8 - b'a') as usize;
+    let mut letters = [0.0; 26];
+    letters[index] = 1.0;
+    band_core::handwriting::Written { index, margin: 3.0, letters }
+}
+
+/// The field's edits since the last look, as JSON.
+fn field(connection: &mut Connection, now: f64) -> serde_json::Value {
+    serde_json::from_str(&connection.field_edits(now)).unwrap()
+}
+
+/// Typing into a text field, the band told.
+fn writing(paused: bool) -> (Connection, Responder) {
+    let (mut connection, mut band) = connected(false);
+    let on = connection.set_field_typing(true, "", true, 2.0).unwrap();
+    pump(&mut connection, &mut band, on, 2.0);
+    if paused {
+        connection.set_paused(true, 2.1);
+    }
+    taken(&mut connection);
+    connection.take_log();
+    (connection, band)
+}
+
+/// The band's handwriting state, as the session last asked for it.
+fn band_writes(connection: &mut Connection) -> bool {
+    serde_json::from_str::<serde_json::Value>(&connection.band_handwriting(false)).unwrap()["on"] == serde_json::json!(true)
+}
+
+#[test]
+fn what_the_band_writes_types_into_the_field_while_the_controls_are_on() {
+    let (mut connection, _band) = writing(false);
+    assert!(band_writes(&mut connection));
+    connection.type_symbols(&[letter('a')], 3.0);
+    let look = field(&mut connection, 3.0);
+    assert_eq!(look["active"], serde_json::json!(true));
+    assert_eq!(look["edits"].as_array().unwrap().len(), 1, "{look}");
+}
+
+#[test]
+fn the_controls_off_from_the_app_end_field_typing_and_nothing_is_typed() {
+    let (mut connection, mut band) = writing(true);
+    connection.type_symbols(&[letter('a'), letter('b')], 3.0);
+    let look = field(&mut connection, 3.0);
+    assert_eq!((look["active"].clone(), look["off"].clone()), (serde_json::json!(false), serde_json::json!(true)));
+    assert_eq!(look["edits"], serde_json::json!([]));
+    // The band goes back to gestures with the next tick's writes.
+    let out = connection.tick(3.5).unwrap();
+    assert!(!out.is_empty());
+    pump(&mut connection, &mut band, out, 3.5);
+    assert!(!band_writes(&mut connection));
+}
+
+#[test]
+fn turning_the_controls_off_from_the_app_reports_the_field_gone() {
+    let (mut connection, _band) = writing(false);
+    connection.set_paused(true, 3.0);
+    assert_eq!(taken(&mut connection).1, vec!["@field off".to_owned()]);
+    assert!(connection.take_log().iter().any(|line| line.contains("controls")));
+}
+
+#[test]
+fn a_middle_hold_while_writing_turns_the_controls_off_and_ends_field_typing() {
+    let (mut connection, mut band) = writing(false);
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 3.0);
+    assert_eq!(
+        taken(&mut connection).1,
+        vec!["@gesture middle hold".to_owned(), "@controls off".to_owned(), "@field off".to_owned()]
+    );
+    assert!(connection.status_json().contains(r#""paused":true"#));
+    assert!(!band_writes(&mut connection), "the hold's own feed wrote the band back to gestures");
+    connection.type_symbols(&[letter('a')], 3.5);
+    assert_eq!(field(&mut connection, 3.5)["active"], serde_json::json!(false));
+    // Off and not writing: the hold turns them back on, as ever.
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 5.0);
+    assert!(taken(&mut connection).1.contains(&"@controls on".to_owned()));
+}
+
+#[test]
+fn field_typing_is_refused_while_the_controls_are_off() {
+    let (mut connection, _band) = connected(true);
+    assert!(connection.set_field_typing(true, "", true, 2.0).is_err());
+    assert!(!band_writes(&mut connection));
+    let look = field(&mut connection, 2.0);
+    assert_eq!((look["active"].clone(), look["off"].clone()), (serde_json::json!(false), serde_json::json!(true)));
+    // Turning it off is always fine.
+    assert!(connection.set_field_typing(false, "", true, 2.1).is_ok());
+}
+
+#[test]
+fn gestures_edit_the_field_only_while_writing_with_the_controls_on() {
+    let (mut connection, mut band) = writing(false);
+    gesture(&mut connection, &mut band, 8, THUMB, 0, 3.0);
+    let (run, events) = taken(&mut connection);
+    assert!(run.is_empty(), "{run:?}");
+    assert_eq!(events, vec!["@gesture swipe left".to_owned(), "@field-gesture swipe left".to_owned()]);
+    gesture(&mut connection, &mut band, 8, THUMB, 0, 4.0);
+    assert_eq!(activities(&mut connection)[0]["writing"], serde_json::json!(true));
+    // The hold that turns the controls off isn't the field's.
+    gesture(&mut connection, &mut band, 0, MIDDLE, 3, 5.0);
+    assert!(!taken(&mut connection).1.iter().any(|line| line.starts_with("@field-gesture")));
+    gesture(&mut connection, &mut band, 8, THUMB, 0, 6.0);
+    assert!(!taken(&mut connection).1.iter().any(|line| line.starts_with("@field-gesture")));
+    // Nor do the field's own calls do anything once it's gone.
+    assert!(!connection.field_choose());
+    assert!(!connection.field_delete_word(6.5));
+}
+
+#[test]
+fn without_a_field_gestures_run_as_usual() {
+    let (mut connection, mut band) = writing(false);
+    let off = connection.set_field_typing(false, "", true, 2.5).unwrap();
+    pump(&mut connection, &mut band, off, 2.5);
+    gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
+    assert_eq!(taken(&mut connection), (vec!["media.next".to_owned()], vec!["@gesture swipe down".to_owned()]));
+}

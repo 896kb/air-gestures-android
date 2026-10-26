@@ -8,8 +8,9 @@
 //! connection (`report`, `teach`). Also the Meta sign-in and the ownership claim
 //! (`metaauth`, `meta`, `claim`), ported from the Linux app.
 
-use band_core::controls::{Class, Controls, DragMode, Finger, Output};
+use band_core::controls::{Class, Controls, DragMode, Finger, Output, Unused};
 use band_core::events::{Event, Hand};
+use band_core::handwriting::Written;
 use band_core::identity::EnrollmentIdentity;
 use band_core::session::BandSession;
 use serde::Serialize;
@@ -50,6 +51,11 @@ pub struct Connection {
     probing: bool,
     /// Typing the band's handwriting into the text field in front (see [`Self::set_field_typing`]).
     field: Option<fieldtext::FieldTyping>,
+    /// The controls went off while typing into a field: the band goes back to gestures with
+    /// the next `feed` or `tick` (what they return).
+    field_ended: bool,
+    /// What the band wrote isn't typed (the controls off): said once in the log, till it types again.
+    untyped_said: bool,
     /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
     roll: palmlive::LiveRoll,
 }
@@ -107,6 +113,8 @@ impl Connection {
             log,
             probing: false,
             field: None,
+            field_ended: false,
+            untyped_said: false,
             roll: palmlive::LiveRoll::default(),
         })
     }
@@ -125,6 +133,7 @@ impl Connection {
             outgoing.extend(self.on_event(event, now)?);
         }
         self.type_written(now);
+        outgoing.extend(self.field_ended_bytes());
         Ok(outgoing)
     }
 
@@ -159,6 +168,7 @@ impl Connection {
                     .map_err(|e| e.to_string())?,
             );
         }
+        outgoing.extend(self.field_ended_bytes());
         Ok(outgoing)
     }
 
@@ -180,6 +190,8 @@ impl Connection {
     /// | `@not-drawn` | `Output::NotDrawn` |
     /// | `@draw-cancelled` | `Output::DrawCancelled` |
     /// | `@drag-sample <index\|middle> <x> <y> <z> <roll>` | `Output::DragSample`, plus `Controls::prototypes().palm_down_roll` (what `Prototypes::taught` needs) |
+    /// | `@field-gesture <label>` | `Output::Unused { why: Unused::Writing }` while typing into a field: the gesture is the field's to edit with |
+    /// | `@field off` | the controls went off while typing into a field: it's no longer typed into (see [`Self::set_field_typing`]) |
     pub fn take_actions(&mut self) -> Vec<String> {
         std::mem::take(&mut self.actions)
     }
@@ -193,12 +205,16 @@ impl Connection {
     }
 
     /// The controls off or on from the app. It knows, so `@controls` isn't reported back; what
-    /// else that brings (turning off closes an open drawing: `@draw-cancelled`) is.
+    /// else that brings (turning off closes an open drawing: `@draw-cancelled`, and ends
+    /// typing into a field: `@field off`) is.
     pub fn set_paused(&mut self, paused: bool, now: f64) {
         let mut outputs = if paused { self.controls.pause() } else { self.controls.resume(now) };
         outputs.retain(|output| !matches!(output, Output::Controls { .. }));
         // Without a clock nothing is written to the band here (a hand waits for `tick`), so it can't fail.
         let _ = self.take(outputs, None);
+        if paused {
+            self.end_field();
+        }
     }
 
     /// New profiles, hand or call layer from the app (see `profiles::parse`). The app knows
@@ -338,24 +354,67 @@ impl Connection {
         self.session.ota_start(plan, now).map_err(|e| e.to_string())
     }
 
-    /// The band's handwriting into a text field: on puts the band in its handwriting state and
-    /// starts a fresh word (`before`: the field's text before the cursor, for capitals); off
-    /// puts it back to gestures. Bytes to write.
+    /// The band's handwriting into a text field: on puts the band in its handwriting state,
+    /// the controls into writing (`Controls::set_writing`: gestures come as `@field-gesture`,
+    /// only Controls on/off acts) and starts a fresh word (`before`: the field's text before the
+    /// cursor, for capitals); off puts it back to gestures. Bytes to write. On is refused while
+    /// the controls are off (`field_edits` then says `"off"`); turning them off while typing
+    /// ends it (`@field off`).
     pub fn set_field_typing(&mut self, on: bool, before: &str, popup: bool, now: f64) -> Result<Vec<u8>, String> {
-        let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string())?;
+        if on && self.controls.status().paused {
+            return Err("not typing into the field: the controls are off".into());
+        }
+        let bytes = self.session.set_band_handwriting(on).map_err(|e| e.to_string());
+        // Off goes off here even when the band can't be told (it's going, or gone).
+        if on && bytes.is_err() {
+            return bytes;
+        }
+        self.field_ended = false;
+        self.controls.set_writing(on);
         self.field = on.then(|| {
             let mut field = fieldtext::FieldTyping::new(before, now);
             field.set_popup(popup);
             field
         });
-        Ok(bytes)
+        bytes
+    }
+
+    /// The controls went off while typing into a field: it goes, the controls stop writing and
+    /// the band goes back to gestures (see `field_ended_bytes`); `@field off` tells the app.
+    fn end_field(&mut self) {
+        if self.field.take().is_none() {
+            return;
+        }
+        self.controls.set_writing(false);
+        self.field_ended = true;
+        self.actions.push("@field off".into());
+        self.log.push("handwriting: back to gestures, the controls went off".into());
+    }
+
+    /// The band back to gestures after `end_field`, once there's a `feed` or `tick` to write it.
+    fn field_ended_bytes(&mut self) -> Vec<u8> {
+        if !std::mem::take(&mut self.field_ended) {
+            return Vec::new();
+        }
+        self.session.set_band_handwriting(false).unwrap_or_else(|e| {
+            self.log.push(format!("handwriting: couldn't go back to gestures ({e})"));
+            Vec::new()
+        })
+    }
+
+    /// The field being typed in, while what the band writes goes there (`Controls::writes`:
+    /// the controls on and the band live): gestures and calls only edit it then.
+    fn typing(&mut self) -> Option<&mut fieldtext::FieldTyping> {
+        if self.controls.writes() { self.field.as_mut() } else { None }
     }
 
     /// The edits for the text field since the last call, and whether the pen is down, as JSON:
-    /// `{"edits": [{"delete", "insert"}], "pen": bool}`.
+    /// `{"active": true, "edits": [{"delete", "insert"}], "pen": bool, …}`; with no field
+    /// typed into, `{"active": false, …, "off": bool}` (`off`: the controls are off, so
+    /// none will be till they're on).
     pub fn field_edits(&mut self, now: f64) -> String {
         let Some(field) = self.field.as_mut() else {
-            return r#"{"active":false,"edits":[],"pen":false}"#.to_owned();
+            return serde_json::json!({"active": false, "edits": [], "pen": false, "off": self.controls.status().paused}).to_string();
         };
         field.tick(now);
         let choices = field.choices();
@@ -375,19 +434,19 @@ impl Connection {
     /// (the app then trims the field's own text).
     pub fn field_delete_word(&mut self, now: f64) -> bool {
         let words = words::dictionary();
-        self.field.as_mut().is_some_and(|field| field.delete_word(words.as_deref(), now))
+        self.typing().is_some_and(|field| field.delete_word(words.as_deref(), now))
     }
 
     /// A swipe up in a text field: the suggestions for the word show in its place. False when
     /// there's nothing to choose for.
     pub fn field_choose(&mut self) -> bool {
         let words = words::dictionary();
-        self.field.as_mut().is_some_and(|field| field.choose(words.as_deref()))
+        self.typing().is_some_and(|field| field.choose(words.as_deref()))
     }
 
     /// While choosing: the next or previous suggestion first.
     pub fn field_choose_step(&mut self, forward: bool) {
-        if let Some(field) = &mut self.field {
+        if let Some(field) = self.typing() {
             field.choose_step(forward);
         }
     }
@@ -395,7 +454,7 @@ impl Connection {
     /// While choosing: take the first.
     pub fn field_choose_pick(&mut self, now: f64) {
         let words = words::dictionary();
-        if let Some(field) = &mut self.field {
+        if let Some(field) = self.typing() {
             field.choose_pick(words.as_deref(), now);
         }
     }
@@ -403,28 +462,43 @@ impl Connection {
     /// While choosing: leave it with the word as it was.
     pub fn field_choose_cancel(&mut self, now: f64) {
         let words = words::dictionary();
-        if let Some(field) = &mut self.field {
+        if let Some(field) = self.typing() {
             field.choose_cancel(words.as_deref(), now);
         }
     }
 
     /// A double tap in a text field: the pen goes down.
     pub fn field_pen_down(&mut self, now: f64) {
-        if let Some(field) = &mut self.field {
+        if let Some(field) = self.typing() {
             field.pen_down(now);
         }
     }
 
-    /// What the band wrote goes to the text field being typed in, if any. The log says how
-    /// many symbols, never which: what's written can be a password.
+    /// What the band wrote goes to the text field being typed in, if any (taken either way, so
+    /// it never types later).
     fn type_written(&mut self, now: f64) {
         let written = self.session.take_written();
-        if let Some(field) = &mut self.field {
-            let words = words::dictionary();
-            let untyped = written.iter().filter(|symbol| !field.take(symbol, words.as_deref(), now)).count();
-            if let Some(note) = written_note(written.len(), untyped) {
-                self.log.push(note);
+        self.type_symbols(&written, now);
+    }
+
+    /// Symbols the band wrote at `now` (`feed` gives the session's; public for the tests): typed
+    /// into the field only while `Controls::writes`, else dropped. The log says how many
+    /// symbols, never which: what's written can be a password.
+    pub fn type_symbols(&mut self, written: &[Written], now: f64) {
+        if written.is_empty() || self.field.is_none() {
+            return;
+        }
+        let words = words::dictionary();
+        let Some(field) = self.typing() else {
+            if !std::mem::replace(&mut self.untyped_said, true) {
+                self.log.push("handwriting: not typed, the controls are off".into());
             }
+            return;
+        };
+        let untyped = written.iter().filter(|symbol| !field.take(symbol, words.as_deref(), now)).count();
+        self.untyped_said = false;
+        if let Some(note) = written_note(written.len(), untyped) {
+            self.log.push(note);
         }
     }
 
@@ -554,6 +628,10 @@ impl Connection {
                     Some(now) => outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?),
                     None => self.pending_hand = Some(hand),
                 },
+                // Made for the field being typed in: the app edits it.
+                Output::Unused { gesture, why: Unused::Writing } if self.field.is_some() => {
+                    self.actions.push(format!("@field-gesture {}", gesture.label()));
+                }
                 other => {
                     // The match's distance, for tuning (the Activity line names the drawing).
                     if let Output::Drawn { name, distance } = &other {
@@ -561,6 +639,10 @@ impl Connection {
                     }
                     let roll = self.controls.prototypes().palm_down_roll;
                     self.actions.extend(line(&other, roll));
+                    // The band's Controls on/off while typing into a field ends it.
+                    if matches!(other, Output::Controls { enabled: false }) {
+                        self.end_field();
+                    }
                 }
             }
         }
