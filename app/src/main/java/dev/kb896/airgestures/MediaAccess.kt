@@ -23,8 +23,17 @@ class MediaAccess : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val note = sbn.notification
-        val eligible = sbn.packageName != packageName && !sbn.isOngoing &&
-            note.flags and Notification.FLAG_GROUP_SUMMARY == 0
+        // Without a ranking its importance and Do Not Disturb are unknown: no buzz.
+        val ranking = Ranking().takeIf { currentRanking?.getRanking(sbn.key, it) == true }
+        val eligible = buzzes(
+            own = sbn.packageName == packageName,
+            ongoing = sbn.isOngoing,
+            summary = note.flags and Notification.FLAG_GROUP_SUMMARY != 0,
+            importance = ranking?.importance ?: NotificationManager.IMPORTANCE_UNSPECIFIED,
+            interrupts = ranking?.matchesInterruptionFilter() == true,
+            media = note.extras?.containsKey(Notification.EXTRA_MEDIA_SESSION) == true,
+            category = note.category,
+        )
         val onlyOnce = note.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
         if (buzz.posted(sbn.key, alertTime(sbn), eligible, onlyOnce)) BandService.instance?.notificationHaptics()
     }
