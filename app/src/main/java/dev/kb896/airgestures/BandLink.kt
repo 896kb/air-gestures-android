@@ -98,7 +98,7 @@ class BandLink(
         if (handle != 0L) Bridge.setInCall(handle, inCall)
     }
 
-    /** A lesson or a text field is listening: gestures are reported, nothing runs. Kept for the next connection. */
+    /** A lesson is listening: gestures are reported, nothing runs. Kept for the next connection. */
     fun setPractice(on: Boolean) = synchronized(lock) {
         practice = on
         if (handle != 0L) Bridge.setPractice(handle, on)

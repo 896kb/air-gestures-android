@@ -338,6 +338,8 @@ class BandService : Service(), BandLink.Listener {
                 )?.let(::onLog)
                 "gesture" -> practice?.gesture(rest)
                 "practiced" -> practice?.action(rest)
+                "field-gesture" -> field?.gesture(rest)
+                "field" -> if (rest == "off") field?.ended()
                 "controls" -> bandToggled(rest == "on")
                 "profile" -> rest.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }
                     ?.let { (index, step) -> bandSwitched(index, step) }
@@ -392,6 +394,19 @@ class BandService : Service(), BandLink.Listener {
         practice = null
         link.setPractice(false)
     }
+
+    /**
+     * The text field the band writes into (WriteService): the gestures made for it (the band's
+     * own actions don't run meanwhile; Controls on/off does), and the controls going off, which
+     * ended it in the bridge.
+     */
+    interface Field {
+        fun gesture(label: String)
+        fun ended()
+    }
+
+    /** Set while the band writes into a text field (with [setFieldTyping]). */
+    var field: Field? = null
 
     /** A draw session's listener: a teach screen while one is open, else the pad over the app in front (or toasts). */
     interface Drawing {
