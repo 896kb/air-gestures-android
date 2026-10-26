@@ -21,6 +21,7 @@
 
 use std::collections::BTreeMap;
 
+use band_core::controls::palm::{RIGHT_PALM_DOWN_ROLL, SWAPPED_RIGHT_PALM_DOWN_ROLL};
 use band_core::controls::pinch::Prototypes;
 use band_core::controls::{
     BandControl, BandControls, Binding, CallBinding, Dial, DragMode, FingerSetup, Gesture, HandSetting, Options, Palm,
@@ -287,11 +288,16 @@ fn calibration(wrist: &str, json: Option<CalibrationJson>, notes: &mut Vec<Strin
             None
         }
     });
-    let drags = json.drags.and_then(|d| match Prototypes::taught(d.turn, d.drags, d.roll) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            notes.push(format!("calibration: the {wrist} wrist's taught drags are dropped ({e:?})"));
-            None
+    // Drags taught at band-core's old right-hand palm down (really palm up; before 2026-10-26,
+    // without a calibration) are read as taught at palm down, as the Linux app's store does.
+    let drags = json.drags.and_then(|d| {
+        let roll = if d.roll == SWAPPED_RIGHT_PALM_DOWN_ROLL { RIGHT_PALM_DOWN_ROLL } else { d.roll };
+        match Prototypes::taught(d.turn, d.drags, roll) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                notes.push(format!("calibration: the {wrist} wrist's taught drags are dropped ({e:?})"));
+                None
+            }
         }
     });
     Calibration { palm, drags }

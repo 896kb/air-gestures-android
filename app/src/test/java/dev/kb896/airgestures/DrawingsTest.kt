@@ -68,4 +68,10 @@ class DrawingsTest {
         assertEquals(listOf("Bulb"), none.store.update { it.with(bulb) }!!.names)
         assertEquals(listOf("Bulb"), FakeFile(none.text).store.load().names)
     }
+
+    @Test fun `drawings taught before the upright frame are the ones to teach again, once`() {
+        assertEquals(setOf("Bulb", "Z"), DrawingLibrary.toReteach(storedFrame = 1, names = listOf("Bulb", "Z")))
+        assertEquals(emptySet<String>(), DrawingLibrary.toReteach(storedFrame = DrawingLibrary.FRAME, names = listOf("Bulb")))
+        assertEquals(emptySet<String>(), DrawingLibrary.toReteach(storedFrame = 1, names = emptyList()))
+    }
 }

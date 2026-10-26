@@ -35,6 +35,16 @@ class DrawingsActivity : GestureScreen() {
         val list = Profiles.load(this)
         body.removeAllViews()
         Drawings.problem(this)?.let { body.addView(note(it).apply { setTextColor(Cb.INK_900) }) }
+        // Once after the update that drew drawings upright: the old ones won't match new tries.
+        val reteach = Drawings.toReteach(this)
+        if (reteach.isNotEmpty()) {
+            body.addView(card(null, column(gap = 10f).apply {
+                addView(note("Drawings taught before this update need teaching again: ${reteach.sorted().joinToString(", ")}.").apply {
+                    setTextColor(Cb.INK_900)
+                })
+                addView(row().apply { addView(pill("Got it") { Drawings.retaught(applicationContext, null); render() }.first) })
+            }))
+        }
 
         val draw = band[Builtin.DRAW]
         body.addView(card(null, column(gap = 8f).apply {

@@ -72,10 +72,10 @@ fn the_options_follow_the_hand_in_use() {
 
 #[test]
 fn stored_drags_are_checked_again() {
-    let good = r#"{"hand":"right","calibration":{"right":{"drags":{"roll":-142.3,"turn":[0,1,0],
+    let good = r#"{"hand":"right","calibration":{"right":{"drags":{"roll":2.3,"turn":[0,1,0],
         "drags":[[0,0,1],[0,0,-1],[1,0,0],[-1,0,0],[0.7,-0.7,0],[-0.7,0.7,0.1]]}}}}"#;
     let (setup, _) = parse(good).unwrap();
-    assert_eq!(setup.options(None).drags.map(|p| p.palm_down_roll), Some(-142.3));
+    assert_eq!(setup.options(None).drags.map(|p| p.palm_down_roll), Some(2.3));
     let bad = good.replace("[0,0,-1]", "[0,0,1]");
     assert!(parse(&bad).unwrap().0.options(None).drags.is_none(), "two drags alike: the defaults instead");
 }
@@ -133,4 +133,20 @@ fn a_null_or_wrong_shape_field_is_its_default_not_an_error() {
     let (_, named) = parse(r#"{"profiles":[{"map":{"swipe_up":"x"}},{"name":null}]}"#).unwrap();
     assert_eq!(named.list.len(), 2);
     assert_eq!(named.list[0].gestures[&Gesture::SwipeUp].normal.as_deref(), Some("x"));
+}
+
+/// Drags taught before band-core put palm down and up the right way round (2026-10-26), with no
+/// palm calibration, carry the old palm down (−142.3°, really palm up): they're read as taught at
+/// palm down (as the Linux app's store does). The directions themselves don't change.
+#[test]
+fn drags_taught_at_the_old_palm_down_read_as_palm_down() {
+    use band_core::controls::palm::{RIGHT_PALM_DOWN_ROLL, SWAPPED_RIGHT_PALM_DOWN_ROLL};
+    let stored = format!(
+        r#"{{"hand":"right","calibration":{{"right":{{"drags":{{"roll":{SWAPPED_RIGHT_PALM_DOWN_ROLL},"turn":[0,1,0],
+            "drags":[[0,0,1],[0,0,-1],[1,0,0],[-1,0,0],[0.7,-0.7,0],[-0.7,0.7,0.1]]}}}}}}}}"#
+    );
+    let (setup, _) = parse(&stored).unwrap();
+    let drags = setup.options(None).drags.unwrap();
+    assert_eq!(drags.palm_down_roll, RIGHT_PALM_DOWN_ROLL);
+    assert!(setup.notes.is_empty());
 }

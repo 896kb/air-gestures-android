@@ -302,12 +302,10 @@ fn a_bad_library_is_refused() {
 fn the_palm_readout_follows_the_bands_orientation() {
     let (mut connection, mut band) = connected(false);
     assert_eq!(connection.palm_now(3.0), r#"{"palm":null,"roll":null}"#);
-    // Roll −11.3° (turned +11.3° about the band's y): palm up on the right hand's measured calibration.
-    let half = 11.3_f64.to_radians() / 2.0;
-    let bytes = band.orientation([half.cos() as f32, 0.0, half.sin() as f32, 0.0]).unwrap();
-    let reply = connection.feed(&bytes, 3.0).unwrap();
-    pump(&mut connection, &mut band, reply, 3.0);
-    assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-11.3}"#);
+    // Roll −142.3° (turned about the band's y): palm up on the right hand's measured calibration
+    // (palm down −11.3°, palm up −142.3° since band-core put them the right way round).
+    roll_to(&mut connection, &mut band, -142.3, 3.0);
+    assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-142.3}"#);
     assert_eq!(connection.palm_now(4.0), r#"{"palm":null,"roll":null}"#, "stale");
 }
 
@@ -328,15 +326,15 @@ fn roll_to(connection: &mut Connection, band: &mut Responder, roll: f64, now: f6
 
 #[test]
 fn the_palm_follows_the_calibration_of_the_wrist_in_use() {
-    // A right wrist calibrated the other way round: −11.3° is palm down there.
-    let right = serde_json::json!({"right": {"palm": {"down": -10.0, "up": -150.0}}});
+    // A right wrist calibrated the other way round: −11.3° is palm up there.
+    let right = serde_json::json!({"right": {"palm": {"down": -150.0, "up": -10.0}}});
     let (mut connection, mut band) = connected_with(false, &with_calibration(json(&[], 0), right));
     roll_to(&mut connection, &mut band, -11.3, 3.0);
-    assert_eq!(connection.palm_now(3.1), r#"{"palm":"down","roll":-11.3}"#);
-    // Calibrated away: band-core's own right hand, where −11.3° is palm up.
+    assert_eq!(connection.palm_now(3.1), r#"{"palm":"up","roll":-11.3}"#);
+    // Calibrated away: band-core's own right hand, where −11.3° is palm down.
     connection.set_profiles(&json(&[], 0)).unwrap();
     roll_to(&mut connection, &mut band, -11.3, 3.2);
-    assert_eq!(connection.palm_now(3.3), r#"{"palm":"up","roll":-11.3}"#);
+    assert_eq!(connection.palm_now(3.3), r#"{"palm":"down","roll":-11.3}"#);
 }
 
 #[test]

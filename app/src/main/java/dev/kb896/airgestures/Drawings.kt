@@ -31,6 +31,15 @@ data class DrawingLibrary(val drawings: List<Drawing> = emptyList()) {
     }).toString()
 
     companion object {
+        /**
+         * The drawing frame the stored tries are in: 2 since band-core drew upright (2026-10-26;
+         * before, a drawing came out turned 180°, so old tries don't match new ones).
+         */
+        const val FRAME = 2
+
+        /** The drawings to teach again: all of them when they were taught in an older frame. */
+        fun toReteach(storedFrame: Int, names: List<String>): Set<String> = if (storedFrame < FRAME) names.toSet() else emptySet()
+
         /** What a drawing runs in a profile: its own action, else the shared one; an own "" is no own action ("" = nothing). */
         fun action(own: Map<String, String>, shared: Map<String, String>, name: String) =
             own[name]?.takeIf { it.isNotEmpty() } ?: shared[name].orEmpty()
@@ -154,12 +163,44 @@ object Drawings {
                 android.util.Log.w("AirGestures", "drawings unreadable; kept as drawings.broken")
                 runCatching { file.baseFile.copyTo(File(context.filesDir, "drawings.broken"), overwrite = true) }
             },
-            // Actions only for drawings that exist (the library is the source of truth).
-            loaded = { Profiles.pruneDrawingActions(context, it.names.toSet()) },
+            loaded = { library ->
+                // Actions only for drawings that exist (the library is the source of truth).
+                Profiles.pruneDrawingActions(context, library.names.toSet())
+                upright(context, library)
+            },
         )
     }
 
     fun load(context: Context): DrawingLibrary = store(context).load()
+
+    private fun prefs(context: Context) = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
+
+    /**
+     * Once, on the first good read after band-core drew upright: the drawings taught before
+     * (now upside down against new tries) are kept, and listed for the Drawings screen's note.
+     */
+    private fun upright(context: Context, library: DrawingLibrary) {
+        val prefs = prefs(context)
+        val frame = prefs.getInt(FRAME_KEY, 1)
+        if (frame >= DrawingLibrary.FRAME) return
+        prefs.edit().putInt(FRAME_KEY, DrawingLibrary.FRAME)
+            .putStringSet(RETEACH_KEY, DrawingLibrary.toReteach(frame, library.names)).apply()
+    }
+
+    /** The drawings taught before the upright frame and not taught again since (the ones that still exist). */
+    fun toReteach(context: Context): Set<String> {
+        val names = load(context).names.toSet()
+        return prefs(context).getStringSet(RETEACH_KEY, emptySet()).orEmpty().filter { it in names }.toSet()
+    }
+
+    /** [name] was taught again (or the note was read: null clears them all). */
+    fun retaught(context: Context, name: String?) {
+        val left = if (name == null) emptySet() else toReteach(context) - name
+        prefs(context).edit().putStringSet(RETEACH_KEY, left).apply()
+    }
+
+    private const val FRAME_KEY = "drawings.frame"
+    private const val RETEACH_KEY = "drawings.reteach"
 
     /** False while drawings.json can't be read (see [DrawingStore]). */
     fun readable(context: Context) = store(context).also { it.load() }.readable

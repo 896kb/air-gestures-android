@@ -278,6 +278,9 @@ class TeachDrawingActivity : GestureScreen(), BandService.Drawing {
                 else -> l to shared + (clean to action)
             }
         }
+        // Taught in the upright frame now: off the "teach again" note.
+        Drawings.retaught(applicationContext, clean)
+        old?.let { Drawings.retaught(applicationContext, it) }
         BandService.instance?.drawingsChanged()
         BandService.instance?.remap()
         finish()
