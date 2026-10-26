@@ -89,7 +89,7 @@ object Sequences {
 
     /**
      * A sequence action as the bridge reports it: its id, and the profile whose gesture started
-     * it (`seq:<id>/<URL-encoded profile>`, see Mappings.profilesJson); null for a plain `seq:<id>`.
+     * it (`seq:<id>/<URL-encoded profile>`, see [Mappings.profilesJson]); null for a plain `seq:<id>`.
      */
     fun started(action: String): Pair<String, String?> {
         val rest = action.removePrefix(PREFIX)
