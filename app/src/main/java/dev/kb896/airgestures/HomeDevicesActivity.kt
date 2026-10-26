@@ -40,8 +40,8 @@ class HomeDevicesActivity : GestureScreen() {
 
     private fun uses(n: Int) = when (n) {
         0 -> "Not used"
-        1 -> "1 gesture"
-        else -> "$n gestures"
+        1 -> "Used in 1 place"
+        else -> "Used in $n places"
     }
 
     private fun menu(device: HomeDevice) {
@@ -72,9 +72,9 @@ class HomeDevicesActivity : GestureScreen() {
     private fun delete(device: HomeDevice) {
         val n = Profiles.deviceUses(this, device.id)
         val body = when (n) {
-            0 -> "No gesture sends for it."
-            1 -> "Used by 1 gesture; it'll send without a device."
-            else -> "Used by $n gestures; they'll send without a device."
+            0 -> "Nothing sends for it."
+            1 -> "Used in 1 place; it'll send without a device."
+            else -> "Used in $n places; they'll send without a device."
         }
         confirm("Delete ${device.name}?", body, "Delete") {
             Profiles.deleteDevice(applicationContext, device.id)
