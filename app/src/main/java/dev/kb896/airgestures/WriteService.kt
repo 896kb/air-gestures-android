@@ -41,9 +41,17 @@ class WriteService : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) = leave("the screen went off")
     }
 
+    /** Unlocked: the controls that came on under the lock screen write into the field in focus now. */
+    private val unlocked = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (reenterUnlocked && !controlsOff) reenter()
+        }
+    }
+
     override fun onServiceConnected() {
         instance = this
         registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
+        registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_PRESENT))
         Words.load(this)
         controlsOff = BandService.state.value.paused
         BandService.state.observe(controls)
@@ -53,6 +61,7 @@ class WriteService : AccessibilityService() {
         BandService.state.remove(controls)
         leave("the service stopped")
         runCatching { unregisterReceiver(screenOff) }
+        runCatching { unregisterReceiver(unlocked) }
         instance = null
         super.onDestroy()
     }
@@ -89,13 +98,29 @@ class WriteService : AccessibilityService() {
             controlsOff = state.paused
             main.post {
                 if (controlsOff) {
+                    reenterUnlocked = false
                     leave("the controls went off")
                 } else {
-                    findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
-                        ?.let { enter(it, it.packageName?.toString()) }
+                    reenter()
                 }
             }
         }
+    }
+
+    /** The controls came on with the phone locked: [reenter] once it's unlocked. */
+    private var reenterUnlocked = false
+
+    /**
+     * The controls came back on: write into the text field in focus, with the screen on and
+     * unlocked only (a chat box under the lock screen isn't the band's); else once unlocked.
+     */
+    private fun reenter() {
+        val awake = getSystemService(android.os.PowerManager::class.java)?.isInteractive == true
+        val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked != false
+        reenterUnlocked = !awake || locked
+        if (reenterUnlocked) return
+        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
+            ?.let { enter(it, it.packageName?.toString()) }
     }
 
     /** A text field has the focus: write into it, if the setting is on, the controls are and the band can. */
