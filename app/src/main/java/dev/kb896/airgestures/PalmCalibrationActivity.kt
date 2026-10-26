@@ -96,8 +96,7 @@ class PalmCalibrationActivity : Screen() {
 
     /** A short buzz: a step is done. */
     private fun buzz() {
-        val vibrator = getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
-        runCatching { vibrator.vibrate(android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE)) }
+        BandService.instance?.feedbackHaptics()
     }
 
     private fun next() {

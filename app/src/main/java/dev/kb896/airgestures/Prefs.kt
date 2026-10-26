@@ -29,6 +29,15 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("paused", false)
         set(value) = prefs.edit().putBoolean("paused", value).apply()
 
+    /** Let app feedback use the Band's haptics (default on for new installs). */
+    var bandVibration: Boolean
+        get() = prefs.getBoolean("band.vibration", true)
+        set(value) = prefs.edit().putBoolean("band.vibration", value).apply()
+
+    var notificationVibration: Boolean
+        get() = prefs.getBoolean("band.notification_vibration", false)
+        set(value) = prefs.edit().putBoolean("band.notification_vibration", value).apply()
+
     /** "left" or "right" once chosen in the app (the band is set to it on every connection), else "band". */
     var hand: String
         get() = prefs.getString("hand", "band") ?: "band"
@@ -118,7 +127,7 @@ class Prefs(context: Context) {
     fun usesBrightness() = DialChoice.BRIGHTNESS in dials() || allIds().any { it.startsWith("brightness.") }
 
     /** Notification access: the seek dial reaches the playing app through it, the notification gestures read or clear. */
-    fun usesNotifications() = DialChoice.SEEK in dials() || usesNotificationGestures()
+    fun usesNotifications() = notificationVibration || DialChoice.SEEK in dials() || usesNotificationGestures()
 
     /** Some profile's dial seeks. */
     fun usesSeek() = DialChoice.SEEK in dials()

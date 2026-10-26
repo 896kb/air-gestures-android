@@ -27,6 +27,8 @@ class Actions(
     private val context: Context,
     /** Where a sequence's failing steps are told (the activity log). */
     private val log: (String) -> Unit = {},
+    /** A successful band dial or slider step can be echoed as a detent. */
+    private val stepDetent: () -> Unit = {},
 ) {
     private val audio = context.getSystemService(AudioManager::class.java)
     /** Where the last seek aimed, so fast dial steps add up before the player reports back. */
@@ -66,32 +68,32 @@ class Actions(
     }
 
     /** Returns a line for the activity log when the action couldn't run. */
-    fun run(action: String): String? {
+    fun run(action: String, fromBand: Boolean = false): String? {
         when (action) {
             "media.play_pause" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "media.next" -> mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
             "media.previous" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-            "volume.up" -> volume(AudioManager.ADJUST_RAISE)
-            "volume.down" -> volume(AudioManager.ADJUST_LOWER)
-            "volume.mute" -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
-            "brightness.up" -> return brightness(+1)
-            "brightness.down" -> return brightness(-1)
+            "volume.up" -> volume(AudioManager.ADJUST_RAISE, fromBand)
+            "volume.down" -> volume(AudioManager.ADJUST_LOWER, fromBand)
+            "volume.mute" -> volume(AudioManager.ADJUST_TOGGLE_MUTE, fromBand)
+            "brightness.up" -> return brightness(+1, fromBand)
+            "brightness.down" -> return brightness(-1, fromBand)
             "screen.swipe_up", "screen.swipe_down", "screen.swipe_left", "screen.swipe_right",
             "screen.back", "screen.home", "screen.recents" ->
-                return screen(action)
+                return screen(action).also { if (it == null && fromBand && action.startsWith("screen.swipe")) stepDetent() }
             "torch.toggle" -> return torch()
-            "dial.seek_forward" -> return seek(+SEEK_STEP)
-            "dial.seek_back" -> return seek(-SEEK_STEP)
+            "dial.seek_forward" -> return seek(+SEEK_STEP, fromBand)
+            "dial.seek_back" -> return seek(-SEEK_STEP, fromBand)
             "assistant.voice" -> return assistant()
             "notification.dismiss" -> return dismiss()
             "notification.read" -> return read()
             "call.answer" -> return call(answer = true)
             "call.end" -> return call(answer = false)
-            "nav.next" -> return navigate { it.move(+1) }
-            "nav.previous" -> return navigate { it.move(-1) }
+            "nav.next" -> return navigate { it.move(+1) }.also { if (it == null && fromBand) stepDetent() }
+            "nav.previous" -> return navigate { it.move(-1) }.also { if (it == null && fromBand) stepDetent() }
             "nav.select" -> return navigate { it.select() }
-            "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }
-            "nav.scroll_back" -> return navigate { it.scroll(forward = false) }
+            "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }.also { if (it == null && fromBand) stepDetent() }
+            "nav.scroll_back" -> return navigate { it.scroll(forward = false) }.also { if (it == null && fromBand) stepDetent() }
             else -> {
                 val sent = Mappings.sent(action)
                 return when {
@@ -99,7 +101,7 @@ class Actions(
                     action.startsWith(Tap.PREFIX) -> tap(action)
                     action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
                     action.startsWith(Sequences.PREFIX) -> Sequences.started(action).let { (id, profile) -> sequence(id, profile) }
-                    sent != null -> automation(sent)
+                    sent != null -> automation(sent).also { if (fromBand && sent is Mappings.Automation.Step) stepDetent() }
                     else -> "unknown action $action"
                 }
             }
@@ -133,7 +135,7 @@ class Actions(
      * Move the playing track by [delta] ms, through its media session (a key
      * event can't seek). Prefers the session that's playing.
      */
-    private fun seek(delta: Long): String? {
+    private fun seek(delta: Long, fromBand: Boolean): String? {
         if (!MediaAccess.granted(context)) return "playback position needs notification access (Setup)"
         val sessions = context.getSystemService(MediaSessionManager::class.java)
             .getActiveSessions(MediaAccess.component(context))
@@ -149,6 +151,7 @@ class Actions(
         val duration = player.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it > 0 } ?: Long.MAX_VALUE
         val to = (from + delta).coerceIn(0, duration)
         player.transportControls.seekTo(to)
+        if (fromBand && to != from) stepDetent()
         seekSession = player.sessionToken
         seekTarget = to
         seekAt = now
@@ -395,14 +398,20 @@ class Actions(
     }
 
     /** Media volume, with the system volume panel as the on-screen feedback. */
-    private fun volume(direction: Int) =
-        audio.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, AudioManager.FLAG_SHOW_UI)
+    private fun volume(direction: Int, fromBand: Boolean) {
+        val stream = AudioManager.STREAM_MUSIC
+        val before = audio.getStreamVolume(stream)
+        val muted = audio.isStreamMute(stream)
+        audio.adjustStreamVolume(stream, direction, AudioManager.FLAG_SHOW_UI)
+        if (fromBand && direction != AudioManager.ADJUST_TOGGLE_MUTE && !muted &&
+            !audio.isStreamMute(stream) && audio.getStreamVolume(stream) != before) stepDetent()
+    }
 
     /**
      * Screen brightness in 5% steps (as the desktop). Needs "Modify system
      * settings"; turns adaptive brightness off, or the system would undo the step.
      */
-    private fun brightness(direction: Int): String? {
+    private fun brightness(direction: Int, fromBand: Boolean): String? {
         if (!Settings.System.canWrite(context)) return "brightness needs Modify system settings (Setup)"
         val resolver = context.contentResolver
         Settings.System.putInt(
@@ -412,7 +421,8 @@ class Actions(
         )
         val current = Settings.System.getInt(resolver, Settings.System.SCREEN_BRIGHTNESS, 128)
         val next = (current + direction * STEP).coerceIn(1, 255)
-        Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, next)
+        val written = Settings.System.putInt(resolver, Settings.System.SCREEN_BRIGHTNESS, next)
+        if (fromBand && written && next != current) stepDetent()
         return null
     }
 

@@ -365,7 +365,8 @@ impl FieldTyping {
                 }
             }
             // Pauses, enter (a field might submit), shift and the pinch: nothing for now.
-            PAUSE | ENTER | _ => return,
+            PAUSE | ENTER => return,
+            _ => return,
         }
         // A word taken into the text keeps its capital where it began.
         let text = self.writer.state().text.chars().count();

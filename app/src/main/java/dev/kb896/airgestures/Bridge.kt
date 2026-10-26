@@ -28,6 +28,12 @@ object Bridge {
     /** Status snapshot JSON: connected, paused, battery, charging, hand, last_gesture, last_action, gestures, drawing (a draw session is open), the update's. */
     @JvmStatic external fun status(handle: Long): String
     @JvmStatic external fun setPaused(handle: Long, paused: Boolean, now: Double)
+    @JvmStatic external fun setBandVibration(handle: Long, enabled: Boolean): ByteArray
+    @JvmStatic external fun controlsHaptics(handle: Long, paused: Boolean): ByteArray
+    @JvmStatic external fun syncControlsHaptics(handle: Long, paused: Boolean): ByteArray
+    @JvmStatic external fun profileHaptics(handle: Long, previous: Boolean): ByteArray
+    @JvmStatic external fun stepDetent(handle: Long): ByteArray
+    @JvmStatic external fun notificationHaptics(handle: Long): ByteArray
     /** New profiles, hand and call layer (Prefs.profilesJson); throws on bad JSON. A switch it causes isn't reported. */
     @JvmStatic external fun setProfiles(handle: Long, json: String)
     /** The app in front ("": none known); a switch it causes isn't reported. */

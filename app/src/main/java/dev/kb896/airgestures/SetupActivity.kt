@@ -24,6 +24,7 @@ private const val RESTORE = 7
 /** Setup: the owner key, the permissions and the system settings the band needs. */
 class SetupActivity : Screen() {
     private lateinit var steps: LinearLayout
+    private lateinit var bandVibration: LinearLayout
     /** The claim state the steps were last drawn for. */
     private var drawnClaiming = false
     private val watch: (BandService.State) -> Unit = { state -> if (state.claiming != drawnClaiming) render() }
@@ -36,7 +37,9 @@ class SetupActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         steps = column(gap = 14f)
+        bandVibration = column()
         val band = column().apply {
+            addView(bandVibration)
             addView(navRow(R.drawable.ic_zap, "Band firmware updates") { open<FirmwareActivity>() })
             addView(navRow(R.drawable.ic_pencil, "Personal words") { open<PersonalWordsActivity>() })
             addView(navRow(R.drawable.ic_info, "Licenses") { open<LicensesActivity>() })
@@ -45,6 +48,7 @@ class SetupActivity : Screen() {
             addView(card(null, steps))
             addView(card(null, band))
         }, title = "Setup")
+        renderBandVibration()
     }
 
     override fun onResume() {
@@ -64,6 +68,31 @@ class SetupActivity : Screen() {
         drawnClaiming = BandService.state.value.claiming
         steps.removeAllViews()
         Setup.steps(this).forEach { steps.addView(stepRow(it)) }
+    }
+
+    private fun renderBandVibration() {
+        bandVibration.removeAllViews()
+        val enabled = Prefs(this).bandVibration
+        bandVibration.addView(settingRow(
+            "Band vibration",
+            "Use the band's haptics for app feedback",
+            pill(if (enabled) "On" else "Off") {
+                val next = !Prefs(this).bandVibration
+                Prefs(this).bandVibration = next
+                BandService.instance?.setBandVibration(next)
+                renderBandVibration()
+            }.first,
+        ))
+        val notifications = Prefs(this).notificationVibration
+        bandVibration.addView(settingRow(
+            "Notification vibration",
+            "One short buzz for new phone notifications; needs notification access",
+            pill(if (notifications) "On" else "Off") {
+                Prefs(this).notificationVibration = !Prefs(this).notificationVibration
+                renderBandVibration()
+                render()
+            }.first,
+        ))
     }
 
     private fun stepRow(step: Step) = row(gap = 12f).apply {
@@ -202,6 +231,8 @@ class SetupActivity : Screen() {
             drawingsFrame = DrawingLibrary.FRAME,
             drawingsReteach = Drawings.toReteach(this),
             devices = Profiles.devices(this),
+            bandVibration = prefs.bandVibration,
+            notificationVibration = prefs.notificationVibration,
         )
     }
 
@@ -220,11 +251,15 @@ class SetupActivity : Screen() {
         prefs.hand = settings.hand
         Profiles.setSpeak(this, settings.speak)
         Profiles.setVibrate(this, settings.vibrate)
+        prefs.bandVibration = settings.bandVibration
+        prefs.notificationVibration = settings.notificationVibration
+        BandService.instance?.setBandVibration(settings.bandVibration)
         settings.sequences?.let { restored -> Profiles.updateSequences(applicationContext) { restored } }
         settings.devices?.let { restored -> Profiles.updateDevices(applicationContext) { restored } }
         Profiles.updateBand(applicationContext) { settings.band }
         BandService.instance?.drawingsChanged()
         BandService.instance?.remap()
+        renderBandVibration()
         log("restored the settings: ${settings.profiles.profiles.size} profiles")
         render()
     }
@@ -309,7 +344,7 @@ class SetupActivity : Screen() {
                 val n = settings.profiles.profiles.size
                 confirm(
                     "Restore settings?",
-                    "Replace your profiles, During calls, wrist and switches with this backup's " +
+                    "Replace your profiles, During calls, wrist, switches and Band vibration setting with this backup's " +
                         "$n ${if (n == 1) "profile" else "profiles"}. The owner key stays as it is.",
                     "Restore",
                 ) { apply(settings) }

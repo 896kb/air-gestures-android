@@ -149,6 +149,43 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setPaused<'local>(
     unsafe { connection(handle) }.set_paused(paused != 0, now);
 }
 
+macro_rules! haptics_method {
+    ($name:ident, $method:ident, $arg:ty, $convert:expr) => {
+        #[unsafe(no_mangle)]
+        pub extern "system" fn $name<'local>(
+            mut env: JNIEnv<'local>,
+            _class: JClass<'local>,
+            handle: jlong,
+            value: $arg,
+        ) -> jbyteArray {
+            bytes_out(&mut env, unsafe { connection(handle) }.$method(($convert)(value)))
+        }
+    };
+}
+
+haptics_method!(Java_dev_kb896_airgestures_Bridge_setBandVibration, set_band_vibration, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_controlsHaptics, controls_haptics, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_syncControlsHaptics, sync_controls_haptics, jboolean, |value| value != 0);
+haptics_method!(Java_dev_kb896_airgestures_Bridge_profileHaptics, profile_haptics, jboolean, |value| value != 0);
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_stepDetent<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    bytes_out(&mut env, unsafe { connection(handle) }.step_detent())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_notificationHaptics<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jbyteArray {
+    bytes_out(&mut env, unsafe { connection(handle) }.notification_haptics())
+}
+
 /// New profiles, hand and call layer as JSON (see `profiles::parse`); bad JSON throws.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setProfiles<'local>(

@@ -28,7 +28,7 @@ class BandService : Service(), BandLink.Listener {
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        actions = Actions(this, ::onLog)
+        actions = Actions(this, ::onLog, ::stepDetent)
         link = BandLink(this, this)
         // Unlocking the phone: the band is likely near and about to be used.
         registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
@@ -92,9 +92,35 @@ class BandService : Service(), BandLink.Listener {
 
     /** From the app (button, tile, widget, notification); the band's own switch comes as `@controls`. */
     fun setPaused(paused: Boolean) {
+        val changed = paused != state.value.paused
         prefs.paused = paused
         link.setPaused(paused)
+        if (changed && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
+        else link.syncControlsHaptics(paused)
         pausedChanged(paused)
+    }
+
+    fun setBandVibration(enabled: Boolean) {
+        prefs.bandVibration = enabled
+        link.setBandVibration(enabled)
+    }
+
+    fun typingHaptics(down: Boolean) {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous = !down)
+    }
+
+    private fun stepDetent() {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.stepDetent()
+    }
+
+    fun notificationHaptics() = main.post {
+        if (prefs.bandVibration && prefs.notificationVibration && state.value.phase == Phase.CONNECTED && !state.value.otaBusy) {
+            link.notificationHaptics()
+        }
+    }
+
+    fun feedbackHaptics(previous: Boolean = false) {
+        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous)
     }
 
     /** Record the controls' state; the status notification shows it. */
@@ -161,6 +187,7 @@ class BandService : Service(), BandLink.Listener {
     /** The band turned the controls on or off (a gesture with Controls on/off). */
     private fun bandToggled(on: Boolean) {
         prefs.paused = !on
+        link.controlsHaptics(paused = !on)
         pausedChanged(!on)
     }
 
@@ -169,19 +196,8 @@ class BandService : Service(), BandLink.Listener {
         showProfile()
         Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
         if (Profiles.speak(this)) actions.announce(profile.name)
-        if (Profiles.vibrate(this)) buzz(times = if (back) 2 else 1)
+        if (Profiles.vibrate(this)) feedbackHaptics(previous = back)
         onLog("profile: ${profile.name}")
-    }
-
-    /** One short buzz, or two (the previous profile). */
-    private fun buzz(times: Int) {
-        val vibrator = getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator ?: return
-        val effect = if (times == 1) {
-            android.os.VibrationEffect.createOneShot(40, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
-        } else {
-            android.os.VibrationEffect.createWaveform(longArrayOf(0, 40, 90, 40), -1)
-        }
-        runCatching { vibrator.vibrate(effect) }
     }
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
@@ -324,7 +340,7 @@ class BandService : Service(), BandLink.Listener {
         for (line in actions) {
             if (!line.startsWith("@")) {
                 // In a lesson nothing runs (the bridge sends `@practiced` instead).
-                if (practice == null) this.actions.run(line)?.let(::onLog)
+                if (practice == null) this.actions.run(line, fromBand = true)?.let(::onLog)
                 continue
             }
             val kind = line.removePrefix("@").substringBefore(' ')
@@ -358,7 +374,7 @@ class BandService : Service(), BandLink.Listener {
                 "drawn" -> pad.drawn(rest)
                 "not-drawn" -> {
                     pad.notDrawn()
-                    buzz(times = 2)
+                    feedbackHaptics(previous = true)
                 }
                 "draw-cancelled" -> pad.cancelled()
                 "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->

@@ -115,8 +115,8 @@ object Lessons {
  * The settings backup file: everything but the owner key (that has its own export) and the
  * calibrations (they belong to a band). Version 2 adds the band controls and the drawings,
  * version 3 the Home devices (an app without them refuses it: their gestures would read as
- * Nothing there); versions 1 and 2 still restore, version 1 with today's band controls (as an
- * upgrade gets them) and without the built-in actions.
+ * Nothing there). Vibration preferences are optional fields: older backups restore with
+ * Band vibration on and notification vibration off, matching new installs.
  */
 object Backup {
     const val VERSION = 3
@@ -141,6 +141,9 @@ object Backup {
         val drawingsReteach: Set<String> = emptySet(),
         /** Null in a backup made before Home devices: restoring it leaves them as they are. */
         val devices: HomeDevices? = null,
+        /** Optional in version 3; absent means Band vibration enabled. */
+        val bandVibration: Boolean = true,
+        val notificationVibration: Boolean = false,
     )
 
     /** Every gesture's call action after a restore: the backup's, else its default (a 0.7.7 backup lacks the newer gestures). */
@@ -166,6 +169,8 @@ object Backup {
                 put("drawings_reteach", JSONArray(settings.drawingsReteach.sorted()))
             }
             settings.devices?.let { put("devices", JSONArray(it.toJson())) }
+            put("band_vibration", settings.bandVibration)
+            put("notification_vibration", settings.notificationVibration)
         }.toString(2)
     }
 
@@ -194,6 +199,8 @@ object Backup {
             drawingsReteach = json.optJSONArray("drawings_reteach")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } }.toSet() }
                 .orEmpty(),
             devices = json.optJSONArray("devices")?.let { HomeDevices.fromJson(it.toString()) },
+            bandVibration = json.optBoolean("band_vibration", true),
+            notificationVibration = json.optBoolean("notification_vibration", false),
         )
     }.getOrNull()
 }

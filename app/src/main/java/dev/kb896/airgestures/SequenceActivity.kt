@@ -163,6 +163,6 @@ class SequenceRunner : android.content.BroadcastReceiver() {
         private var actions: Actions? = null
 
         private fun runner(context: Context) =
-            actions ?: Actions(context.applicationContext) { android.util.Log.i("AirGestures", it) }.also { actions = it }
+            actions ?: Actions(context.applicationContext, log = { android.util.Log.i("AirGestures", it) }).also { actions = it }
     }
 }
