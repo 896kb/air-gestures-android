@@ -34,7 +34,13 @@ fails without one.
 - **Teach your drags** for your own wrist. Turning drags or sliders on before you have
   says so, with a link: untaught, away and right can mix up.
 - **Automation:** overrides carry `palm`; the middle dial, sliders and drawings have their
-  own names.
+  own names. Every broadcast also carries `profile`, the name of the profile it came from
+  (`During calls` for the During calls actions).
+- **Home devices:** name your lamps, speakers and the like (under Gestures, or right after
+  picking Send to automation) and tie any Send to automation to one, gestures, overrides,
+  dials, sliders and drawings alike. Its broadcast then carries `device` with the device's
+  name. Renaming a device renames it everywhere (update your rules too); deleting one
+  leaves its gestures sending without a device. The settings backup includes them.
 - The settings backup is version 2 (band controls and drawings); version 1 backups still
   restore.
 
