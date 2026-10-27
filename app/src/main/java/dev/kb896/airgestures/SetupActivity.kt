@@ -66,6 +66,8 @@ class SetupActivity : Screen() {
 
     private fun render() {
         drawnClaiming = BandService.state.value.claiming
+        // With two bands this page is about the one the home screen shows.
+        titleView?.text = bandTitle("Setup")
         steps.removeAllViews()
         Setup.steps(this).forEach { steps.addView(stepRow(it)) }
     }
@@ -264,14 +266,34 @@ class SetupActivity : Screen() {
         render()
     }
 
-    fun forgetBand() = confirm(
-        "Forget the band?",
-        "The key, the Bluetooth pairing and the companion link are removed from this phone. " +
-            "The band keeps its owner: to use it with Meta's apps again, hold its button for about 16 seconds to factory reset it.",
-        "Forget",
+    /** A second band, on the other wrist: this page is about it next (claim it, or import its key). */
+    fun addBand() = confirm(
+        "Add a second band?",
+        "It goes on your other wrist, with its own owner key, wrist, controls, calibration and firmware; " +
+            "the profiles are shared, and you pick which ones each band uses. Next, claim it here " +
+            "(a band in pairing mode), or import its key from a computer. Switch between the bands at the top of the home screen.",
+        "Add",
     ) {
+        Bands.add(this)
+        log("added a second band: claim it or import its key")
+        render()
+    }
+
+    fun forgetBand() {
+        val two = Bands.two(this)
+        val name = Bands.name(this, Bands.selected(this))
+        confirm(
+            if (two) "Remove the ${name.lowercase()}?" else "Forget the band?",
+            "Its key, the Bluetooth pairing and the companion link are removed from this phone" +
+                (if (two) "; the other band stays. " else ". ") +
+                "The band keeps its owner: to use it with Meta's apps again, hold its button for about 16 seconds to factory reset it.",
+            if (two) "Remove" else "Forget",
+        ) { forget(two, name) }
+    }
+
+    private fun forget(two: Boolean, name: String) {
         val openSettings = Identity.forget(this)
-        log("forgot the band on this phone")
+        log(if (two) "removed the ${name.lowercase()} from this phone" else "forgot the band on this phone")
         if (openSettings) {
             log("tap Forget on the band in Bluetooth settings to remove the pairing")
             startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))

@@ -120,7 +120,7 @@ class FirmwareActivity : Screen() {
             addView(card("Band", band))
             addView(warning())
             addView(card("Firmware", offered))
-        }, title = "Firmware")
+        }, title = bandTitle("Firmware"))
     }
 
     /** Above the install buttons: what an update can do to the band, in plain terms. */

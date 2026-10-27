@@ -57,7 +57,7 @@ class PracticeActivity : Screen() {
                 addView(result)
             }))
             addView(buttons, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }, title = "Practice")
+        }, title = bandTitle("Practice"))
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

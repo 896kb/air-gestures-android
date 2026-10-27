@@ -52,7 +52,7 @@ class PalmCalibrationActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         content = column(gap = 20f)
-        show(pageColumn().apply { addView(content) }, title = "Palm positions")
+        show(pageColumn().apply { addView(content) }, title = bandTitle("Palm positions"))
     }
 
     override fun onResume() {

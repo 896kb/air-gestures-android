@@ -144,13 +144,22 @@ class MappingsTest {
 
     @Test fun `the band's palm goes with gestures and dial steps, an override keeps its own`() {
         assertEquals(Mappings.Automation.Gesture("index_drag_up", "sideways", "Music"),
-            Mappings.withPalm(Mappings.sent("automation/Music:index_drag_up")!!, "sideways"))
+            Mappings.madeWith(Mappings.sent("automation/Music:index_drag_up")!!, "sideways"))
         assertEquals(Mappings.Automation.Gesture("index_tap", "up", "Music"),
-            Mappings.withPalm(Mappings.sent("automation/Music:index_tap:up")!!, "down"))
-        val step = Mappings.withPalm(Mappings.Automation.Step("dial", +1, "Music"), "up")
+            Mappings.madeWith(Mappings.sent("automation/Music:index_tap:up")!!, "down"))
+        val step = Mappings.madeWith(Mappings.Automation.Step("dial", +1, "Music"), "up")
         assertEquals(mapOf("gesture" to "dial", "palm" to "up", "steps" to 2, "profile" to "Music"), Mappings.extras(step, null, steps = 2))
-        assertEquals(Mappings.Automation.Drawing("Star", "Music"), Mappings.withPalm(Mappings.Automation.Drawing("Star", "Music"), "up"))
-        assertEquals(Mappings.Automation.Gesture("index_tap", null), Mappings.withPalm(Mappings.Automation.Gesture("index_tap", null), null))
+        assertEquals(Mappings.Automation.Drawing("Star", "Music"), Mappings.madeWith(Mappings.Automation.Drawing("Star", "Music"), "up"))
+        assertEquals(Mappings.Automation.Gesture("index_tap", null), Mappings.madeWith(Mappings.Automation.Gesture("index_tap", null), null))
+    }
+
+    @Test fun `with two bands each says which made it, and a dial's steps gather per band`() {
+        val left = Mappings.madeWith(Mappings.sent("automation/Music:index_tap")!!, "up", "left")
+        assertEquals(mapOf("gesture" to "index_tap", "palm" to "up", "band" to "left", "profile" to "Music"), Mappings.extras(left, null))
+        val drawing = Mappings.madeWith(Mappings.Automation.Drawing("Star", "Music"), "up", "band2")
+        assertEquals(mapOf("gesture" to "drawing", "name" to "Star", "band" to "band2", "profile" to "Music"), Mappings.extras(drawing, null))
+        val step = Mappings.madeWith(Mappings.Automation.Step("dial", +1, "Music"), null, "left") as Mappings.Automation.Step
+        assertFalse(step.key == (Mappings.madeWith(step, null, "right") as Mappings.Automation.Step).key)
     }
 
     @Test fun `a sequence's automation step sends the sequence's name, its profile and device`() {

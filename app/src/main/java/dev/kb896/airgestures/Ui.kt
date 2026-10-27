@@ -113,6 +113,9 @@ abstract class Screen : Activity() {
         })
     }
 
+    /** A screen about one band: with two, its title says which. */
+    fun bandTitle(title: String) = if (Bands.two(this)) "$title · ${Bands.name(this, Bands.selected(this))}" else title
+
     /** A sub-screen's title, to change it later (a renamed profile). */
     var titleView: TextView? = null
         private set
@@ -197,7 +200,7 @@ abstract class Screen : Activity() {
         if (link != null) addView(row().apply { addView(pill(link) { onLink() }.first) })
     }
 
-    fun log(line: String) = BandService.state.update { copy(log = (log + line).takeLast(60)) }
+    fun log(line: String) = BandService.log(line)
 
     /** The band needs Bluetooth: say so and offer Android's own prompt to switch it on. */
     fun askForBluetooth() = confirm(

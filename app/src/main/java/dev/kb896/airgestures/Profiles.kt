@@ -156,8 +156,8 @@ object Profiles {
         prefs(context).edit().putString(SHARED_DRAWINGS, JSONObject(change(sharedDrawings(context))).toString()).apply()
     }
 
-    /** The profile in force now (the app in front's own, else the picked one). */
-    fun active(context: Context) = load(context).active(foreground)
+    /** The profile in force now on the band the home screen shows (the app in front's own, else its pick). */
+    fun active(context: Context) = Bands.profiles(context, Bands.selected(context)).active(foreground)
 
     /** Also say a profile's name when switching to it. */
     fun speak(context: Context) = prefs(context).getBoolean(SPEAK, false)

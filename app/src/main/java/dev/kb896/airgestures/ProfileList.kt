@@ -62,6 +62,16 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
 
     private fun appProfile(foreground: String?) = foreground?.let { profile(apps[it]) }
 
+    /**
+     * The list as a band uses it: the profiles [on] names, in that order (null, or none left: all
+     * of them), [picked] if it's among them (else the first), and the apps whose profile is.
+     */
+    fun forBand(on: List<String>?, picked: String): ProfileList {
+        val mine = on?.mapNotNull(::profile)?.distinct()?.takeIf { it.isNotEmpty() } ?: profiles
+        val ids = mine.map { it.id }.toSet()
+        return ProfileList(mine, picked.takeIf { it in ids } ?: mine.first().id, apps.filterValues { it in ids })
+    }
+
     /** The picked profile [by] places on (+1 next, −1 previous), wrapping round. */
     fun step(by: Int): ProfileList {
         val at = profiles.indexOfFirst { it.id == picked }.coerceAtLeast(0)

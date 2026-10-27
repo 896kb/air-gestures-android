@@ -69,9 +69,10 @@ class Actions(
 
     /**
      * Returns a line for the activity log when the action couldn't run. [palm]: the position the
-     * band read it in (a [Palm] key; null: none, or uncalibrated), which automation sends.
+     * band read it in (a [Palm] key; null: none, or uncalibrated) and [band] the band ([Bands.tag]),
+     * which automation sends.
      */
-    fun run(action: String, fromBand: Boolean = false, palm: String? = null): String? {
+    fun run(action: String, fromBand: Boolean = false, palm: String? = null, band: String? = null): String? {
         when (action) {
             "media.play_pause" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "media.next" -> mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
@@ -104,7 +105,7 @@ class Actions(
                     action.startsWith(Tap.PREFIX) -> tap(action)
                     action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
                     action.startsWith(Sequences.PREFIX) -> Sequences.started(action).let { (id, profile) -> sequence(id, profile) }
-                    sent != null -> automation(Mappings.withPalm(sent, palm)).also { if (fromBand && sent is Mappings.Automation.Step) stepDetent() }
+                    sent != null -> automation(Mappings.madeWith(sent, palm, band)).also { if (fromBand && sent is Mappings.Automation.Step) stepDetent() }
                     else -> "unknown action $action"
                 }
             }

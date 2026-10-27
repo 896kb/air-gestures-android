@@ -40,7 +40,7 @@ class TeachDragsActivity : Screen() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         content = column(gap = 20f)
-        show(pageColumn().apply { addView(content) }, title = "Teach your drags")
+        show(pageColumn().apply { addView(content) }, title = bandTitle("Teach your drags"))
     }
 
     override fun onResume() {

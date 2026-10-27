@@ -59,7 +59,8 @@ class GesturesActivity : GestureScreen() {
 
     override fun render() {
         val list = Profiles.load(this)
-        val active = list.active(Profiles.foreground)
+        // Each band's profile in force (with two, it says which band).
+        val active = Bands.slots(this).map { Bands.profiles(this, it).active(Profiles.foreground).id }
         // Moving a band control and coming back re-renders (mockup 7: no toast).
         val report = Report.of(this)
         val controls = Profiles.band(this)
@@ -78,7 +79,8 @@ class GesturesActivity : GestureScreen() {
             list.profiles.forEachIndexed { index, profile ->
                 val count = list.apps.values.count { it == profile.id }
                 val detail = listOfNotNull(
-                    "In use".takeIf { profile.id == active.id && list.profiles.size > 1 },
+                    active.withIndex().filter { it.value == profile.id }.map { it.index }.takeIf { it.isNotEmpty() && list.profiles.size > 1 }
+                        ?.let { slots -> if (Bands.two(this@GesturesActivity)) "In use: " + slots.joinToString(", ") { Bands.name(this@GesturesActivity, it) } else "In use" },
                     when (count) {
                         0 -> null
                         1 -> "1 app"
@@ -114,6 +116,7 @@ class GesturesActivity : GestureScreen() {
                         }
                         if (navigate) added.renamed(profile.id, "Navigate") else added
                     }.profiles.last()
+                    Bands.profileAdded(applicationContext, made.id)
                     BandService.instance?.remap()
                     ProfileActivity.open(context, made.id)
                 }

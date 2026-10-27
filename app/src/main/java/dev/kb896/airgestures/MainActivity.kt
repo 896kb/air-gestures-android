@@ -25,7 +25,11 @@ import android.widget.TextView
 /** Same Ko-fi page the website links. */
 private const val KOFI_URL = "https://ko-fi.com/88896kb"
 
-/** Home: the band, its state, the controls, and the way to the other screens. */
+/**
+ * Home: the band, its state, the controls, and the way to the other screens. With two bands a
+ * switch above the status picks which one the status, the switches and Setup are about (a
+ * sideways swipe over them too).
+ */
 class MainActivity : Screen() {
     private val watch: (BandService.State) -> Unit = ::render
 
@@ -53,6 +57,12 @@ class MainActivity : Screen() {
     /** Whether the hero shows the band as live (full speed and opacity); null = not set yet. */
     private var heroLive: Boolean? = null
     private lateinit var setupNav: FrameLayout
+    /** With two bands: which one this page is about. */
+    private lateinit var bandSwitch: FrameLayout
+    /** With two bands: the profiles this band uses. */
+    private lateinit var bandProfiles: FrameLayout
+    /** The band names the switch was last drawn with. */
+    private var drawnBands: List<String>? = null
     /** The claim state the Setup row was last counted for. */
     private var navClaiming = false
 
@@ -65,8 +75,10 @@ class MainActivity : Screen() {
             addView(update)
             hero()?.let(::addView)
             addView(powerBlock())
-            addView(statusCard())
-            addView(togglesBlock())
+            bandSwitch = FrameLayout(context)
+            addView(bandSwitch)
+            addView(statusCard().also(::swipeBetweenBands))
+            addView(togglesBlock().also(::swipeBetweenBands))
             addView(navCard())
             // The installed version, quietly, bottom left.
             addView(Cb.text(context, 12f, color = Cb.INK_400).apply {
@@ -98,6 +110,8 @@ class MainActivity : Screen() {
 
     override fun onResume() {
         super.onResume()
+        // A band added or removed elsewhere (Setup): the page follows.
+        BandService.selectionChanged(this)
         BandService.state.observe(watch)
         registerReceiver(bluetoothChanged, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
         renderNav()
@@ -335,6 +349,60 @@ class MainActivity : Screen() {
         }
     }
 
+    /** A sideways fling over [view] shows the other band (with two). */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun swipeBetweenBands(view: View) {
+        val detector = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent) = true
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+                if (!Bands.two(this@MainActivity) || Math.abs(vx) < 2 * Math.abs(vy) || Math.abs(vx) < dp(400f)) return false
+                showBand(if (vx < 0) 1 else 0)
+                return true
+            }
+        })
+        // Taking the touch from its start: a sideways fling then reaches it (the page still scrolls).
+        view.setOnTouchListener { _, event -> detector.onTouchEvent(event) }
+    }
+
+    private fun showBand(slot: Int) {
+        if (slot == Bands.selected(this)) return
+        Bands.select(this, slot)
+        renderNav()
+    }
+
+    /** The band switch, drawn again when the names change. */
+    private fun renderBands() {
+        val two = Bands.two(this)
+        val names = if (two) Bands.slots(this).map { Bands.name(this, it) } else emptyList()
+        if (names != drawnBands) {
+            drawnBands = names
+            bandSwitch.removeAllViews()
+            if (two) bandSwitch.addView(segmented(*names.mapIndexed { slot, name -> segment(name) { showBand(slot) } }.toTypedArray()))
+        }
+        bandSwitch.visibility = if (two) View.VISIBLE else View.GONE
+        val selected = Bands.selected(this)
+        (bandSwitch.getChildAt(0) as? LinearLayout)?.let { track ->
+            for (i in 0 until track.childCount) {
+                val view = track.getChildAt(i) as TextView
+                val active = i == selected
+                view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
+                view.background = if (active) GradientDrawable().apply {
+                    cornerRadius = dp(999f)
+                    setColor(Cb.INK_900)
+                } else null
+            }
+        }
+        bandProfiles.removeAllViews()
+        bandProfiles.visibility = if (two) View.VISIBLE else View.GONE
+        if (two) {
+            val mine = Bands.profiles(this, selected).profiles
+            val detail = if (Bands.on(this, selected) == null) "All of them" else mine.joinToString(", ") { it.name }
+            bandProfiles.addView(navRow(R.drawable.ic_layers, "Profiles on this band", detail = detail) {
+                BandProfilesActivity.open(this, selected)
+            })
+        }
+    }
+
     private fun setHand(hand: String) {
         BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
         render(BandService.state.value)
@@ -400,6 +468,8 @@ class MainActivity : Screen() {
         wristLeft = segment("Left") { setHand("left") }
         wristRight = segment("Right") { setHand("right") }
         addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
+        bandProfiles = FrameLayout(context)
+        addView(bandProfiles)
     }
 
     // ---- state ----
@@ -441,6 +511,7 @@ class MainActivity : Screen() {
         }
         chip.removeAllViews()
         chip.addView(Cb.chip(this, signal, label))
+        renderBands()
         subtitle.text = listOfNotNull(
             state.band ?: "Meta Neural Band",
             state.hand?.let { "${it} wrist" },
@@ -473,8 +544,10 @@ class MainActivity : Screen() {
         val writing = Prefs(this).writeInFields
         fields.first.text = if (writing) "On" else "Off"
         if ((fields.second.pressed > .5f) != writing) fields.second.press(writing)
+        val elsewhere = Bands.writer(this)?.takeIf { it != Bands.selected(this) }
         fieldsDetail.text = when {
             BandService.instance?.bandWrites() == false -> "Needs band firmware build 64 or later: Setup › Band firmware updates"
+            elsewhere != null -> "On for the ${Bands.name(this, elsewhere).lowercase()}; turning it on here moves it"
             writing && !WriteService.enabled(this) -> "Turn on its accessibility service to start"
             else -> "In a text field, write letters on a table with a finger"
         }

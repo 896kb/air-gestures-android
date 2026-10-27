@@ -20,9 +20,9 @@ import java.util.regex.Pattern
  * its service in the background, and wakes it when the band comes into range.
  */
 object Companion {
-    fun linked(context: Context): Boolean = Prefs(context).associationId >= 0 &&
-        context.getSystemService(CompanionDeviceManager::class.java).myAssociations
-            .any { it.id == Prefs(context).associationId }
+    fun linked(context: Context, slot: Int = Bands.selected(context)): Boolean = Prefs(context, slot).associationId.let { id ->
+        id >= 0 && context.getSystemService(CompanionDeviceManager::class.java).myAssociations.any { it.id == id }
+    }
 
     /**
      * Asks again to be woken when the linked band appears. Linking asks once, but a link
@@ -30,11 +30,13 @@ object Companion {
      * so the service asks each time it starts; asking twice changes nothing.
      */
     fun observe(context: Context) {
-        val id = Prefs(context).associationId
-        if (id < 0) return
         val manager = context.getSystemService(CompanionDeviceManager::class.java)
-        val association = manager.myAssociations.firstOrNull { it.id == id } ?: return
-        watch(manager, association)
+        for (slot in Bands.slots(context)) {
+            val id = Prefs(context, slot).associationId
+            if (id < 0) continue
+            val association = manager.myAssociations.firstOrNull { it.id == id } ?: continue
+            watch(manager, association)
+        }
     }
 
     /**
@@ -60,6 +62,7 @@ object Companion {
      * Shows the system's device picker; the band must be advertising (pairing mode).
      * [onLinked] gets the picked band (Android 14+ reports it; null before), so a claim
      * can use the same choice; [onFailed] runs when the picker is cancelled or finds nothing.
+     * The link is the band's the home screen shows.
      */
     fun link(
         activity: Activity,
@@ -78,13 +81,14 @@ object Companion {
             .setSingleDevice(true)
             .build()
         val manager = activity.getSystemService(CompanionDeviceManager::class.java)
+        val slot = Bands.selected(activity)
         manager.associate(request, activity.mainExecutor, object : CompanionDeviceManager.Callback() {
             override fun onAssociationPending(intentSender: IntentSender) {
                 activity.startIntentSenderForResult(intentSender, requestCode, null, 0, 0, 0)
             }
 
             override fun onAssociationCreated(association: AssociationInfo) {
-                Prefs(activity).associationId = association.id
+                Prefs(activity, slot).associationId = association.id
                 watch(manager, association)
                 log("linked ${association.displayName ?: "the band"} as a companion device")
                 val device = if (Build.VERSION.SDK_INT >= 34) {

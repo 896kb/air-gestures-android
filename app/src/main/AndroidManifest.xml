@@ -66,6 +66,7 @@
 
         <activity android:name=".GesturesActivity" android:exported="false" />
         <activity android:name=".ProfileActivity" android:exported="false" />
+        <activity android:name=".BandProfilesActivity" android:exported="false" />
         <activity android:name=".BandControlActivity" android:exported="false" />
         <activity android:name=".CallsActivity" android:exported="false" />
         <activity android:name=".GestureActivity" android:exported="false" />

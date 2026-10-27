@@ -53,12 +53,12 @@ class WriteService : AccessibilityService() {
         registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
         registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_PRESENT))
         Words.load(this)
-        controlsOff = BandService.state.value.paused
-        BandService.state.observe(controls)
+        controlsOff = writerState().paused
+        for ((slot, watch) in controls.withIndex()) BandService.stateOf(slot).listen(watch)
     }
 
     override fun onDestroy() {
-        BandService.state.remove(controls)
+        for ((slot, watch) in controls.withIndex()) BandService.stateOf(slot).remove(watch)
         leave("the service stopped")
         runCatching { unregisterReceiver(screenOff) }
         runCatching { unregisterReceiver(unlocked) }
@@ -95,7 +95,15 @@ class WriteService : AccessibilityService() {
     /** The controls as last seen: off, then on again, writes into the field in focus. */
     private var controlsOff = false
 
-    private val controls: (BandService.State) -> Unit = { state ->
+    /** The band handwriting is on for ([Bands.writer]), else the one the home screen shows. */
+    private fun writer() = Bands.writer(this) ?: Bands.selected(this)
+
+    private fun writerState() = BandService.stateOf(writer()).value
+
+    /** Each band's controls, heeded for the writing band only. */
+    private val controls = List(Bands.MAX) { slot -> { state: BandService.State -> if (slot == writer()) controlsChanged(state) } }
+
+    private fun controlsChanged(state: BandService.State) {
         if (state.paused != controlsOff) {
             controlsOff = state.paused
             main.post {
@@ -127,9 +135,9 @@ class WriteService : AccessibilityService() {
 
     /** A text field has the focus: write into it, if the setting is on, the controls are and the band can. */
     private fun enter(node: AccessibilityNodeInfo, from: String?) {
-        if (FieldWriting.refusal(Prefs(this).writeInFields, BandService.state.value) != null) return
+        if (FieldWriting.refusal(Bands.writer(this) != null, writerState()) != null) return
         val service = BandService.instance ?: return
-        if (service.bandWrites() != true) return
+        if (service.bandWrites(writer()) != true) return
         val same = field?.let { it == node } == true
         // Moving to another field: the menu or word choices shown in the last one go first.
         if (!same) dropInline()
@@ -432,7 +440,7 @@ class WriteService : AccessibilityService() {
         override fun run() {
             val node = field ?: return
             val service = BandService.instance ?: return leave("the band disconnected")
-            FieldWriting.refusal(Prefs(this@WriteService).writeInFields, BandService.state.value)?.let { return leave(it) }
+            FieldWriting.refusal(Bands.writer(this@WriteService) != null, writerState())?.let { return leave(it) }
             if (SystemClock.uptimeMillis() - lastWritten > IDLE_MS) return leave("nothing written for a while")
             val answer = service.fieldEdits() ?: return leave("the band disconnected")
             val edits = answer.optJSONArray("edits")
@@ -512,7 +520,7 @@ class WriteService : AccessibilityService() {
 
     private fun log(line: String) {
         Log.i("AirGestures", line)
-        BandService.state.update { copy(log = (log + line).takeLast(60)) }
+        BandService.log(line)
     }
 
     companion object {

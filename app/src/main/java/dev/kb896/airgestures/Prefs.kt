@@ -5,15 +5,24 @@ import android.content.Context
 /** How many announced apps get the band's state. */
 private const val ANNOUNCED_KEPT = 8
 
-/** The few settings that outlive a connection. */
-class Prefs(context: Context) {
+/**
+ * The few settings that outlive a connection; the band's own ones ([Bands]) are [slot]'s, the
+ * band the home screen shows unless said.
+ */
+class Prefs(context: Context, val slot: Int = Bands.selected(context)) {
     private val context = context.applicationContext
     private val prefs = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
 
-    /** Handwriting in text fields: when one has the focus, the band writes into it. */
+    /** This band's own setting's name. */
+    private fun own(name: String) = Bands.key(slot, name)
+
+    /** Handwriting in text fields: when one has the focus, the band writes into it (one band at most). */
     var writeInFields: Boolean
-        get() = prefs.getBoolean("write_in_fields", false)
-        set(value) = prefs.edit().putBoolean("write_in_fields", value).apply()
+        get() = prefs.getBoolean(own("write_in_fields"), false)
+        set(value) = prefs.edit().apply {
+            if (value) for (other in Bands.slots(context)) putBoolean(Bands.key(other, "write_in_fields"), false)
+            putBoolean(own("write_in_fields"), value)
+        }.apply()
 
     /** A word's suggestions (swipe up in a text field) show in a popup, else in the field itself. */
     var choicesPopup: Boolean
@@ -22,12 +31,12 @@ class Prefs(context: Context) {
 
     /** The firmware an install committed, until the band reconnects and is checked (0: none). */
     var otaExpect: Long
-        get() = prefs.getLong("ota_expect", 0)
-        set(value) = prefs.edit().putLong("ota_expect", value).apply()
+        get() = prefs.getLong(own("ota_expect"), 0)
+        set(value) = prefs.edit().putLong(own("ota_expect"), value).apply()
 
     var paused: Boolean
-        get() = prefs.getBoolean("paused", false)
-        set(value) = prefs.edit().putBoolean("paused", value).apply()
+        get() = prefs.getBoolean(own("paused"), false)
+        set(value) = prefs.edit().putBoolean(own("paused"), value).apply()
 
     /** Let app feedback use the Band's haptics (default on for new installs). */
     var bandVibration: Boolean
@@ -40,16 +49,16 @@ class Prefs(context: Context) {
 
     /** "left" or "right" once chosen in the app (the band is set to it on every connection), else "band". */
     var hand: String
-        get() = prefs.getString("hand", "band") ?: "band"
-        set(value) = prefs.edit().putString("hand", value).apply()
+        get() = prefs.getString(own("hand"), "band") ?: "band"
+        set(value) = prefs.edit().putString(own("hand"), value).apply()
 
     /** The band's Bluetooth address, as BandLink last connected to it: calibrations are kept per band. */
     var bandAddress: String?
-        get() = prefs.getString("band.address", null)
-        set(value) = prefs.edit().putString("band.address", value).apply()
+        get() = prefs.getString(own("band.address"), null)
+        set(value) = prefs.edit().putString(own("band.address"), value).apply()
 
     /** The wrist band-core reads gestures for: the band's, else the one it's set to (as the bridge's `Setup::hand_in_use`). */
-    fun handInUse(): String? = BandService.state.value.hand ?: hand.takeIf { it != "band" }
+    fun handInUse(): String? = BandService.stateOf(slot).value.hand ?: hand.takeIf { it != "band" }
 
     fun setDial(profile: String, dial: String) = Profiles.update(context) { it.withDial(profile, dial) }
 
@@ -60,7 +69,7 @@ class Prefs(context: Context) {
 
     /** The action id in force for [gesture] (the active profile's), or [profile]'s: an [Action]'s id, `app:…` or `tap:…`. */
     fun actionId(gesture: Gesture, profile: String? = null): String {
-        val list = Profiles.load(context)
+        val list = Bands.profiles(context, slot)
         val chosen = if (profile == null) list.active(Profiles.foreground) else list.profile(profile)
         return chosen?.map?.get(gesture.key) ?: gesture.default.id
     }
@@ -78,9 +87,12 @@ class Prefs(context: Context) {
     /** The During calls layer: gesture key → action id, [Mappings.AS_USUAL] or [Mappings.NOTHING]. */
     fun calls() = Gesture.entries.associate { it.key to callActionId(it) }
 
-    /** Everything the bridge needs to know about gestures, as JSON (see [Mappings.profilesJson]). */
-    fun profilesJson(): String = Mappings.profilesJson(Mappings.Input(
-        Profiles.load(context),
+    /**
+     * Everything the bridge needs to know about gestures, as JSON (see [Mappings.profilesJson]):
+     * the profiles this band uses, or [all] of them (the screens' reports, which go by the list's indexes).
+     */
+    fun profilesJson(all: Boolean = false): String = Mappings.profilesJson(Mappings.Input(
+        if (all) Profiles.load(context) else Bands.profiles(context, slot),
         Profiles.band(context),
         calls(),
         Profiles.sharedDrawings(context),
@@ -159,6 +171,6 @@ class Prefs(context: Context) {
         set(value) = prefs.edit().putString("probe", value).apply()
 
     var associationId: Int
-        get() = prefs.getInt("association", -1)
-        set(value) = prefs.edit().putInt("association", value).apply()
+        get() = prefs.getInt(own("association"), -1)
+        set(value) = prefs.edit().putInt(own("association"), value).apply()
 }

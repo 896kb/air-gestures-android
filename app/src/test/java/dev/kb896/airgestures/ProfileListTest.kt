@@ -87,6 +87,21 @@ class ProfileListTest {
         ProfileList.fromJson("[]", "{}", "p1")
     }
 
+    @Test fun `a band uses the profiles it names, in its order, with its pick and their apps`() {
+        val list = three().assigned("vlc", "p2").assigned("maps", "p3")
+        val band = list.forBand(listOf("p3", "p1"), "p1")
+        assertEquals(listOf("p3", "p1"), band.profiles.map { it.id })
+        assertEquals("p1", band.picked)
+        assertEquals(mapOf("maps" to "p3"), band.apps)
+        // A pick it doesn't use: its first; gone or no profiles named: all of them.
+        assertEquals("p3", list.forBand(listOf("p3", "p1"), "p2").picked)
+        assertEquals(list.profiles, list.forBand(listOf("p9"), "p1").profiles)
+        assertEquals(list.profiles, list.forBand(null, "p2").profiles)
+        assertEquals("p2", list.forBand(null, "p2").picked)
+        // A deleted profile drops out of the band's list.
+        assertEquals(listOf("p1"), list.deleted("p3").forBand(listOf("p3", "p1"), "p3").profiles.map { it.id })
+    }
+
     @Test fun `it round-trips through JSON`() {
         val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1).withSendAll("p3", true)
         val json = list.toJson()
