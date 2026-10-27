@@ -446,6 +446,8 @@ class WriteService : AccessibilityService() {
             }
             action == WriteAction.LEFT -> moveCursor(service, node, -1)
             action == WriteAction.RIGHT -> moveCursor(service, node, 1)
+            action == WriteAction.WORD_LEFT -> moveCursorTo(service, node) { FieldWriting.wordLeft(it, cursor(node)) }
+            action == WriteAction.WORD_RIGHT -> moveCursorTo(service, node) { FieldWriting.wordRight(it, cursor(node)) }
             action == WriteAction.HOME -> moveCursorTo(service, node) { 0 }
             action == WriteAction.END -> moveCursorTo(service, node) { it.length }
             action == WriteAction.DELETE_WORD -> deleteWord(service, node)
@@ -699,7 +701,9 @@ class WriteService : AccessibilityService() {
         /** The edit menu (swipe down), and its punctuation and emoji lists. */
         val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
         /** What still happens after word choices it closes (the rest only close them). */
-        private val AFTER_CHOOSING = setOf(WriteAction.DELETE_WORD, WriteAction.DELETE_ALL, WriteAction.HOME, WriteAction.END)
+        private val AFTER_CHOOSING = setOf(
+            WriteAction.DELETE_WORD, WriteAction.DELETE_ALL, WriteAction.HOME, WriteAction.END, WriteAction.WORD_LEFT, WriteAction.WORD_RIGHT,
+        )
         /** Punctuation that closes up to the word before it. */
         val CLOSING = setOf(".", ",", "?", "!", ":", ";", "…")
         val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
@@ -748,6 +752,22 @@ object FieldWriting {
         own -> ownScreen
         "com.android.systemui" -> false
         else -> !keyboard(from)
+    }
+
+    /** Where a word left of [at] in [text] starts (spaces before it skipped). */
+    fun wordLeft(text: String, at: Int): Int {
+        var i = at.coerceIn(0, text.length)
+        while (i > 0 && text[i - 1].isWhitespace()) i--
+        while (i > 0 && !text[i - 1].isWhitespace()) i--
+        return i
+    }
+
+    /** Where a word right of [at] in [text] ends (spaces before it skipped). */
+    fun wordRight(text: String, at: Int): Int {
+        var i = at.coerceIn(0, text.length)
+        while (i < text.length && text[i].isWhitespace()) i++
+        while (i < text.length && !text[i].isWhitespace()) i++
+        return i
     }
 
     /** A keyboard's package (Gboard's `…inputmethod…`, Samsung's honeyboard, …). */

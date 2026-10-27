@@ -37,4 +37,14 @@ class FieldWritingTest {
         // Writing in a field of ours: our own screens are its app.
         assertFalse(FieldWriting.leaves(own, app = own, own = own, ownScreen = true))
     }
+
+    @Test fun `word steps go to the start of the word before and the end of the word after`() {
+        val text = "hello  big world"
+        assertEquals(7, FieldWriting.wordLeft(text, 10))
+        assertEquals(0, FieldWriting.wordLeft(text, 7))
+        assertEquals(0, FieldWriting.wordLeft(text, 0))
+        assertEquals(5, FieldWriting.wordRight(text, 0))
+        assertEquals(10, FieldWriting.wordRight(text, 5))
+        assertEquals(16, FieldWriting.wordRight(text, 16))
+    }
 }

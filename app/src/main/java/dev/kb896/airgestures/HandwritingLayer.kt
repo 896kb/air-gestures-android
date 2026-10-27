@@ -17,6 +17,8 @@ enum class WriteAction(val id: String, val label: String, val icon: Int) {
     MENU_INLINE("write.menu.inline", "Edit menu (in text)", R.drawable.ic_list_ordered),
     LEFT("write.left", "Cursor left", R.drawable.ic_arrow_left),
     RIGHT("write.right", "Cursor right", R.drawable.ic_arrow_right),
+    WORD_LEFT("write.word_left", "Cursor word left", R.drawable.ic_circle_arrow_left),
+    WORD_RIGHT("write.word_right", "Cursor word right", R.drawable.ic_circle_arrow_right),
     HOME("write.home", "Cursor home", R.drawable.ic_skip_back),
     END("write.end", "Cursor end", R.drawable.ic_skip_forward),
     SELECT("write.select", "Select", R.drawable.ic_mouse_pointer_click),
