@@ -24,8 +24,10 @@ const MARK_MARGIN: f32 = 3.0;
 /// The two dots of a wake-up: each this sure, at most this far apart (s).
 const WAKE_MARGIN: f32 = 1.5;
 const WAKE_GAP_S: f64 = 1.5;
-/// Dots held back this long after the last one (s): no more are coming.
-const DOTS_SETTLE_S: f64 = 0.8;
+/// Dots held back this long after the last one (s): no more are coming. About the gap between
+/// the taps of a triple tap (band-core's `TRIPLE_TAP_GAP`, 0.45 s), a little more for the
+/// handwriting model's own delay.
+const DOTS_SETTLE_S: f64 = 0.5;
 /// The pen lifts after this long with nothing confident written (s).
 const PEN_QUIET_S: f64 = 8.0;
 /// Where the capitals are in the scores (A–Z).
@@ -744,14 +746,14 @@ mod tests {
         typing.take(&dot(2.0), None, 3.0);
         typing.take(&dot(2.0), None, 3.3);
         assert_eq!(typing.take_dots(), (0, 0), "may still be three");
-        typing.flush_dot(None, 4.2);
+        typing.flush_dot(None, 3.9);
         assert_eq!(typing.take_dots(), (1, 0));
         // Three as a gesture only, the pen up: two settle as the pen down.
         typing.set_dots(false, true);
         typing.pen_up();
         typing.take(&dot(2.0), None, 5.0);
         typing.take(&dot(2.0), None, 5.3);
-        typing.flush_dot(None, 6.2);
+        typing.flush_dot(None, 5.9);
         assert!(typing.pen());
     }
 
