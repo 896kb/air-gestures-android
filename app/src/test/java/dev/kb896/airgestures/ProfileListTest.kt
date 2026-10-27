@@ -88,9 +88,11 @@ class ProfileListTest {
     }
 
     @Test fun `it round-trips through JSON`() {
-        val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1)
+        val list = three().renamed("p2", "Reading").assigned("app", "p2").step(+1).withSendAll("p3", true)
         val json = list.toJson()
         assertEquals(list, ProfileList.fromJson(json.first, json.second, list.picked))
+        assertTrue(list.profile("p3")!!.does(Gesture.MIDDLE_DRAG_DOWN))
+        assertFalse(ProfileList.fromJson("""[{"id":"p1","name":"A","map":{},"dial":"volume"}]""", "{}", "p1").profile("p1")!!.sendAll)
     }
 
     @Test fun pickingMakesAProfileTheManualOne() {

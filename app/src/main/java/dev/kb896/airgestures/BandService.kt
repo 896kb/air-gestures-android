@@ -337,10 +337,13 @@ class BandService : Service(), BandLink.Listener {
     }
 
     override fun onActions(actions: List<String>) = main.post {
+        // The palm the next action was made in (`@palm`, just before it).
+        var palm: String? = null
         for (line in actions) {
             if (!line.startsWith("@")) {
                 // In a lesson nothing runs (the bridge sends `@practiced` instead).
-                if (practice == null) this.actions.run(line, fromBand = true)?.let(::onLog)
+                if (practice == null) this.actions.run(line, fromBand = true, palm = palm)?.let(::onLog)
+                palm = null
                 continue
             }
             val kind = line.removePrefix("@").substringBefore(' ')
@@ -352,6 +355,7 @@ class BandService : Service(), BandLink.Listener {
                     label = { id -> ActivityLine.label(id, device = { Profiles.devices(this).get(it)?.name }) { Labels.action(this, it) } },
                     profile = { Profiles.load(this).profiles.getOrNull(it)?.name },
                 )?.let(::onLog)
+                "palm" -> palm = Palm.of(rest)?.key
                 "gesture" -> practice?.gesture(rest)
                 "practiced" -> practice?.action(rest)
                 "field-gesture" -> field?.gesture(rest)

@@ -12,6 +12,8 @@ import android.widget.LinearLayout
  */
 class ProfileActivity : GestureScreen() {
     private lateinit var profileId: String
+    private lateinit var sendAll: Pair<android.widget.TextView, NeuDrawable>
+    private lateinit var mappings: List<android.view.View>
     private lateinit var gestures: LinearLayout
     private lateinit var note: android.widget.TextView
     private lateinit var dials: LinearLayout
@@ -28,13 +30,28 @@ class ProfileActivity : GestureScreen() {
         drawings = column()
         apps = column(gap = 8f)
         actions = row(gap = 10f)
-        show(pageColumn().apply {
-            addView(card(null, column(gap = 14f).apply {
+        sendAll = pill("Off", R.drawable.ic_zap) {
+            val on = Profiles.load(this).profile(profileId)?.sendAll != true
+            Profiles.update(applicationContext) { it.withSendAll(profileId, on) }
+            BandService.instance?.remap()
+            render()
+            if (on) automationGuide(firstTime = true)
+        }
+        mappings = listOf(
+            card(null, column(gap = 14f).apply {
                 addView(gestures)
                 addView(note)
-            }))
-            addView(card("Dials · pinch and turn", dials))
-            addView(card(null, drawings))
+            }),
+            card("Dials · pinch and turn", dials),
+            card(null, drawings),
+        )
+        show(pageColumn().apply {
+            addView(card(null, settingRow(
+                "Send everything to automation",
+                "Every gesture, dial, drag and drawing, by its own name and with your palm",
+                sendAll.first,
+            )))
+            for (view in mappings) addView(view)
             addView(card("Apps", apps))
             addView(actions)
         }, title = Profiles.load(this).profile(profileId)?.name ?: "Profile")
@@ -57,6 +74,10 @@ class ProfileActivity : GestureScreen() {
         val list = Profiles.load(this)
         val profile = list.profile(profileId) ?: return finish()
         titleView?.text = profile.name
+        sendAll.first.text = if (profile.sendAll) "On" else "Off"
+        if ((sendAll.second.pressed > .5f) != profile.sendAll) sendAll.second.press(profile.sendAll)
+        // Sending everything, the mappings below don't apply (they're kept for when it's off).
+        for (view in mappings) view.visibility = if (profile.sendAll) android.view.View.GONE else android.view.View.VISIBLE
         // Re-rendered on resume: a band control moved elsewhere shows its paused actions as normal again (mockup 7).
         val report = Report.of(this)
         gestures.removeAllViews()

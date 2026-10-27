@@ -86,6 +86,7 @@ class Prefs(context: Context) {
         Profiles.sharedDrawings(context),
         listOf("left", "right").associateWith { Calibrations.get(context, bandAddress, it) },
         hand,
+        Drawings.load(context).drawings.map { it.name }.toSet(),
     ))
 
     /**

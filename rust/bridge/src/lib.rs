@@ -344,6 +344,7 @@ impl Connection {
     /// | Line | From |
     /// |---|---|
     /// | `@gesture <label>` | `Output::Gesture` |
+    /// | `@palm <down\|sideways\|up>` | just before an action, while the hand in use is calibrated: the palm of the gesture that ran it (a dial or slider step: at its pinch's press) |
     /// | `@controls on` / `@controls off` | `Output::Controls` |
     /// | `@profile <index> <step>` | `Output::Profile` |
     /// | `@held <app>` | `Output::ProfileHeld` |
@@ -827,9 +828,17 @@ impl Connection {
         for line in self.activity_lines(&outputs) {
             self.actions.push(format!("@activity {line}"));
         }
+        // The palm each action goes with: its gesture's, else (a dial or slider step) the pinch's.
+        let calibrated = self.controls.options().palm.is_some();
+        let mut palm = None;
         for output in outputs {
             match output {
-                Output::Run(action) => self.actions.push(action),
+                Output::Run(action) => {
+                    if calibrated && let Some(palm) = palm.or(self.controls.status().last_palm) {
+                        self.actions.push(format!("@palm {}", palm.key()));
+                    }
+                    self.actions.push(action)
+                }
                 Output::SetHand(hand) => match now {
                     Some(now) => outgoing.extend(self.session.set_handedness(hand, now).map_err(|e| e.to_string())?),
                     None => self.pending_hand = Some(hand),
@@ -839,6 +848,9 @@ impl Connection {
                     self.actions.push(format!("@field-gesture {}", gesture.label()));
                 }
                 other => {
+                    if let Output::Gesture { palm: made, .. } = &other {
+                        palm = Some(*made);
+                    }
                     // The match's distance, for tuning (the Activity line names the drawing).
                     if let Output::Drawn { name, distance } = &other {
                         self.log.push(format!("drawn {name} ({distance:.2})"));
