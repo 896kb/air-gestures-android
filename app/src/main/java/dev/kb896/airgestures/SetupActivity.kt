@@ -78,22 +78,21 @@ class SetupActivity : Screen() {
         bandVibration.addView(settingRow(
             "Band vibration",
             "Use the band's haptics for app feedback",
-            pill(if (enabled) "On" else "Off") {
-                val next = !Prefs(this).bandVibration
-                Prefs(this).bandVibration = next
-                BandService.instance?.setBandVibration(next)
+            onOff(enabled) { on ->
+                Prefs(this).bandVibration = on
+                BandService.instance?.setBandVibration(on)
                 renderBandVibration()
-            }.first,
+            },
         ))
         val notifications = Prefs(this).notificationVibration
         bandVibration.addView(settingRow(
             "Notification vibration",
             "One short buzz for new phone notifications; needs notification access",
-            pill(if (notifications) "On" else "Off") {
-                Prefs(this).notificationVibration = !Prefs(this).notificationVibration
+            onOff(notifications) { on ->
+                Prefs(this).notificationVibration = on
                 renderBandVibration()
                 render()
-            }.first,
+            },
         ))
     }
 

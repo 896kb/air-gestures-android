@@ -316,6 +316,15 @@ abstract class Screen : Activity() {
         segments.forEach(::addView)
     }
 
+    /** An Off / On switch: a segmented control with the current one inked; [set] runs only on a change. */
+    fun onOff(on: Boolean, set: (Boolean) -> Unit): LinearLayout {
+        val off = segment("Off") { if (on) set(false) }
+        val yes = segment("On") { if (!on) set(true) }
+        markSegment(off, !on)
+        markSegment(yes, on)
+        return segmented(off, yes)
+    }
+
     /** A setting: its label and a line of detail on the left, the control on the right. */
     fun settingRow(label: String, detail: String, control: View) = row(gap = 12f).apply {
         addView(column(gap = 4f).apply {
