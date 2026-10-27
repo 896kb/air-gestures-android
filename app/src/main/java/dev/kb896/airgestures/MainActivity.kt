@@ -356,7 +356,9 @@ class MainActivity : Screen() {
             override fun onDown(e: MotionEvent) = true
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
                 if (!Bands.two(this@MainActivity) || Math.abs(vx) < 2 * Math.abs(vy) || Math.abs(vx) < dp(400f)) return false
-                showBand(if (vx < 0) 1 else 0)
+                // As the switch reads: swiping left shows the band on the right.
+                val order = Bands.inOrder(this@MainActivity)
+                showBand(if (vx < 0) order.last() else order.first())
                 return true
             }
         })
@@ -373,18 +375,23 @@ class MainActivity : Screen() {
     /** The band switch, drawn again when the names change. */
     private fun renderBands() {
         val two = Bands.two(this)
-        val names = if (two) Bands.slots(this).map { Bands.name(this, it) } else emptyList()
+        // The left wrist's band on the left; the switch centred.
+        val order = if (two) Bands.inOrder(this) else emptyList()
+        val names = order.map { Bands.name(this, it) }
         if (names != drawnBands) {
             drawnBands = names
             bandSwitch.removeAllViews()
-            if (two) bandSwitch.addView(segmented(*names.mapIndexed { slot, name -> segment(name) { showBand(slot) } }.toTypedArray()))
+            if (two) bandSwitch.addView(
+                segmented(*order.map { slot -> segment(Bands.name(this, slot)) { showBand(slot) } }.toTypedArray()),
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL),
+            )
         }
         bandSwitch.visibility = if (two) View.VISIBLE else View.GONE
         val selected = Bands.selected(this)
         (bandSwitch.getChildAt(0) as? LinearLayout)?.let { track ->
             for (i in 0 until track.childCount) {
                 val view = track.getChildAt(i) as TextView
-                val active = i == selected
+                val active = order.getOrNull(i) == selected
                 view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
                 view.background = if (active) GradientDrawable().apply {
                     cornerRadius = dp(999f)

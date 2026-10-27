@@ -106,6 +106,15 @@ object Bands {
     fun wrist(context: Context, slot: Int): String? =
         Prefs(context, slot).hand.takeIf { it != "band" } ?: BandService.stateOf(slot).value.hand
 
+    /** The bands as they're shown side by side: the left wrist's first, the right wrist's last. */
+    fun inOrder(context: Context): List<Int> = slots(context).sortedBy {
+        when (wrist(context, it)) {
+            "left" -> 0
+            "right" -> 2
+            else -> 1
+        }
+    }
+
     /** "Left band" / "Right band", or "Band 2" without a wrist, or when both say the same one. */
     fun name(context: Context, slot: Int): String {
         val wrist = wrist(context, slot)
