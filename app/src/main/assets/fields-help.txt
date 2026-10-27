@@ -21,7 +21,7 @@ Word choices show the other corrections of the word you're writing (or the last 
 Del word, Del all, ↵ (a new line), ! (punctuation) and 🙂 (emoji), in a popup above the keyboard or in the text. Cursor left and right choose, Select does it, either menu's gesture closes it. Del word and Del all can also go straight on a gesture of their own.
 
 ## The cursor and selecting
-Cursor left or right moves the cursor. Select starts selecting: left and right then grow the selection, and Select again stops. Writing replaces what's selected.
+Cursor left or right moves the cursor; Cursor home and Cursor end jump to the start or end of the text. Select starts selecting: left and right then grow the selection, and Select again stops. Writing replaces what's selected.
 
 ## Your keyboard and touch
 You can switch between typing on your device's keyboard or with the band, they will work together fine.

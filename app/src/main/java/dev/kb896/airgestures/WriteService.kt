@@ -423,8 +423,8 @@ class WriteService : AccessibilityService() {
                     service.fieldChooseCancel()
                     choosing = false
                     popup.hide()
-                    // A delete still deletes, once the word is back as it was.
-                    if (action == WriteAction.DELETE_WORD || action == WriteAction.DELETE_ALL) act(service, node, action)
+                    // A delete or a jump still happens, once the word is back as it was.
+                    if (action in AFTER_CHOOSING) act(service, node, action)
                 }
             }
             action == WriteAction.CHOICES_POPUP || action == WriteAction.CHOICES_INLINE -> {
@@ -446,6 +446,8 @@ class WriteService : AccessibilityService() {
             }
             action == WriteAction.LEFT -> moveCursor(service, node, -1)
             action == WriteAction.RIGHT -> moveCursor(service, node, 1)
+            action == WriteAction.HOME -> moveCursorTo(service, node) { 0 }
+            action == WriteAction.END -> moveCursorTo(service, node) { it.length }
             action == WriteAction.DELETE_WORD -> deleteWord(service, node)
             action == WriteAction.DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
         }
@@ -571,10 +573,14 @@ class WriteService : AccessibilityService() {
     }
 
     /** The cursor a character left or right, or the selection's moving end while selecting. */
-    private fun moveCursor(service: BandService, node: AccessibilityNodeInfo, by: Int) {
+    private fun moveCursor(service: BandService, node: AccessibilityNodeInfo, by: Int) =
+        moveCursorTo(service, node) { cursor(node) + by }
+
+    /** The cursor (the selection's moving end while selecting) to where [to] says in the field's text: its start, its end. */
+    private fun moveCursorTo(service: BandService, node: AccessibilityNodeInfo, to: (String) -> Int) {
         node.refresh()
         val text = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-        val at = cursor(node) + by
+        val at = to(text)
         if (at !in 0..text.length) return
         val from = anchor ?: at
         node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
@@ -692,6 +698,8 @@ class WriteService : AccessibilityService() {
         const val EMOJI_ITEM = "🙂"
         /** The edit menu (swipe down), and its punctuation and emoji lists. */
         val MAIN = listOf(DELETE_WORD, DELETE_ALL, NEW_LINE, PUNCTUATION_ITEM, EMOJI_ITEM)
+        /** What still happens after word choices it closes (the rest only close them). */
+        private val AFTER_CHOOSING = setOf(WriteAction.DELETE_WORD, WriteAction.DELETE_ALL, WriteAction.HOME, WriteAction.END)
         /** Punctuation that closes up to the word before it. */
         val CLOSING = setOf(".", ",", "?", "!", ":", ";", "…")
         val PUNCTUATION = listOf(".", ",", "?", "!", "'", "\"", ":", ";", "-", "(", ")", "@", "#", "&", "/", "…", "*", "$", "%", "+", "=")
