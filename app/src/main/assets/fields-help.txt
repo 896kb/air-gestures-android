@@ -9,7 +9,7 @@ Tap into any text field and write with your index finger on a table, your leg or
 Right away: the pen is down as the field gets the focus (one buzz). After ..: the pen starts up and your gestures stay as usual until you write two dots (..). On a gesture: handwriting stays off in the field until you make the gesture set to Handwriting on/off; the same gesture turns it off again.
 
 ## The pen
-While the pen is down, what you write is typed and the gestures do what While writing sets. After 8 seconds with nothing written it lifts (two buzzes): nothing more is typed, and your gestures go back to what they do in your profile, except the ones that bring the pen back (Pen down, by default a double tap of your index finger, or Handwriting on/off). Write two dots (..) to put it down again too. Stop writing lifts it at once.
+While the pen is down, what you write is typed and the gestures do what While writing sets. After 8 seconds with nothing written it lifts (two buzzes): nothing more is typed, and your gestures go back to what they do in your profile, except the ones that bring the pen back (Pen down, by default a double tap of your index finger, Pen up/down, or Handwriting on/off). Write two dots (..) to put it down again too. Pen up lifts it at once; Pen up/down flips it either way.
 
 ## While writing
 Gestures › Handwriting sets what each gesture does while the pen is down: As usual (your profile's action), Nothing, or one of the writing actions. By default: swipe left and right move the cursor, swipe up shows word choices, swipe down the edit menu, an index tap selects, an index double tap puts the pen down; every other gesture does what it does in your profile.

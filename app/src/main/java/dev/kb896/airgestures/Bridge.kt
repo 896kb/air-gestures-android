@@ -102,7 +102,7 @@ object Bridge {
      * (what the field takes with the pen down; with it up); throws on bad JSON.
      */
     @JvmStatic external fun setWritingLayer(handle: Long, json: String)
-    /** Stop writing: the pen goes up. */
+    /** Pen up: nothing's typed till it's down again. */
     @JvmStatic external fun fieldPenUp(handle: Long)
     /** Where the next word choices show: the app's popup, or in the field. */
     @JvmStatic external fun setFieldPopup(handle: Long, popup: Boolean)

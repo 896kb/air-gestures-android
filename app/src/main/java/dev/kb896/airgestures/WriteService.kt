@@ -357,7 +357,7 @@ class WriteService : AccessibilityService() {
      * - Edit menu (swipe down): delete word, delete all, new line, and lists of punctuation
      *   and emoji, in a popup above the keyboard or in the text; the cursor gestures choose,
      *   Select does it, either menu's gesture closes (or goes back from a list);
-     * - Del word and Del all at once; Pen down (a double tap), Stop writing (the pen up), and
+     * - Del word and Del all at once; Pen down (a double tap), Pen up, Pen up/down, and
      *   Handwriting on/off (back to gestures in this field until it's made again).
      */
     private val gestures = object : BandService.Field {
@@ -386,14 +386,14 @@ class WriteService : AccessibilityService() {
 
     /**
      * Two (or [three]) dots on the surface, as a gesture of their own: with the pen up, all but
-     * Nothing, Stop writing and on/off put it down first.
+     * Nothing, Pen up, Pen up/down and on/off put it down first.
      */
     private fun onDots(three: Boolean = false) {
         val node = field ?: return
         val service = BandService.instance ?: return
         lastWritten = SystemClock.uptimeMillis()
         val action = WriteAction.of(if (three) HandwritingLayer.dots3(this) else HandwritingLayer.dots(this)) ?: return
-        if (!pen && action != WriteAction.TOGGLE && action != WriteAction.STOP) {
+        if (!pen && action != WriteAction.TOGGLE && action != WriteAction.STOP && action != WriteAction.PEN_TOGGLE) {
             service.fieldPenDown()
             if (action == WriteAction.PEN_DOWN) return
         }
@@ -406,6 +406,7 @@ class WriteService : AccessibilityService() {
         when {
             action == WriteAction.PEN_DOWN -> service.fieldPenDown()
             action == WriteAction.STOP -> service.fieldPenUp()
+            action == WriteAction.PEN_TOGGLE -> if (pen) service.fieldPenUp() else service.fieldPenDown()
             action == WriteAction.TOGGLE -> toggle()
             open != null -> onMenuAction(service, node, open, action)
             choosing -> when (action) {

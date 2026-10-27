@@ -7,7 +7,9 @@ import org.json.JSONObject
 /** What a gesture does while handwriting has the pen down (the Handwriting layer's choices). */
 enum class WriteAction(val id: String, val label: String, val icon: Int) {
     PEN_DOWN("write.pen_down", "Pen down", R.drawable.ic_pencil),
-    STOP("write.stop", "Stop writing", R.drawable.ic_hand),
+    /** The pen up (its id from when it was called Stop writing). */
+    STOP("write.stop", "Pen up", R.drawable.ic_hand),
+    PEN_TOGGLE("write.pen_toggle", "Pen up/down", R.drawable.ic_pencil),
     TOGGLE("write.toggle", "Handwriting on/off", R.drawable.ic_power),
     CHOICES_POPUP("write.choices.popup", "Word choices (popup)", R.drawable.ic_layers),
     CHOICES_INLINE("write.choices.inline", "Word choices (in text)", R.drawable.ic_layers),
@@ -20,7 +22,7 @@ enum class WriteAction(val id: String, val label: String, val icon: Int) {
     DELETE_ALL("write.delete_all", "Del all", R.drawable.ic_x);
 
     /** Whether it works with the pen up too (it's what brings the pen or handwriting back). */
-    val withPenUp get() = this == PEN_DOWN || this == TOGGLE
+    val withPenUp get() = this == PEN_DOWN || this == PEN_TOGGLE || this == TOGGLE
 
     companion object {
         fun of(id: String?) = entries.firstOrNull { it.id == id }

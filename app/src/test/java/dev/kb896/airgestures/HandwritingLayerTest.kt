@@ -17,10 +17,12 @@ class HandwritingLayerTest {
     }
 
     @Test fun `as usual is left to the profile, and on-off works with the pen up`() {
-        val layer = mapOf("swipe_left" to HandwritingLayer.AS_USUAL, "middle_tap" to WriteAction.TOGGLE.id, "index_tap" to HandwritingLayer.NOTHING)
+        val layer = mapOf("swipe_left" to HandwritingLayer.AS_USUAL, "middle_tap" to WriteAction.TOGGLE.id, "index_tap" to HandwritingLayer.NOTHING,
+            "middle_double" to WriteAction.PEN_TOGGLE.id, "middle_triple" to WriteAction.STOP.id)
         val json = JSONObject(HandwritingLayer.json(layer, true))
-        assertEquals(setOf("middle_tap", "index_tap"), keys(json, "takes"))
-        assertEquals(setOf("middle_tap"), keys(json, "pen"))
+        assertEquals(setOf("middle_tap", "index_tap", "middle_double", "middle_triple"), keys(json, "takes"))
+        // Pen up/down works with the pen up too; Pen up has nothing to do then.
+        assertEquals(setOf("middle_tap", "middle_double"), keys(json, "pen"))
     }
 
     @Test fun `two dots are a gesture of their own unless they put the pen down`() {
