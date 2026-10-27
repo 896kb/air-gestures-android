@@ -73,7 +73,8 @@ class WriteService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_FOCUSED, AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 val node = event.source ?: return
                 if (node.isEditable && !node.isPassword) enter(node, event.packageName?.toString())
-                else if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) leave("the focus moved off the field")
+                // Focus on another screen (a flip phone's cover screen) isn't the field's.
+                else if (event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED && !elsewhere(event)) leave("the focus moved off the field")
             }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
                 val node = field ?: return
@@ -81,11 +82,36 @@ class WriteService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val from = event.packageName?.toString() ?: return
-                if (field != null && FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) {
-                    leave(if (from == packageName) "a screen of this app came up" else "$from came up")
+                val node = field
+                // No field yet, and the keyboard came up: the app may have focused one without a focus event.
+                if (node == null) {
+                    if (FieldWriting.keyboard(from)) main.postDelayed(::catchFocused, KEYBOARD_SETTLE_MS)
+                    return
                 }
+                if (elsewhere(event) || !FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) return
+                val why = if (from == packageName) "a screen of this app came up" else "$from came up"
+                // A panel or pop-up over the app (Samsung's edge panel comes up with the keyboard)
+                // leaves the field focused: only once it isn't does writing end.
+                if (stillFocused(node)) main.postDelayed({ if (field === node && !stillFocused(node)) leave(why) }, RECHECK_MS)
+                else leave(why)
             }
         }
+    }
+
+    /** The field's screen, where it has one: a flip phone's cover screen is another. */
+    private var fieldDisplay: Int? = null
+
+    /** [event] happened on another screen than the field's. */
+    private fun elsewhere(event: AccessibilityEvent) = fieldDisplay?.let { it != event.displayId } == true
+
+    /** [node] is still the focused field, in a window still on screen. */
+    private fun stillFocused(node: AccessibilityNodeInfo) = runCatching { node.refresh() && node.isFocused }.getOrDefault(false)
+
+    /** The field with the input focus now, if the app focused one without saying so. */
+    private fun catchFocused() {
+        if (field != null) return
+        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable && !it.isPassword }
+            ?.let { enter(it, it.packageName?.toString()) }
     }
 
     /** Whether [name] is one of our screens (a lesson, say), not a pop-up or pad of ours over the field. */
@@ -142,6 +168,7 @@ class WriteService : AccessibilityService() {
         // Moving to another field: the menu or word choices shown in the last one go first.
         if (!same) dropInline()
         field = node
+        fieldDisplay = runCatching { node.window?.displayId }.getOrNull()
         app = from
         lastWritten = SystemClock.uptimeMillis()
         if (same) return
@@ -542,6 +569,10 @@ class WriteService : AccessibilityService() {
 
         /** Back to gestures after this long with nothing written (the pen lifts much sooner). */
         const val IDLE_MS = 5 * 60_000L
+        /** After the keyboard comes up, how long until the focused field is looked for. */
+        private const val KEYBOARD_SETTLE_MS = 300L
+        /** A window over the field: how long until it's checked again that the field kept the focus. */
+        private const val RECHECK_MS = 500L
         const val POLL_MS = 100L
         /** How long a field may take to show a change of ours before a difference is someone else's. */
         const val SETTLE_MS = 300L
@@ -577,6 +608,9 @@ object FieldWriting {
         app -> false
         own -> ownScreen
         "com.android.systemui" -> false
-        else -> "inputmethod" !in from && "keyboard" !in from
+        else -> !keyboard(from)
     }
+
+    /** A keyboard's package (Gboard's `…inputmethod…`, Samsung's honeyboard, …). */
+    fun keyboard(from: String) = "inputmethod" in from || "keyboard" in from || "honeyboard" in from
 }

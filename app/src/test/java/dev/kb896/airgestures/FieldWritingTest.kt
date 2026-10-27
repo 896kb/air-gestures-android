@@ -29,6 +29,9 @@ class FieldWritingTest {
         assertFalse(FieldWriting.leaves(own, app = "com.chat", own = own, ownScreen = false))
         assertFalse(FieldWriting.leaves("com.chat", app = "com.chat", own = own, ownScreen = false))
         assertFalse(FieldWriting.leaves("com.android.systemui", app = "com.chat", own = own, ownScreen = false))
+        // Samsung's keyboard too.
+        assertFalse(FieldWriting.leaves("com.samsung.android.honeyboard", app = "com.chat", own = own, ownScreen = false))
+        assertTrue(FieldWriting.keyboard("com.google.android.inputmethod.latin"))
         assertFalse(FieldWriting.leaves("com.google.android.inputmethod.latin", app = "com.chat", own = own, ownScreen = false))
         assertFalse(FieldWriting.leaves("com.swiftkey.keyboard", app = "com.chat", own = own, ownScreen = false))
         // Writing in a field of ours: our own screens are its app.
