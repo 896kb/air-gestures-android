@@ -157,10 +157,10 @@ object Bands {
         for (slot in slots(context)) on(context, slot)?.let { setOn(context, slot, it + id) }
     }
 
-    /** The profile [slot] picked (band 1's is the list's own). */
+    /** The profile [slot] picked (band 1's is the list's own; band 2 follows band 1's until it picks its own). */
     fun picked(context: Context, slot: Int): String =
         if (slot == 0) Profiles.load(context).picked
-        else prefs(context).getString(key(slot, PICKED), null) ?: Profiles.load(context).picked
+        else prefs(context).getString(key(slot, PICKED), null) ?: profiles(context, 0).picked
 
     fun pick(context: Context, slot: Int, id: String) {
         if (slot == 0) Profiles.update(context) { it.picking(id) }

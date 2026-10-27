@@ -275,6 +275,10 @@ class MainActivity : Screen() {
         val (g, gv) = stat("Gestures"); gestures = gv
         val (l, lv) = stat("Last gesture"); lastGesture = lv.apply { typeface = Cb.font(context, R.font.geist_medium); textSize = 15f }
         val (p, pv) = stat("Profile"); profile = pv.apply { typeface = Cb.font(context, R.font.geist_medium); textSize = 15f }
+        // Tapping the profile picks this band's from its own.
+        p.isClickable = true
+        p.background = ripple()
+        p.setOnClickListener { pickProfile() }
         val (f, fv) = stat("Firmware"); firmware = fv.apply { typeface = Cb.font(context, R.font.geist_medium); textSize = 15f }
         return card("Status", column(gap = 16f).apply {
             addView(row().apply { addView(b, weighted()); addView(h, weighted()) })
@@ -346,6 +350,22 @@ class MainActivity : Screen() {
                     "turn on \"${applicationInfo.loadLabel(packageManager)} handwriting in text fields\".",
                 "Open settings",
             ) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+    }
+
+    /** Pick the profile in force on the band this page shows, from the ones it uses. */
+    private fun pickProfile() {
+        val slot = Bands.selected(this)
+        val list = Bands.profiles(this, slot)
+        if (list.profiles.size < 2) return
+        val active = list.active(Profiles.foreground)
+        choose(
+            "Profile",
+            list.profiles.map { Option(it.name, it.id == active.id, R.drawable.ic_layers) },
+            heading = if (list.locked(Profiles.foreground)) "The app in front has its own" else "Switch to",
+        ) { index ->
+            BandService.pickProfile(this, list.profiles[index].id)
+            render(BandService.state.value)
         }
     }
 
