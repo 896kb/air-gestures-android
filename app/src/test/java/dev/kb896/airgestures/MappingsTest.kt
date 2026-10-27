@@ -149,6 +149,14 @@ class MappingsTest {
         assertFalse(json.getJSONObject(0).getJSONObject("palm").has("index_tap"))
     }
 
+    @Test fun `the overlay beats a band control on its gesture, but not Controls on-off`() {
+        val over = Mappings.Input(list, BandControls.standard(), calls, input.drawings, input.calibrations, "left",
+            overlay = mapOf("index_hold" to WriteAction.TOGGLE.id, "middle_hold" to WriteAction.TOGGLE.id))
+        val bandJson = org.json.JSONObject(Mappings.profilesJson(over)).getJSONObject("band")
+        assertTrue(bandJson.isNull("draw") || !bandJson.has("draw"))
+        assertEquals("middle_hold", bandJson.getJSONObject("controls").getString("gesture"))
+    }
+
     @Test fun `the band's palm goes with gestures and dial steps, an override keeps its own`() {
         assertEquals(Mappings.Automation.Gesture("index_drag_up", "sideways", "Music"),
             Mappings.madeWith(Mappings.sent("automation/Music:index_drag_up")!!, "sideways"))

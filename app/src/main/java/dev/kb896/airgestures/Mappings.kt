@@ -138,7 +138,10 @@ object Mappings {
             put("hand", input.hand)
             put("picked", index(list.picked).coerceAtLeast(0))
             put("apps", JSONObject(list.apps.mapValues { index(it.value) }.filterValues { it >= 0 }))
-            put("band", input.band.toJson())
+            // The overlay beats the band controls on its gestures too (Controls on/off stays: a way to turn them off).
+            val band = input.band.at.keys.filter { it != Builtin.CONTROLS && input.band[it]?.gesture?.key in input.overlay }
+                .fold(input.band) { controls, builtin -> controls.with(builtin, null) }
+            put("band", band.toJson())
             put("calls", JSONObject(input.calls.filterValues { it != AS_USUAL }.mapValues { (key, id) -> if (id == NOTHING) "-" else named(id, key, CALLS) }))
             put("drawings", drawingsJson(input.drawings, null))
             put("calibration", JSONObject().apply {
