@@ -97,6 +97,15 @@ object Bridge {
      * with no field typed into, `"off"`: the controls are off.
      */
     @JvmStatic external fun fieldEdits(handle: Long, now: Double): String
+    /**
+     * The Handwriting layer: `{"takes": [gesture keys], "pen": [gesture keys], "dials": bool}`
+     * (what the field takes with the pen down; with it up); throws on bad JSON.
+     */
+    @JvmStatic external fun setWritingLayer(handle: Long, json: String)
+    /** Stop writing: the pen goes up. */
+    @JvmStatic external fun fieldPenUp(handle: Long)
+    /** Where the next word choices show: the app's popup, or in the field. */
+    @JvmStatic external fun setFieldPopup(handle: Long, popup: Boolean)
     /** A swipe up in a text field: the word's suggestions show in its place; false when none. */
     @JvmStatic external fun fieldChoose(handle: Long): Boolean
     /** While choosing: the next (or previous) suggestion first. */

@@ -9,6 +9,7 @@ object Labels {
     fun action(context: Context, id: String): String = when {
         Sequences.waitMs(id) != null -> "Wait ${seconds(Sequences.waitMs(id)!!)}"
         id.startsWith(Strokes.PATH) -> "Drawn swipe"
+        WriteAction.of(id) != null -> WriteAction.of(id)!!.label
         id.startsWith(Sequences.PREFIX) -> sequence(Profiles.sequences(context), id)
         else -> when (val action = Action.of(id)) {
             Action.OPEN_APP -> "Open ${appName(context, id.removePrefix(APP_PREFIX))}"

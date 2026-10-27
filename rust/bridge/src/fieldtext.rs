@@ -258,6 +258,11 @@ impl FieldTyping {
         self.last_dot = None;
     }
 
+    /// Lift the pen (Stop writing, or a field that starts with it up): nothing's typed till it's down again.
+    pub fn pen_up(&mut self) {
+        self.pen = false;
+    }
+
     /// Whether the pen is down (what's written is typed).
     pub fn pen(&self) -> bool {
         self.pen

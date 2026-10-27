@@ -69,6 +69,7 @@
         <activity android:name=".BandProfilesActivity" android:exported="false" />
         <activity android:name=".BandControlActivity" android:exported="false" />
         <activity android:name=".CallsActivity" android:exported="false" />
+        <activity android:name=".HandwritingActivity" android:exported="false" />
         <activity android:name=".GestureActivity" android:exported="false" />
         <activity android:name=".DragsActivity" android:exported="false" />
         <activity android:name=".PalmCalibrationActivity" android:exported="false" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize" />

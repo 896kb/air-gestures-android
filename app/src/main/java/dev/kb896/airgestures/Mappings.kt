@@ -40,6 +40,8 @@ object Mappings {
         val hand: String,
         /** Every drawing's name: a profile that sends everything sends each one. */
         val library: Set<String> = emptySet(),
+        /** Gesture key → action id over every profile (Handwriting on/off while a field waits for it), no palm overrides there. */
+        val overlay: Map<String, String> = emptyMap(),
     )
 
     /**
@@ -115,12 +117,12 @@ object Mappings {
         for (profile in list.profiles) {
             val map = JSONObject()
             for (gesture in Gesture.entries) {
-                val id = if (profile.sendAll) AUTOMATION else profile.map[gesture.key] ?: gesture.default.id
+                val id = input.overlay[gesture.key] ?: if (profile.sendAll) AUTOMATION else profile.map[gesture.key] ?: gesture.default.id
                 map.put(gesture.key, named(id, gesture.key, profile.name))
             }
             val palm = JSONObject()
             // Sending everything there are no overrides: the palm goes with each gesture anyway.
-            if (!profile.sendAll) for ((key, own) in profile.palm) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at", profile.name) }))
+            if (!profile.sendAll) for ((key, own) in profile.palm) if (key !in input.overlay) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at", profile.name) }))
             val drawings = if (profile.sendAll) input.library.associateWith { AUTOMATION } else drawingsOf(profile, input.drawings)
             profiles.put(JSONObject().apply {
                 put("name", profile.name)

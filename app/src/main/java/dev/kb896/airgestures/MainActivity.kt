@@ -44,10 +44,6 @@ class MainActivity : Screen() {
     private lateinit var lastGesture: TextView
     private lateinit var profile: TextView
     private lateinit var controls: Pair<TextView, NeuDrawable>
-    private lateinit var fields: Pair<TextView, NeuDrawable>
-    private lateinit var fieldsDetail: TextView
-    private lateinit var choicesPopup: TextView
-    private lateinit var choicesInline: TextView
     private lateinit var wristLeft: TextView
     private lateinit var wristRight: TextView
     private var player: MediaPlayer? = null
@@ -318,41 +314,6 @@ class MainActivity : Screen() {
         setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(KOFI_URL))) }
     }
 
-    /**
-     * Handwriting in text fields on or off. It needs firmware with a handwriting model (build 64
-     * and later) and its own accessibility service, which the system has to turn on.
-     */
-    private fun toggleFields() {
-        val prefs = Prefs(this)
-        if (prefs.writeInFields) {
-            prefs.writeInFields = false
-            render(BandService.state.value)
-            return
-        }
-        if (BandService.instance?.bandWrites() == false) {
-            confirm(
-                "Update the band first",
-                "The band's firmware has no handwriting model. Handwriting came with firmware build 64; " +
-                    "update the band in Setup › Band firmware updates, then turn this on.",
-                "Open firmware",
-            ) { open<FirmwareActivity>() }
-            return
-        }
-        prefs.writeInFields = true
-        Words.load(this)
-        render(BandService.state.value)
-        if (!WriteService.enabled(this)) {
-            confirm(
-                "Turn on the text field service",
-                "To type into text fields, Air Gestures needs its \"handwriting in text fields\" accessibility " +
-                    "service. It notices which field you're in and changes only that field's text; password " +
-                    "fields are left alone, and nothing leaves the phone.\n\nIn Accessibility, tap Installed apps, then " +
-                    "turn on \"${applicationInfo.loadLabel(packageManager)} handwriting in text fields\".",
-                "Open settings",
-            ) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        }
-    }
-
     /** Pick the profile in force on the band this page shows, from the ones it uses. */
     private fun pickProfile() {
         val slot = Bands.selected(this)
@@ -445,53 +406,12 @@ class MainActivity : Screen() {
         }
     }
 
-    /** What writing in a text field does, and the gestures meanwhile (the ? by its switch). */
-    private fun fieldsHelp() {
-        val body = column(gap = 14f)
-        for ((heading, text) in Sections.read(this, "fields-help.txt")) {
-            body.addView(column(gap = 4f).apply {
-                addView(Cb.text(context, 15f, R.font.geist_semibold, Cb.INK_900).apply { this.text = heading })
-                addView(Cb.text(context, 14f, color = Cb.INK_700).apply {
-                    this.text = text
-                    setLineSpacing(0f, 1.3f)
-                })
-            })
-        }
-        val scroll = ScrollView(this).apply {
-            addView(body)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * .6f).toInt())
-        }
-        sheet("Handwriting in text fields", scroll, "Got it", cancel = false) { true }
-    }
-
     private fun togglesBlock() = column(gap = 16f).apply {
         controls = pill("Controls on", R.drawable.ic_hand) {
             BandService.instance?.setPaused(!BandService.state.value.paused)
                 ?: Prefs(context).let { it.paused = !it.paused; render(BandService.state.value) }
         }
         addView(settingRow("Controls", "Or hold the middle finger", controls.first))
-        fields = pill("Off", R.drawable.ic_pencil) { toggleFields() }
-        fieldsDetail = Cb.text(context, 13f, color = Cb.INK_500)
-        addView(row(gap = 12f).apply {
-            addView(column(gap = 4f).apply {
-                addView(row(gap = 6f).apply {
-                    addView(Cb.label(context, "Handwriting in text fields"))
-                    addView(FrameLayout(context).apply {
-                        addView(icon(R.drawable.ic_help, 18f, Cb.INK_500), FrameLayout.LayoutParams(dpi(18f), dpi(18f), Gravity.CENTER))
-                        layoutParams = LinearLayout.LayoutParams(dpi(30f), dpi(30f))
-                        contentDescription = "How handwriting in text fields works"
-                        isClickable = true
-                        background = ripple(999f)
-                        setOnClickListener { fieldsHelp() }
-                    })
-                })
-                addView(fieldsDetail)
-            }, weighted())
-            addView(fields.first)
-        })
-        choicesPopup = segment("Popup") { Prefs(context).choicesPopup = true; render(BandService.state.value) }
-        choicesInline = segment("In the field") { Prefs(context).choicesPopup = false; render(BandService.state.value) }
-        addView(settingRow("Word choices", "Swipe up while writing for a word's other readings", segmented(choicesPopup, choicesInline)))
         wristLeft = segment("Left") { setHand("left") }
         wristRight = segment("Right") { setHand("right") }
         addView(settingRow("Wrist", "Which arm the band is on", segmented(wristLeft, wristRight)))
@@ -572,27 +492,10 @@ class MainActivity : Screen() {
                 setTint(Cb.INK_900)
             }, null, null, null,
         )
-        val writing = Prefs(this).writeInFields
-        fields.first.text = if (writing) "On" else "Off"
-        if ((fields.second.pressed > .5f) != writing) fields.second.press(writing)
-        val elsewhere = Bands.writer(this)?.takeIf { it != Bands.selected(this) }
-        fieldsDetail.text = when {
-            BandService.instance?.bandWrites() == false -> "Needs band firmware build 64 or later: Setup › Band firmware updates"
-            elsewhere != null -> "On for the ${Bands.name(this, elsewhere).lowercase()}; turning it on here moves it"
-            writing && !WriteService.enabled(this) -> "Turn on its accessibility service to start"
-            else -> "In a text field, write letters on a table with a finger"
-        }
         // The wrist chosen here, else what the band reports.
         val wrist = Prefs(this).hand.takeIf { it != "band" } ?: state.hand
         for ((view, name) in listOf(wristLeft to "left", wristRight to "right")) {
             val active = wrist == name
-            view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
-            view.background = if (active) GradientDrawable().apply {
-                cornerRadius = dp(999f)
-                setColor(Cb.INK_900)
-            } else null
-        }
-        for ((view, active) in listOf(choicesPopup to Prefs(this).choicesPopup, choicesInline to !Prefs(this).choicesPopup)) {
             view.setTextColor(if (active) android.graphics.Color.WHITE else Cb.INK_700)
             view.background = if (active) GradientDrawable().apply {
                 cornerRadius = dp(999f)

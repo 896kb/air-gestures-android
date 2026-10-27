@@ -37,6 +37,13 @@ object Profiles {
     @Volatile
     var announced: String? = null
 
+    /**
+     * How handwriting starts in the announced app's text fields, as it said (`handwriting`:
+     * on, wait, gesture or off); null: as set in the Handwriting layer.
+     */
+    @Volatile
+    var announcedWriting: String? = null
+
     /** The app whose own profile counts: the one that announced itself, else the one seen. */
     val foreground: String?
         get() = announced ?: seen

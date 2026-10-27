@@ -227,6 +227,14 @@ class BandLink(
 
     /** A double tap in a text field: the pen goes down. */
     fun fieldPenDown() = synchronized(lock) { if (handle != 0L) Bridge.fieldPenDown(handle, now()) }
+    /** After the field typing asked before it (a field that starts with the pen up). */
+    fun fieldPenUp() = fieldSends.execute { synchronized(lock) { if (handle != 0L) Bridge.fieldPenUp(handle) } }
+    fun setFieldPopup(popup: Boolean) = synchronized(lock) { if (handle != 0L) Bridge.setFieldPopup(handle, popup) }
+
+    /** The Handwriting layer ([HandwritingLayer.json]); the next connection reads it anyway. */
+    fun setWritingLayer(json: String) = synchronized(lock) {
+        if (handle != 0L) runCatching { Bridge.setWritingLayer(handle, json) }.onFailure { log("handwriting layer: ${it.message}") }
+    }
 
     /** Debug: the band's own handwriting on or off (see Bridge.setBandHandwriting). */
     fun setBandHandwriting(on: Boolean) = debugSend { Bridge.setBandHandwriting(it, on) }
@@ -406,6 +414,7 @@ class BandLink(
                 Bridge.setLibrary(handle, Drawings.load(context).toJson())
                 Bridge.setTeaching(handle, teaching)
                 Bridge.setDragTeaching(handle, dragTeaching)
+                runCatching { Bridge.setWritingLayer(handle, HandwritingLayer.json(context)) }
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")

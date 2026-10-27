@@ -86,6 +86,9 @@ class WriteService : AccessibilityService() {
                 // No field yet, and the keyboard came up: the app may have focused one without a focus event.
                 if (node == null) {
                     if (FieldWriting.keyboard(from)) main.postDelayed(::catchFocused, KEYBOARD_SETTLE_MS)
+                    // A field waiting for Handwriting on/off whose app went.
+                    else if (waiting != null && !elsewhere(event) && FieldWriting.leaves(from, waitingApp, packageName, from == packageName && activity(event.className))
+                        && Profiles.announced != waitingApp) clearWaiting()
                     return
                 }
                 if (elsewhere(event) || !FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) return
@@ -161,11 +164,72 @@ class WriteService : AccessibilityService() {
             ?.let { enter(it, it.packageName?.toString()) }
     }
 
-    /** A text field has the focus: write into it, if the setting is on, the controls are and the band can. */
-    private fun enter(node: AccessibilityNodeInfo, from: String?) {
+    /** How handwriting starts in a field of [from]: as the app said when it announced itself, else as set; null: not at all. */
+    private fun startFor(from: String?): WriteStart? {
+        if (from != null && from == Profiles.announced) when (Profiles.announcedWriting) {
+            "off" -> return null
+            "on" -> return WriteStart.RIGHT_AWAY
+            "wait" -> return WriteStart.DOTS
+            "gesture" -> return WriteStart.GESTURE
+        }
+        return HandwritingLayer.start(this)
+    }
+
+    /** A focused field waiting for the Handwriting on/off gesture, and its app. */
+    private var waiting: AccessibilityNodeInfo? = null
+    private var waitingApp: String? = null
+
+    private fun wait(node: AccessibilityNodeInfo, from: String?) {
+        if (waiting == node) return
+        waiting = node
+        waitingApp = from
+        fieldDisplay = runCatching { node.window?.displayId }.getOrNull()
+        log("handwriting: waiting for Handwriting on/off in $from")
+        // The gesture turns it on: it goes over every profile meanwhile.
+        BandService.instance?.remap()
+    }
+
+    private fun clearWaiting() {
+        if (waiting == null) return
+        waiting = null
+        waitingApp = null
+        BandService.instance?.remap()
+    }
+
+    /** What goes over every profile while a field waits: Handwriting on/off's gestures turn it on. */
+    fun toggleOverlay(): Map<String, String> =
+        if (waiting == null) emptyMap() else HandwritingLayer.keysFor(this, WriteAction.TOGGLE).associateWith { WriteAction.TOGGLE.id }
+
+    /** Handwriting on/off: off in the field being written into (it waits for the gesture again), or on in the one waiting. */
+    fun toggle(): String? {
+        val now = field
+        if (now != null) {
+            val from = app
+            leave("turned off with a gesture")
+            wait(now, from)
+            return null
+        }
+        val node = waiting ?: return "no text field to write in"
+        val from = waitingApp
+        clearWaiting()
+        enter(node, from, forced = true)
+        return null
+    }
+
+    /**
+     * A text field has the focus: write into it, if the setting is on, the controls are and the
+     * band can, as its start says ([startFor]); [forced]: Handwriting on/off turned it on.
+     */
+    private fun enter(node: AccessibilityNodeInfo, from: String?, forced: Boolean = false) {
         if (FieldWriting.refusal(Bands.writer(this) != null, writerState()) != null) return
         val service = BandService.instance ?: return
         if (service.bandWrites(writer()) != true) return
+        val start = if (forced) WriteStart.RIGHT_AWAY else startFor(from) ?: return
+        if (start == WriteStart.GESTURE && field?.let { it == node } != true) {
+            if (field != null) leave("another field took the focus")
+            return wait(node, from)
+        }
+        clearWaiting()
         val same = field?.let { it == node } == true
         // Moving to another field: the menu or word choices shown in the last one go first.
         if (!same) dropInline()
@@ -177,8 +241,9 @@ class WriteService : AccessibilityService() {
         restart(service, node)
         // Gestures edit the field meanwhile instead of running their actions.
         service.field = gestures
-        pen = true
-        log("handwriting: writing into a field in $from")
+        pen = start != WriteStart.DOTS
+        if (!pen) service.fieldPenUp()
+        log("handwriting: writing into a field in $from" + if (pen) "" else " (write .. to start)")
         main.removeCallbacks(tick)
         main.post(tick)
     }
@@ -268,6 +333,7 @@ class WriteService : AccessibilityService() {
         dropInline()
         expected = null
         main.removeCallbacks(lookAgain)
+        clearWaiting()
         if (field == null) return
         field = null
         app = null
@@ -280,17 +346,19 @@ class WriteService : AccessibilityService() {
     }
 
     /**
-     * Gestures in a field, instead of their actions:
-     * - swipe up: the word's suggestions, or after a space the likely next words (up again
-     *   turns to the last word's); swipe left and right turn through them, a tap takes one,
-     *   swipe down cancels;
-     * - otherwise swipe left and right move the cursor, and a tap starts selecting: then
-     *   left and right grow the selection from where the tap was, until the next tap (writing
-     *   replaces what's selected);
-     * - swipe down: the edit menu above the keyboard (a popup whichever way word choices show): delete word, delete all,
-     *   new line, and lists of punctuation and emoji; left and right choose, a tap does it, swipe up closes
-     *   (or goes back from the list);
-     * - a double tap puts the pen down.
+     * Gestures in a field, instead of their actions, as the Handwriting layer sets them
+     * ([HandwritingLayer], [WriteAction]; by default):
+     * - Word choices (swipe up): the word's suggestions, or after a space the likely next words
+     *   (again turns to the last word's), in a popup or in the text; the cursor gestures turn
+     *   through them, Select takes one, the edit menu's gesture cancels;
+     * - otherwise Cursor left and right (swipes) move the cursor, and Select (a tap) starts
+     *   selecting: then left and right grow the selection from where it was, until the next
+     *   Select (writing replaces what's selected);
+     * - Edit menu (swipe down): delete word, delete all, new line, and lists of punctuation
+     *   and emoji, in a popup above the keyboard or in the text; the cursor gestures choose,
+     *   Select does it, either menu's gesture closes (or goes back from a list);
+     * - Del word and Del all at once; Pen down (a double tap), Stop writing (the pen up), and
+     *   Handwriting on/off (back to gestures in this field until it's made again).
      */
     private val gestures = object : BandService.Field {
         override fun gesture(label: String) = main.post { onGesture(label) }.let {}
@@ -301,48 +369,69 @@ class WriteService : AccessibilityService() {
     private var choosing = false
     private var anchor: Int? = null
 
+    /** Where the word choices and the edit menu now open show: the app's popup, or in the field. */
+    private var choicesPopup = true
+    private var menuPopup = true
+
+    /** A gesture the field took ([HandwritingLayer]): what it's set to do there. */
     private fun onGesture(label: String) {
         val node = field ?: return
         val service = BandService.instance ?: return
         lastWritten = SystemClock.uptimeMillis()
+        val gesture = Gesture.entries.firstOrNull { it.label.lowercase() == label } ?: return
+        // Nothing (or As usual, which the field doesn't take).
+        val action = WriteAction.of(HandwritingLayer.load(this)[gesture.key]) ?: return
         val open = menu
         when {
-            label == "index double tap" -> service.fieldPenDown()
-            open != null -> onMenuGesture(service, node, open, label)
-            choosing -> when (label) {
-                "swipe left" -> service.fieldChooseStep(false)
-                "swipe right" -> service.fieldChooseStep(true)
-                "index tap" -> {
+            action == WriteAction.PEN_DOWN -> service.fieldPenDown()
+            action == WriteAction.STOP -> service.fieldPenUp()
+            action == WriteAction.TOGGLE -> toggle()
+            open != null -> onMenuAction(service, node, open, action)
+            choosing -> when (action) {
+                WriteAction.LEFT -> service.fieldChooseStep(false)
+                WriteAction.RIGHT -> service.fieldChooseStep(true)
+                WriteAction.SELECT -> {
                     service.fieldChoosePick()
                     choosing = false
                     popup.hide()
                 }
-                // Up again on the next words turns to the last word's readings.
-                "swipe up" -> choosing = service.fieldChoose()
-                "swipe down" -> {
+                // Again on the next words turns to the last word's readings.
+                WriteAction.CHOICES_POPUP, WriteAction.CHOICES_INLINE -> choosing = service.fieldChoose()
+                else -> {
                     service.fieldChooseCancel()
                     choosing = false
                     popup.hide()
+                    // A delete still deletes, once the word is back as it was.
+                    if (action == WriteAction.DELETE_WORD || action == WriteAction.DELETE_ALL) onGesture(label)
                 }
             }
-            label == "swipe up" -> {
+            action == WriteAction.CHOICES_POPUP || action == WriteAction.CHOICES_INLINE -> {
                 anchor = null
+                choicesPopup = action == WriteAction.CHOICES_POPUP
+                service.setFieldPopup(choicesPopup)
                 choosing = service.fieldChoose()
                 if (!choosing) buzz(false)
             }
-            label == "swipe down" -> {
+            action == WriteAction.MENU_POPUP || action == WriteAction.MENU_INLINE -> {
                 anchor = null
+                menuPopup = action == WriteAction.MENU_POPUP
                 menu = Menu(MAIN, 0)
                 showMenu(node)
             }
-            label == "index tap" -> {
+            action == WriteAction.SELECT -> {
                 anchor = if (anchor == null) cursor(node) else null
                 log(if (anchor != null) "handwriting: selecting (left and right, tap to stop)" else "handwriting: selection kept")
             }
-            label == "swipe left" -> moveCursor(service, node, -1)
-            label == "swipe right" -> moveCursor(service, node, 1)
+            action == WriteAction.LEFT -> moveCursor(service, node, -1)
+            action == WriteAction.RIGHT -> moveCursor(service, node, 1)
+            action == WriteAction.DELETE_WORD -> deleteWord(service, node)
+            action == WriteAction.DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
         }
     }
+
+    /** The word before the cursor (and the spaces after it) goes. */
+    private fun deleteWord(service: BandService, node: AccessibilityNodeInfo) =
+        edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
 
     /** The edit menu (swipe down): which list, and which entry is picked. */
     private data class Menu(val items: List<String>, val pick: Int)
@@ -357,7 +446,7 @@ class WriteService : AccessibilityService() {
         if (open == null) {
             popup.hide()
             setInline(node, "")
-        } else if (Prefs(this).choicesPopup) {
+        } else if (menuPopup) {
             popup.show(node, open.items, open.pick, MENU_HINT, aboveKeyboard = true)
         } else {
             // Set apart from the word before it by a space (one already there will do), which goes with it.
@@ -393,20 +482,30 @@ class WriteService : AccessibilityService() {
         inline = text
     }
 
-    private fun onMenuGesture(service: BandService, node: AccessibilityNodeInfo, open: Menu, label: String) {
+    /**
+     * In the edit menu: the cursor gestures choose, Select does it, either menu's gesture goes
+     * back from a list (or closes it), and the deletes close it and delete.
+     */
+    private fun onMenuAction(service: BandService, node: AccessibilityNodeInfo, open: Menu, action: WriteAction) {
         val n = open.items.size
-        when (label) {
-            "swipe left" -> menu = open.copy(pick = (open.pick + n - 1) % n)
-            "swipe right" -> menu = open.copy(pick = (open.pick + 1) % n)
-            "swipe up" -> menu = if (open.items === MAIN) null else Menu(MAIN, 0)
-            "index tap" -> {
+        when (action) {
+            WriteAction.LEFT -> menu = open.copy(pick = (open.pick + n - 1) % n)
+            WriteAction.RIGHT -> menu = open.copy(pick = (open.pick + 1) % n)
+            WriteAction.CHOICES_POPUP, WriteAction.CHOICES_INLINE, WriteAction.MENU_POPUP, WriteAction.MENU_INLINE ->
+                menu = if (open.items === MAIN) null else Menu(MAIN, 0)
+            WriteAction.DELETE_WORD, WriteAction.DELETE_ALL -> {
+                menu = null
+                setInline(node, "")
+                if (action == WriteAction.DELETE_WORD) deleteWord(service, node) else edit(service, node) { _, _ -> "" to "" }
+            }
+            WriteAction.SELECT -> {
                 val item = open.items[open.pick]
                 menu = null
                 setInline(node, "")
                 when {
                     open.items === MAIN && item == PUNCTUATION_ITEM -> menu = Menu(PUNCTUATION, 0)
                     open.items === MAIN && item == EMOJI_ITEM -> menu = Menu(EMOJI, 0)
-                    item == DELETE_WORD -> edit(service, node) { before, after -> before.trimEnd().trimEnd { !it.isWhitespace() } to after }
+                    item == DELETE_WORD -> deleteWord(service, node)
                     item == DELETE_ALL -> edit(service, node) { _, _ -> "" to "" }
                     item == NEW_LINE -> edit(service, node) { before, after -> before + "\n" to after }
                     // A mark that ends a word or sentence goes straight after it, then a space.
@@ -416,6 +515,7 @@ class WriteService : AccessibilityService() {
                     else -> edit(service, node) { before, after -> before + item to after }
                 }
             }
+            else -> Unit
         }
         showMenu(node)
     }
@@ -502,7 +602,7 @@ class WriteService : AccessibilityService() {
             }
             choosing = answer.optBoolean("choosing")
             val list = answer.optJSONArray("suggestions")
-            if (choosing && list != null && Prefs(this@WriteService).choicesPopup) {
+            if (choosing && list != null && choicesPopup) {
                 val hint = if (answer.optBoolean("next")) NEXT_HINT else CHOOSE_HINT
                 popup.show(node, (0 until list.length()).map { list.getString(it) }, answer.optInt("highlight"), hint)
             } else if (menu == null) {

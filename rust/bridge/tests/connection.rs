@@ -496,3 +496,18 @@ fn without_a_field_gestures_run_as_usual() {
     gesture(&mut connection, &mut band, 7, THUMB, 0, 3.0);
     assert_eq!(taken(&mut connection), (vec!["media.next".to_owned()], vec!["@gesture swipe down".to_owned()]));
 }
+
+#[test]
+fn stop_writing_lifts_the_pen_and_a_bad_layer_is_refused() {
+    let (mut connection, _band) = writing(false);
+    connection.set_writing_layer(r#"{"takes": ["swipe_left", "index_double"], "pen": ["index_double"], "dials": true}"#).unwrap();
+    assert!(connection.set_writing_layer("not json").is_err());
+    connection.field_pen_up();
+    connection.type_symbols(&[letter('a')], 3.0);
+    let look = field(&mut connection, 3.0);
+    assert_eq!(look["pen"], serde_json::json!(false));
+    assert!(look["edits"].as_array().unwrap().is_empty(), "{look}");
+    connection.field_pen_down(3.5);
+    connection.type_symbols(&[letter('b')], 3.6);
+    assert_eq!(field(&mut connection, 3.6)["edits"].as_array().unwrap().len(), 1);
+}

@@ -15,6 +15,7 @@ class GesturesActivity : GestureScreen() {
     private lateinit var band: LinearLayout
     private lateinit var profiles: LinearLayout
     private lateinit var calls: LinearLayout
+    private lateinit var handwriting: LinearLayout
     private lateinit var sequences: LinearLayout
     private lateinit var drawings: LinearLayout
     private lateinit var devices: LinearLayout
@@ -26,6 +27,7 @@ class GesturesActivity : GestureScreen() {
         band = column()
         profiles = column(gap = 8f)
         calls = column()
+        handwriting = column()
         sequences = column(gap = 8f)
         drawings = column()
         devices = column()
@@ -42,6 +44,12 @@ class GesturesActivity : GestureScreen() {
             addView(card(null, drawings))
             addView(card("Sequences", sequences))
             addView(card(null, devices))
+            addView(card("Handwriting", column(gap = 8f).apply {
+                addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
+                    text = "Write letters with a finger into the text field in focus; what the gestures do there."
+                })
+                addView(handwriting)
+            }))
             addView(card("During calls", column(gap = 8f).apply {
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
                     text = "While the phone rings or a call is on, in every profile. Phone calls only; WhatsApp and other app calls can't be answered by another app."
@@ -164,6 +172,14 @@ class GesturesActivity : GestureScreen() {
         })
         devices.removeAllViews()
         devices.addView(homeDevicesRow())
+        handwriting.removeAllViews()
+        val writer = Bands.writer(this)
+        val writing = when {
+            writer == null -> "Off"
+            Bands.two(this) -> "On · ${Bands.name(this, writer)} · starts ${HandwritingLayer.start(this).label.lowercase()}"
+            else -> "On · starts ${HandwritingLayer.start(this).label.lowercase()}"
+        }
+        handwriting.addView(navRow(R.drawable.ic_pencil, "Handwriting", detail = writing) { open<HandwritingActivity>() })
         calls.removeAllViews()
         val prefs = Prefs(this)
         val set = Gesture.entries.count { !it.drag && prefs.callActionId(it) != Mappings.AS_USUAL }

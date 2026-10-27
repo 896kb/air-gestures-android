@@ -98,6 +98,8 @@ class Actions(
             "nav.select" -> return navigate { it.select() }
             "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }.also { if (it == null && fromBand) stepDetent() }
             "nav.scroll_back" -> return navigate { it.scroll(forward = false) }.also { if (it == null && fromBand) stepDetent() }
+            // A text field waiting for it (see WriteService.toggleOverlay).
+            WriteAction.TOGGLE.id -> return WriteService.instance?.toggle() ?: "handwriting needs its accessibility service on"
             else -> {
                 val sent = Mappings.sent(action)
                 return when {

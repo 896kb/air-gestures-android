@@ -142,6 +142,13 @@ class MappingsTest {
         assertEquals("nav.next", org.json.JSONObject(Mappings.profilesJson(all)).getJSONArray("profiles").getJSONObject(1).getJSONObject("map").getString("swipe_up"))
     }
 
+    @Test fun `an overlay goes over every profile, its palm overrides too`() {
+        val over = Mappings.Input(list, band, calls, input.drawings, input.calibrations, "left", overlay = mapOf("index_tap" to WriteAction.TOGGLE.id))
+        val json = org.json.JSONObject(Mappings.profilesJson(over)).getJSONArray("profiles")
+        for (i in 0 until json.length()) assertEquals(WriteAction.TOGGLE.id, json.getJSONObject(i).getJSONObject("map").getString("index_tap"))
+        assertFalse(json.getJSONObject(0).getJSONObject("palm").has("index_tap"))
+    }
+
     @Test fun `the band's palm goes with gestures and dial steps, an override keeps its own`() {
         assertEquals(Mappings.Automation.Gesture("index_drag_up", "sideways", "Music"),
             Mappings.madeWith(Mappings.sent("automation/Music:index_drag_up")!!, "sideways"))

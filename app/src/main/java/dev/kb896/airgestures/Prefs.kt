@@ -104,6 +104,8 @@ class Prefs(context: Context, val slot: Int = Bands.selected(context)) {
         listOf("left", "right").associateWith { Calibrations.get(context, bandAddress, it) },
         hand,
         Drawings.load(context).drawings.map { it.name }.toSet(),
+        // A text field waiting for Handwriting on/off: that gesture turns it on, on the writing band.
+        if (!all && Bands.writer(context) == slot) WriteService.instance?.toggleOverlay().orEmpty() else emptyMap(),
     ))
 
     /**

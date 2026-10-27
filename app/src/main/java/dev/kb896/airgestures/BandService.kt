@@ -241,6 +241,11 @@ class BandService : Service() {
     }
     fun fieldEdits() = pen()?.fieldEdits()
     fun fieldPenDown() = pen()?.fieldPenDown()
+    fun fieldPenUp() = pen()?.fieldPenUp()
+    fun setFieldPopup(popup: Boolean) = pen()?.setFieldPopup(popup)
+
+    /** The Handwriting layer changed: every band gets it. */
+    fun writingLayerChanged() = HandwritingLayer.json(this).let { json -> all().forEach { it.link.setWritingLayer(json) } }
     fun fieldChoose() = pen()?.fieldChoose() == true
     fun fieldChooseStep(forward: Boolean) = pen()?.fieldChooseStep(forward)
     fun fieldChoosePick() = pen()?.fieldChoosePick()

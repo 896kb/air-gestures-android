@@ -1,24 +1,27 @@
-# The help behind the ? by "Handwriting in text fields" on Home.
+# The help behind the ? on Gestures › Handwriting.
 # "## " starts a section (its heading); the lines under it are its text. Lines joined
 # into one paragraph; a blank line starts a new paragraph. "#" lines are notes like these.
 
 ## Writing
 Tap into any text field and write with your index finger on a table, your leg or any surface. The band reads each letter and the dictionary corrects the word as you go. Draw a short line to the right for a space (a clear pause between words often does too), and a short line to the left to backspace.
 
+## How it starts
+Right away: the pen is down as the field gets the focus (one buzz). After ..: the pen starts up and your gestures stay as usual until you write two dots (..). On a gesture: handwriting stays off in the field until you make the gesture set to Handwriting on/off; the same gesture turns it off again.
+
 ## The pen
-The pen is down when you enter a field (one buzz): what you write is typed. After 8 seconds with nothing written it lifts (two buzzes), so other hand movements don't type. To put it down again, double tap your index finger or write two dots (..).
+While the pen is down, what you write is typed and the gestures do what While writing sets. After 8 seconds with nothing written it lifts (two buzzes): nothing more is typed, and your gestures go back to what they do in your profile, except the ones that bring the pen back (Pen down, by default a double tap of your index finger, or Handwriting on/off). Write two dots (..) to put it down again too. Stop writing lifts it at once.
 
-## Word choices: swipe up
-Swipe up for the other corrections of the word you're writing (or the last one). Right after a space, swipe up shows next word predictions; swipe up again for the last word's readings. Swipe left and right to move through them, tap to select, swipe down to cancel.
+## While writing
+Gestures › Handwriting sets what each gesture does while the pen is down: As usual (your profile's action), Nothing, or one of the writing actions. By default: swipe left and right move the cursor, swipe up shows word choices, swipe down the edit menu, an index tap selects, an index double tap puts the pen down; everything else does nothing.
 
-## The edit menu: swipe down
-Swipe down for a menu above the keyboard: Del word, Del all, ↵ (a new line), ! (punctuation), and 🙂 (emoji menu). Swipe left and right to choose, tap to select, swipe up to close.
+## Word choices
+Word choices show the other corrections of the word you're writing (or the last one); right after a space, the likely next words, and the same gesture again turns to the last word's readings. Cursor left and right move through them, Select takes one, the edit menu's gesture cancels. The popup shows them in a row above the text field and leaves the field as it is until you take one; in text puts them into the text itself in place of the word ("there · three · these").
 
-## Popup or In the field
-Popup shows the choices in a row just above the text field and leaves the field as it is until you take one. In the field puts the choices into the text itself in place of the word ("there · three · these"), still swipe left/right+tap to select the first one.
+## The edit menu
+Del word, Del all, ↵ (a new line), ! (punctuation) and 🙂 (emoji), in a popup above the keyboard or in the text. Cursor left and right choose, Select does it, either menu's gesture closes it. Del word and Del all can also go straight on a gesture of their own.
 
 ## The cursor and selecting
-Swipe left or right to move the cursor. Tap your index finger to start selecting: left and right then grow the selection, and a second tap stops. Writing replaces what's selected.
+Cursor left or right moves the cursor. Select starts selecting: left and right then grow the selection, and Select again stops. Writing replaces what's selected.
 
 ## Your keyboard and touch
 You can switch between typing on your device's keyboard or with the band, they will work together fine.

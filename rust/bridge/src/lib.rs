@@ -8,7 +8,7 @@
 //! connection (`report`, `teach`). Also the Meta sign-in and the ownership claim
 //! (`metaauth`, `meta`, `claim`), ported from the Linux app.
 
-use band_core::controls::{Class, Controls, DragMode, Finger, Output, Unused};
+use band_core::controls::{Class, Controls, DragMode, Finger, Gesture, Output, Unused};
 use band_core::events::{Event, Hand};
 use band_core::handwriting::Written;
 use band_core::haptics::HapticsCommand;
@@ -78,6 +78,8 @@ pub struct Connection {
     left_edits: Vec<fieldtext::Edit>,
     /// The band's roll right now, for the calibration screen (see [`Self::palm_now`]).
     roll: palmlive::LiveRoll,
+    /// The Handwriting layer (see [`Self::set_writing_layer`]).
+    writing_layer: WritingLayer,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -151,6 +153,7 @@ impl Connection {
             field_ended: false,
             untyped_said: false,
             left_edits: Vec::new(),
+            writing_layer: WritingLayer::default(),
             roll: palmlive::LiveRoll::default(),
         })
     }
@@ -555,7 +558,45 @@ impl Connection {
             field.set_popup(popup);
             field
         });
+        self.sync_writing();
         bytes
+    }
+
+    /// The Handwriting layer: `{"takes": [gesture keys], "pen": [gesture keys], "dials": bool}`.
+    /// While the pen is down the field takes `takes` (the others act as usual, dials and sliders
+    /// step when `dials`); while it's up only `pen` (what puts it down or turns handwriting
+    /// off), and dials step. Until set: every gesture, no dials, the index double tap.
+    pub fn set_writing_layer(&mut self, json: &str) -> Result<(), String> {
+        let value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let keys = |name: &str| -> Vec<Gesture> {
+            value[name].as_array().into_iter().flatten().filter_map(|k| k.as_str().and_then(Gesture::from_key)).collect()
+        };
+        self.writing_layer = WritingLayer { takes: keys("takes"), pen: keys("pen"), dials: value["dials"].as_bool().unwrap_or(false) };
+        self.sync_writing();
+        Ok(())
+    }
+
+    /// The controls take what the layer says for the pen as it is now.
+    fn sync_writing(&mut self) {
+        let down = self.field.as_ref().is_none_or(|field| field.pen());
+        let layer = &self.writing_layer;
+        let (takes, dials) = if down { (layer.takes.clone(), layer.dials) } else { (layer.pen.clone(), true) };
+        self.controls.set_writing_layer(takes, dials);
+    }
+
+    /// The pen up in the text field (Stop writing; or a field that starts with it up).
+    pub fn field_pen_up(&mut self) {
+        if let Some(field) = self.field.as_mut() {
+            field.pen_up();
+        }
+        self.sync_writing();
+    }
+
+    /// Where the next word choices show: the app's popup, or in the field.
+    pub fn set_field_popup(&mut self, popup: bool) {
+        if let Some(field) = self.field.as_mut() {
+            field.set_popup(popup);
+        }
     }
 
     /// The controls went off while typing into a field: it goes, the controls stop writing and
@@ -609,16 +650,20 @@ impl Connection {
         };
         field.tick(now);
         let choices = field.choices();
-        serde_json::json!({
+        let pen = field.pen();
+        let out = serde_json::json!({
             "active": true,
             "edits": field.take_edits(),
-            "pen": field.pen(),
+            "pen": pen,
             "choosing": field.choosing(),
             "next": field.choosing_next(),
             "suggestions": choices.as_ref().map(|(list, _)| list.clone()),
             "highlight": choices.as_ref().map(|(_, pick)| *pick),
         })
-        .to_string()
+        .to_string();
+        // The pen may have lifted on its own.
+        self.sync_writing();
+        out
     }
 
     /// A swipe left in a text field: take back the last word. False when none of ours was left
@@ -663,6 +708,7 @@ impl Connection {
         if let Some(field) = self.typing() {
             field.pen_down(now);
         }
+        self.sync_writing();
     }
 
     /// What the band wrote goes to the text field being typed in, if any (taken either way, so
@@ -687,6 +733,8 @@ impl Connection {
             return;
         };
         let untyped = written.iter().filter(|symbol| !field.take(symbol, words.as_deref(), now)).count();
+        // ".." may have put the pen down.
+        self.sync_writing();
         self.untyped_said = false;
         if let Some(note) = written_note(written.len(), untyped) {
             self.log.push(note);
@@ -1086,5 +1134,18 @@ mod tests {
                 HapticsCommand::Vibrate { duration_ms: 300, amplitude: 255 },
             ],
         );
+    }
+}
+
+/// The Handwriting layer as the app sets it (see [`Connection::set_writing_layer`]).
+struct WritingLayer {
+    takes: Vec<Gesture>,
+    pen: Vec<Gesture>,
+    dials: bool,
+}
+
+impl Default for WritingLayer {
+    fn default() -> Self {
+        Self { takes: Gesture::ALL.to_vec(), pen: vec![Gesture::IndexDouble], dials: false }
     }
 }
