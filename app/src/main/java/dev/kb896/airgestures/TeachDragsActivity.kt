@@ -161,7 +161,7 @@ class TeachDragsActivity : Screen() {
             if (saved) addView(pill("Done", R.drawable.ic_check) { finish() }.first)
             // Back to band-core's measured drags (the owner's right hand).
             if (stored) {
-                addView(pill("Use the measured ones") {
+                addView(pill("Revert to defaults") {
                     Calibrations.update(this@TeachDragsActivity, address, hand) { it.copy(drags = null) }
                     BandService.instance?.remap()
                     // A fresh start: the next pinch mustn't save the old set again.
