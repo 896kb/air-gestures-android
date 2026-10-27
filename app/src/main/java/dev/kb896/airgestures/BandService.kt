@@ -266,8 +266,8 @@ class BandService : Service() {
 
     /** Set a band to this wrist now and on every later connection. */
     fun setHand(hand: String, slot: Int = Bands.selected(this)) {
-        Prefs(this, slot).hand = hand
-        // The other band's `band` tag and log mark may follow the wrist.
+        // The other band goes on the other wrist; both bands' `band` tags and log marks follow.
+        Bands.setHand(this, slot, hand)
         remap()
     }
 

@@ -99,6 +99,16 @@ object Bands {
         BandService.selectionChanged(context)
     }
 
+    /**
+     * [slot] goes on [hand]: with two bands, the other one goes on the other wrist (one band per
+     * wrist), so neither is left on the same one.
+     */
+    fun setHand(context: Context, slot: Int, hand: String) {
+        Prefs(context, slot).hand = hand
+        val other = when (hand) { "left" -> "right"; "right" -> "left"; else -> return }
+        for (it in slots(context)) if (it != slot) Prefs(context, it).hand = other
+    }
+
     /** The band handwriting in text fields is on for, if any (one at most). */
     fun writer(context: Context): Int? = slots(context).firstOrNull { Prefs(context, it).writeInFields }
 

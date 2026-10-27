@@ -431,7 +431,7 @@ class MainActivity : Screen() {
     }
 
     private fun setHand(hand: String) {
-        BandService.instance?.setHand(hand) ?: run { Prefs(this).hand = hand }
+        BandService.instance?.setHand(hand) ?: Bands.setHand(this, Bands.selected(this), hand)
         render(BandService.state.value)
         // Judgement 16: a wrist this band has no palm positions for asks to calibrate (once a band is known).
         val band = Prefs(this).bandAddress ?: return
