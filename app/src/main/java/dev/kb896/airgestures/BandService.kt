@@ -879,7 +879,9 @@ class BandService : Service() {
          * band's state from now on ([ACTION_STATUS]), and once right away.
          */
         fun announce(context: Context, pkg: String?) {
+            val before = Profiles.announced
             front(context) { Profiles.announced = pkg }
+            if (pkg == null && before != null) WriteService.instance?.appLeft(before)
             if (pkg == null) return
             val prefs = Prefs(context)
             val first = pkg !in prefs.announced

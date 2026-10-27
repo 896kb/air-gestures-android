@@ -89,6 +89,8 @@ class WriteService : AccessibilityService() {
                     return
                 }
                 if (elsewhere(event) || !FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) return
+                // The field's app said it's in front (and says when it leaves): another app's window isn't it leaving.
+                if (from != packageName && app != null && Profiles.announced == app) return
                 val why = if (from == packageName) "a screen of this app came up" else "$from came up"
                 // A panel or pop-up over the app (Samsung's edge panel comes up with the keyboard)
                 // leaves the field focused: only once it isn't does writing end.
@@ -246,6 +248,11 @@ class WriteService : AccessibilityService() {
 
     /** A lesson or a teach screen takes the band's gestures: back to them (main thread). */
     fun lessonStarted() = leave("a lesson started")
+
+    /** An app that announced itself in front ([ProfileReceiver]) said it left: writing into its field ends. */
+    fun appLeft(pkg: String) {
+        if (field != null && app == pkg) leave("$pkg said it left")
+    }
 
     /** Back to gestures. */
     private fun leave(why: String) {
