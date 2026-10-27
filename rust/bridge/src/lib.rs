@@ -738,6 +738,7 @@ impl Connection {
                     "serial": info.serial, "release_branch": info.release_branch,
                     "models": info.models, "handwriting": info.handwriting(),
                     "tag": firmware::band_tag(&info.serial),
+                    "fields": info.fields,
                 })
                 .to_string()
             },
