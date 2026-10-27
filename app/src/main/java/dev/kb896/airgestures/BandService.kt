@@ -343,17 +343,12 @@ class BandService : Service() {
         override fun onPhase(phase: Phase, band: String?) = main.post {
             // A disconnect ends an open draw session without a word from band-core: close the pad.
             if (phase != Phase.CONNECTED) pad.cancelled()
-            val arrived = phase == Phase.CONNECTED && !connected
             state.update {
                 val back = phase == Phase.CONNECTED && install?.stage == "restarting"
                 copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
             }
             // Its wrist may tell it from the other band now: the `band` tags and marks follow.
             if (phase == Phase.CONNECTED && Bands.two(this@BandService)) this@BandService.remap()
-            // Once per connection: everything the band says about itself but its serial (colour, size?).
-            if (arrived) main.postDelayed({
-                link.deviceInfo()?.optString("fields")?.takeIf { it.isNotEmpty() }?.let { onLog("device info: $it") }
-            }, 1000)
             refreshNotification()
             watchIdle()
             broadcastStatus()
