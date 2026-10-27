@@ -111,6 +111,16 @@ object HandwritingLayer {
         changed()
     }
 
+    /** What dots can do with the pen up that brings writing on: put the pen down, flip it, or turn handwriting on. */
+    private val STARTERS = setOf(WriteAction.PEN_DOWN.id, WriteAction.PEN_TOGGLE.id, WriteAction.TOGGLE.id)
+
+    /**
+     * Dots (two or three) can start writing: then On a gesture keeps the band's handwriting
+     * model listening in a field with the pen up (dots are only seen there), instead of
+     * waiting in gesture mode.
+     */
+    fun dotsStart(context: Context) = dots(context) in STARTERS || dots3(context) in STARTERS
+
     fun start(context: Context) = WriteStart.of(prefs(context).getString(START, null))
 
     fun setStart(context: Context, start: WriteStart) = prefs(context).edit().putString(START, start.key).apply()

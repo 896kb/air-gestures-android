@@ -203,6 +203,16 @@ class WriteService : AccessibilityService() {
     /** Handwriting on/off: off in the field being written into (it waits for the gesture again), or on in the one waiting. */
     fun toggle(): String? {
         val now = field
+        // Listening with the pen up (After .., or dots that start it): on is the pen down.
+        if (now != null && !pen) {
+            BandService.instance?.fieldPenDown()
+            return null
+        }
+        // Dots can bring it back: off is the pen up, the model still listening for them.
+        if (now != null && HandwritingLayer.dotsStart(this)) {
+            BandService.instance?.fieldPenUp()
+            return null
+        }
         if (now != null) {
             val from = app
             leave("turned off with a gesture")
@@ -225,7 +235,9 @@ class WriteService : AccessibilityService() {
         val service = BandService.instance ?: return
         if (service.bandWrites(writer()) != true) return
         val start = if (forced) WriteStart.RIGHT_AWAY else startFor(from) ?: return
-        if (start == WriteStart.GESTURE && field?.let { it == node } != true) {
+        // On a gesture, when dots can start it too: the handwriting model listens with the pen up (as After ..).
+        val listening = start == WriteStart.DOTS || (start == WriteStart.GESTURE && HandwritingLayer.dotsStart(this))
+        if (start == WriteStart.GESTURE && !listening && field?.let { it == node } != true) {
             if (field != null) leave("another field took the focus")
             return wait(node, from)
         }
@@ -241,7 +253,7 @@ class WriteService : AccessibilityService() {
         restart(service, node)
         // Gestures edit the field meanwhile instead of running their actions.
         service.field = gestures
-        pen = start != WriteStart.DOTS
+        pen = !listening
         if (!pen) service.fieldPenUp()
         log("handwriting: writing into a field in $from" + if (pen) "" else " (write .. to start)")
         main.removeCallbacks(tick)

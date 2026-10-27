@@ -89,11 +89,16 @@ class HandwritingActivity : GestureScreen() {
             text = when (now) {
                 WriteStart.RIGHT_AWAY -> "The pen is down as the field gets the focus."
                 WriteStart.DOTS -> "The pen starts up: your gestures stay as usual until you write two dots (..) or use Pen down."
-                WriteStart.GESTURE -> "Off until you make the gesture set to Handwriting on/off below; it turns it off again too."
+                WriteStart.GESTURE -> if (HandwritingLayer.dotsStart(this)) {
+                    "Off until you make the gesture set to Handwriting on/off below, or write two dots (..); the gesture turns it off again too. " +
+                        "The band listens for the dots in a text field meanwhile, your gestures as usual."
+                } else {
+                    "Off until you make the gesture set to Handwriting on/off below; it turns it off again too."
+                }
             }
         })
         // On a gesture with none set: it would never start.
-        if (now == WriteStart.GESTURE && HandwritingLayer.load(this).values.none { it == WriteAction.TOGGLE.id }) {
+        if (now == WriteStart.GESTURE && !HandwritingLayer.dotsStart(this) && HandwritingLayer.load(this).values.none { it == WriteAction.TOGGLE.id }) {
             start.addView(Cb.text(this, 13f, R.font.geist_semibold, WARNING_RED).apply {
                 text = "No gesture is set to Handwriting on/off yet, so handwriting never starts. Set one under While writing."
                 setLineSpacing(0f, 1.3f)
