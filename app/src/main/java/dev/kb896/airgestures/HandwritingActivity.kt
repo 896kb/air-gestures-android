@@ -89,7 +89,7 @@ class HandwritingActivity : GestureScreen() {
             text = when (now) {
                 WriteStart.RIGHT_AWAY -> "The pen is down as the field gets the focus."
                 WriteStart.DOTS -> "The pen starts up: your gestures stay as usual until you write two dots (..) or use Pen down."
-                WriteStart.GESTURE -> if (HandwritingLayer.dotsStart(this)) {
+                WriteStart.GESTURE -> if (HandwritingLayer.dotsStart(this@HandwritingActivity)) {
                     "Off until you make the gesture set to Handwriting on/off below, or write two dots (..); the gesture turns it off again too. " +
                         "The band listens for the dots in a text field meanwhile, your gestures as usual."
                 } else {
