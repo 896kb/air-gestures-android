@@ -46,12 +46,13 @@ class ProfileActivity : GestureScreen() {
             card(null, drawings),
         )
         show(pageColumn().apply {
+            for (view in mappings) addView(view)
+            // Rarely used: below the mappings it replaces, above the apps.
             addView(card(null, settingRow(
                 "Send everything to automation",
                 "Every gesture, dial, drag and drawing, by its own name and with your palm",
                 sendAll.first,
             )))
-            for (view in mappings) addView(view)
             addView(card("Apps", apps))
             addView(actions)
         }, title = Profiles.load(this).profile(profileId)?.name ?: "Profile")
