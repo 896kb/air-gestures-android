@@ -92,6 +92,13 @@ class HandwritingActivity : GestureScreen() {
                 WriteStart.GESTURE -> "Off until you make the gesture set to Handwriting on/off below; it turns it off again too."
             }
         })
+        // On a gesture with none set: it would never start.
+        if (now == WriteStart.GESTURE && HandwritingLayer.load(this).values.none { it == WriteAction.TOGGLE.id }) {
+            start.addView(Cb.text(this, 13f, R.font.geist_semibold, WARNING_RED).apply {
+                text = "No gesture is set to Handwriting on/off yet, so handwriting never starts. Set one under While writing."
+                setLineSpacing(0f, 1.3f)
+            })
+        }
     }
 
     private fun renderRows() {
@@ -133,11 +140,8 @@ class HandwritingActivity : GestureScreen() {
                 render()
             }
         })
-        // A start that needs a gesture without one.
-        val toggles = layer.values.any { it == WriteAction.TOGGLE.id }
+        // What the start needs and nothing gives.
         val text = when {
-            HandwritingLayer.start(this) == WriteStart.GESTURE && !toggles ->
-                "No gesture is set to Handwriting on/off, so handwriting never starts: set one above."
             HandwritingLayer.start(this) == WriteStart.DOTS && HandwritingLayer.dots(this) == HandwritingLayer.NOTHING ->
                 "Two dots are set to Nothing, so the pen never comes down in a field: set them to Pen down."
             HandwritingLayer.start(this) == WriteStart.DOTS && layer.values.none { it == WriteAction.PEN_DOWN.id } ->
@@ -166,6 +170,11 @@ class HandwritingActivity : GestureScreen() {
                 render()
             }
         }
+    }
+
+    companion object {
+        /** Red, dark enough to read on the page (the coral signal is for fills). */
+        private const val WARNING_RED = 0xFFC62828.toInt()
     }
 
     /** What dots on the surface are (the ? by them). */
