@@ -53,6 +53,7 @@ object HandwritingLayer {
     private const val DIALS = "write.dials"
     private const val START = "write.start"
     private const val DOTS = "write.two_dots"
+    private const val DOTS3 = "write.three_dots"
 
     /** Today's gestures in a field; every other gesture keeps its profile's action while writing. */
     val DEFAULTS = mapOf(
@@ -96,6 +97,14 @@ object HandwritingLayer {
         changed()
     }
 
+    /** Three dots ("..."): [AS_USUAL] by default (not a gesture: as two dots and a full stop), or Nothing, or a [WriteAction]. */
+    fun dots3(context: Context) = prefs(context).getString(DOTS3, null) ?: AS_USUAL
+
+    fun setDots3(context: Context, value: String) {
+        prefs(context).edit().putString(DOTS3, value).apply()
+        changed()
+    }
+
     fun start(context: Context) = WriteStart.of(prefs(context).getString(START, null))
 
     fun setStart(context: Context, start: WriteStart) = prefs(context).edit().putString(START, start.key).apply()
@@ -105,7 +114,7 @@ object HandwritingLayer {
 
     private fun changed() = BandService.instance?.let { it.writingLayerChanged(); it.remap() }
 
-    fun json(context: Context) = json(load(context), dials(context), dots(context))
+    fun json(context: Context) = json(load(context), dials(context), dots(context), dots3(context))
 
     /**
      * What the bridge needs (rust/bridge/src/lib.rs `set_writing_layer`): the gestures the field
@@ -113,10 +122,11 @@ object HandwritingLayer {
      * it down or turns handwriting off), the dials, and whether two dots are a gesture of their
      * own (anything but Pen down).
      */
-    fun json(layer: Map<String, String>, dials: Boolean, dots: String = WriteAction.PEN_DOWN.id): String = JSONObject()
+    fun json(layer: Map<String, String>, dials: Boolean, dots: String = WriteAction.PEN_DOWN.id, dots3: String = AS_USUAL): String = JSONObject()
         .put("takes", JSONArray(layer.filterValues { it != AS_USUAL }.keys.sorted()))
         .put("pen", JSONArray(layer.filterValues { WriteAction.of(it)?.withPenUp == true }.keys.sorted()))
         .put("dials", dials)
         .put("dots", dots != WriteAction.PEN_DOWN.id)
+        .put("dots3", dots3 != AS_USUAL)
         .toString()
 }

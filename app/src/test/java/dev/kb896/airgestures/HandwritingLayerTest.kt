@@ -28,4 +28,9 @@ class HandwritingLayerTest {
         assertEquals(true, JSONObject(HandwritingLayer.json(emptyMap(), false, WriteAction.STOP.id)).getBoolean("dots"))
         assertEquals(true, JSONObject(HandwritingLayer.json(emptyMap(), false, HandwritingLayer.NOTHING)).getBoolean("dots"))
     }
+
+    @Test fun `three dots are a gesture only once set to something`() {
+        assertEquals(false, JSONObject(HandwritingLayer.json(emptyMap(), false)).getBoolean("dots3"))
+        assertEquals(true, JSONObject(HandwritingLayer.json(emptyMap(), false, dots3 = WriteAction.DELETE_WORD.id)).getBoolean("dots3"))
+    }
 }

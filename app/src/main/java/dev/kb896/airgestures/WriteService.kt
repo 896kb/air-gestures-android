@@ -384,12 +384,15 @@ class WriteService : AccessibilityService() {
         act(service, node, action)
     }
 
-    /** Two dots on the surface, as a gesture of their own: with the pen up all but Nothing and on/off put it down first. */
-    private fun onDots() {
+    /**
+     * Two (or [three]) dots on the surface, as a gesture of their own: with the pen up, all but
+     * Nothing, Stop writing and on/off put it down first.
+     */
+    private fun onDots(three: Boolean = false) {
         val node = field ?: return
         val service = BandService.instance ?: return
         lastWritten = SystemClock.uptimeMillis()
-        val action = WriteAction.of(HandwritingLayer.dots(this)) ?: return
+        val action = WriteAction.of(if (three) HandwritingLayer.dots3(this) else HandwritingLayer.dots(this)) ?: return
         if (!pen && action != WriteAction.TOGGLE && action != WriteAction.STOP) {
             service.fieldPenDown()
             if (action == WriteAction.PEN_DOWN) return
@@ -627,6 +630,7 @@ class WriteService : AccessibilityService() {
                 popup.hide()
             }
             repeat(answer.optInt("dots")) { onDots() }
+            repeat(answer.optInt("dots3")) { onDots(three = true) }
             val down = answer.optBoolean("pen")
             if (down != pen) {
                 pen = down

@@ -109,24 +109,21 @@ class HandwritingActivity : GestureScreen() {
                 }
             })
         }
-        // Two dots tapped on the surface: only the band's handwriting sees them.
-        rows.addView(Cb.label(this, "On the surface"))
-        val dots = HandwritingLayer.dots(this)
-        val dotsAction = WriteAction.of(dots)
-        val dotsLabel = if (dotsAction == WriteAction.PEN_DOWN) "Pen down (else types ..)" else label(dots)
-        rows.addView(gestureRow(dotsAction?.icon ?: R.drawable.ic_minus, "Two dots (..)", dotsLabel, dotsAction == null) {
-            val values = listOf(HandwritingLayer.NOTHING) + WriteAction.entries.map { it.id }
-            choose(
-                "Two dots (..)",
-                values.map { Option(label(it), it == dots, WriteAction.of(it)?.icon ?: R.drawable.ic_minus) },
-                heading = "While writing",
-                note = "Tap twice on the table where you write. Only while handwriting is on: it can't start handwriting. " +
-                    "Set to anything but Pen down, two dots are never typed, and with the pen up they don't put it down " +
-                    "(other than to do what they're set to).",
-            ) { i ->
-                HandwritingLayer.setDots(applicationContext, values[i])
-                render()
-            }
+        // Dots tapped on the surface: only the band's handwriting sees them.
+        rows.addView(row(gap = 6f).apply {
+            addView(Cb.label(context, "On the surface"))
+            addView(FrameLayout(context).apply {
+                addView(icon(R.drawable.ic_help, 18f, Cb.INK_500), FrameLayout.LayoutParams(dpi(18f), dpi(18f), Gravity.CENTER))
+                layoutParams = LinearLayout.LayoutParams(dpi(30f), dpi(30f))
+                contentDescription = "What dots on the surface are"
+                isClickable = true
+                background = ripple(999f)
+                setOnClickListener { dotsHelp() }
+            })
+        })
+        rows.addView(column(gap = 4f).apply {
+            addView(dotsRow("Two dots (..)", HandwritingLayer.dots(this@HandwritingActivity), WriteAction.PEN_DOWN.id) { HandwritingLayer.setDots(applicationContext, it) })
+            addView(dotsRow("Three dots (...)", HandwritingLayer.dots3(this@HandwritingActivity), HandwritingLayer.AS_USUAL) { HandwritingLayer.setDots3(applicationContext, it) })
         })
         rows.addView(Cb.label(this, "Dials and sliders"))
         val dials = HandwritingLayer.dials(this)
@@ -150,6 +147,41 @@ class HandwritingActivity : GestureScreen() {
         note.text = text.orEmpty()
         note.visibility = if (text == null) View.GONE else View.VISIBLE
     }
+
+    /**
+     * A row for dots on the surface: [usual] is what they do when they aren't a gesture (two
+     * dots: Pen down, else typed; three: typed, as two and a full stop).
+     */
+    private fun dotsRow(name: String, value: String, usual: String, set: (String) -> Unit): View {
+        fun shown(v: String) = when {
+            v == usual && v == WriteAction.PEN_DOWN.id -> "Pen down (else typed)"
+            v == usual -> "Typed (not a gesture)"
+            else -> label(v)
+        }
+        val action = WriteAction.of(value)
+        return gestureRow(action?.icon ?: R.drawable.ic_minus, name, shown(value), value == usual && action == null) {
+            val values = (listOf(usual, HandwritingLayer.NOTHING) + WriteAction.entries.map { it.id }).distinct()
+            choose(name, values.map { Option(shown(it), it == value, WriteAction.of(it)?.icon ?: R.drawable.ic_minus) }, heading = "While writing") { i ->
+                set(values[i])
+                render()
+            }
+        }
+    }
+
+    /** What dots on the surface are (the ? by them). */
+    private fun dotsHelp() = sheet(
+        "Dots on the surface",
+        Cb.text(this, 14f, color = Cb.INK_700).apply {
+            text = "Tap your index finger on the table (or whatever you write on) as if you were typing a full stop: " +
+                "two taps are two dots (..), three are three (...). The band only reads them while handwriting is on " +
+                "in a text field, so they can't start handwriting, but they can do anything else here.\n\n" +
+                "By default two dots put the pen down when it's up, and type two full stops when it's down; three dots " +
+                "just type. Set to anything else, they're never typed: they do that instead. A single dot always types."
+            setLineSpacing(0f, 1.3f)
+        },
+        "Got it",
+        cancel = false,
+    ) { true }
 
     private fun label(value: String) = when (value) {
         HandwritingLayer.AS_USUAL -> "As usual"

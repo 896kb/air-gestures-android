@@ -24,6 +24,8 @@ const MARK_MARGIN: f32 = 3.0;
 /// The two dots of a wake-up: each this sure, at most this far apart (s).
 const WAKE_MARGIN: f32 = 1.5;
 const WAKE_GAP_S: f64 = 1.5;
+/// Dots held back this long after the last one (s): no more are coming.
+const DOTS_SETTLE_S: f64 = 0.8;
 /// The pen lifts after this long with nothing confident written (s).
 const PEN_QUIET_S: f64 = 8.0;
 /// Where the capitals are in the scores (A–Z).
@@ -61,14 +63,17 @@ pub struct FieldTyping {
     /// confident symbol; two full stops ("..", a double tap) put it down again.
     pen: bool,
     last_confident: f64,
-    last_dot: Option<f64>,
-    /// Two dots are a gesture of their own (the Handwriting layer's): with the pen down they
-    /// aren't typed, the first held back till the second or [`WAKE_GAP_S`] (see [`Self::set_dots`]).
-    dots_gesture: bool,
-    /// A first dot held back, and when it came.
-    held_dot: Option<(Written, f64)>,
-    /// Two dots made since the last look ([`Self::take_dots`]).
-    dots: u32,
+    /// Two and three dots tapped on the surface are gestures of their own (the Handwriting
+    /// layer's, see [`Self::set_dots`]).
+    two_dots: bool,
+    three_dots: bool,
+    /// Dots tapped in a row, held back till it's clear how many ([`DOTS_SETTLE_S`]), and when
+    /// the last came.
+    dot_run: Vec<Written>,
+    dot_last: f64,
+    /// Two and three dots made since the last look ([`Self::take_dots`]).
+    twos: u32,
+    threes: u32,
     /// The last word taken with a space (as shown, and its letters), to choose again later.
     last_word: Option<(String, Vec<crate::words::LetterOdds>)>,
     /// Choosing among the suggestions (a swipe up): shown in place of the word, the current
@@ -262,28 +267,52 @@ impl FieldTyping {
     pub fn pen_down(&mut self, now: f64) {
         self.pen = true;
         self.last_confident = now;
-        self.last_dot = None;
+        self.dot_run.clear();
     }
 
-    /// Two dots on the surface: [`gesture`] makes them a gesture of their own (counted for
-    /// [`Self::take_dots`]; with the pen up they leave it up, for the app to say), else they
-    /// put the pen down, and with it down they're two full stops.
-    pub fn set_dots(&mut self, gesture: bool) {
-        self.dots_gesture = gesture;
+    /// Dots tapped on the surface: [`two`] and [`three`] make two and three in a row gestures of
+    /// their own (counted for [`Self::take_dots`], never typed; with the pen up they leave it
+    /// up, for the app to say). Otherwise two put the pen down (with it down they're two full
+    /// stops), and three are as two and a full stop.
+    pub fn set_dots(&mut self, two: bool, three: bool) {
+        self.two_dots = two;
+        self.three_dots = three;
     }
 
-    /// How many times two dots were made since the last call (as a gesture: see [`Self::set_dots`]).
-    pub fn take_dots(&mut self) -> u32 {
-        std::mem::take(&mut self.dots)
+    /// How many times two dots, and three, were made since the last call (as gestures).
+    pub fn take_dots(&mut self) -> (u32, u32) {
+        (std::mem::take(&mut self.twos), std::mem::take(&mut self.threes))
     }
 
-    /// A first dot held back that no second followed in time: typed after all.
+    /// Dots held back that no more followed in time: what they are now settles.
     pub fn flush_dot(&mut self, words: Option<&Dictionary>, now: f64) {
-        if let Some((dot, at)) = self.held_dot
-            && now - at > WAKE_GAP_S
-        {
-            self.held_dot = None;
-            self.write(&dot, words);
+        if !self.dot_run.is_empty() && now - self.dot_last > DOTS_SETTLE_S {
+            self.settle_dots(words, now);
+        }
+    }
+
+    /// The dots in a row so far are all there'll be: three a gesture, two a gesture or the pen
+    /// down (or typed), the rest typed while the pen is down.
+    fn settle_dots(&mut self, words: Option<&Dictionary>, now: f64) {
+        let run = std::mem::take(&mut self.dot_run);
+        let mut typed = &run[..];
+        if run.len() >= 3 && self.three_dots {
+            self.threes += 1;
+            typed = &[];
+        } else if run.len() >= 2 && self.two_dots {
+            self.twos += 1;
+            typed = &run[2..];
+        } else if run.len() >= 2 && !self.pen {
+            self.pen = true;
+            typed = &[];
+        }
+        if run.len() >= 2 {
+            self.last_confident = now;
+        }
+        if self.pen {
+            for dot in typed.to_vec() {
+                self.write(&dot, words);
+            }
         }
     }
 
@@ -299,9 +328,8 @@ impl FieldTyping {
 
     /// The pen lifts once nothing confident has come for a while.
     pub fn tick(&mut self, now: f64) {
-        if self.pen && now - self.last_confident > PEN_QUIET_S {
+        if self.pen && now - self.last_confident > PEN_QUIET_S && self.dot_run.is_empty() {
             self.pen = false;
-            self.last_dot = None;
         }
     }
 
@@ -312,36 +340,27 @@ impl FieldTyping {
         if self.choosing.is_some() {
             return false;
         }
-        if !self.pen {
-            if written.index == PERIOD && written.margin >= WAKE_MARGIN {
-                if self.last_dot.is_some_and(|at| now - at <= WAKE_GAP_S) {
-                    self.last_dot = None;
-                    if self.dots_gesture {
-                        self.dots += 1;
-                    } else {
-                        self.pen = true;
-                        self.last_confident = now;
-                    }
-                } else {
-                    self.last_dot = Some(now);
-                }
+        // Dots in a row, while they may be more than a full stop: held back till it's clear how many.
+        let held = !self.pen || self.two_dots || self.three_dots;
+        if held && written.index == PERIOD && written.margin >= WAKE_MARGIN {
+            if !self.dot_run.is_empty() && now - self.dot_last > WAKE_GAP_S {
+                self.settle_dots(words, now);
             }
-            return false;
+            self.dot_run.push(*written);
+            self.dot_last = now;
+            // As many as can mean anything: settled at once.
+            let most = if self.three_dots { 3 } else { 2 };
+            if self.dot_run.len() >= most {
+                self.settle_dots(words, now);
+            }
+            return self.pen;
         }
-        // Two dots as a gesture: the first waits for the second; anything else types it first.
-        if self.dots_gesture {
-            if written.index == PERIOD && written.margin >= WAKE_MARGIN {
-                if self.held_dot.take().is_some_and(|(_, at)| now - at <= WAKE_GAP_S) {
-                    self.dots += 1;
-                    self.last_confident = now;
-                    return true;
-                }
-                self.held_dot = Some((*written, now));
-                return true;
-            }
-            if let Some((dot, _)) = self.held_dot.take() {
-                self.write(&dot, words);
-            }
+        // Anything else: the dots before it are all there were.
+        if !self.dot_run.is_empty() {
+            self.settle_dots(words, now);
+        }
+        if !self.pen {
+            return false;
         }
         if written.index == PAUSE {
             // A sure pause inside a word: maybe a space that wasn't written (see `write`).
@@ -685,18 +704,21 @@ mod tests {
     #[test]
     fn two_dots_as_a_gesture_are_counted_not_typed_and_a_lone_dot_still_types() {
         let mut typing = FieldTyping::new("", 0.0);
-        typing.set_dots(true);
+        typing.set_dots(true, false);
         let mut field = String::new();
         let dot = |margin| Written { index: PERIOD, margin, letters: [0.0; 26] };
         typing.take(&letter('a', 0.95), None, 1.0);
         typing.take(&dot(2.0), None, 2.0);
         typing.take(&dot(2.0), None, 2.5);
-        assert_eq!(typing.take_dots(), 1);
+        assert_eq!(typing.take_dots(), (1, 0));
         // A lone dot waits, then types once no second one came.
         typing.take(&dot(2.0), None, 3.0);
         typing.flush_dot(None, 3.5);
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "A", "still held");
+        typing.take(&letter('b', 0.95), None, 3.6); // another symbol: the dot was a full stop
+        typing.take_edits();
+        typing.take(&dot(2.0), None, 4.0);
         typing.flush_dot(None, 5.0);
         apply(&mut field, typing.take_edits());
         assert!(field.starts_with("A."), "{field:?}");
@@ -706,7 +728,31 @@ mod tests {
         typing.take(&dot(2.0), None, 21.0);
         typing.take(&dot(2.0), None, 21.3);
         assert!(!typing.pen());
-        assert_eq!(typing.take_dots(), 1);
+        assert_eq!(typing.take_dots(), (1, 0));
+    }
+
+    #[test]
+    fn three_dots_wait_out_two_and_are_their_own_gesture() {
+        let mut typing = FieldTyping::new("", 0.0);
+        typing.set_dots(true, true);
+        let dot = |margin| Written { index: PERIOD, margin, letters: [0.0; 26] };
+        for at in [1.0, 1.3, 1.6] {
+            typing.take(&dot(2.0), None, at);
+        }
+        assert_eq!(typing.take_dots(), (0, 1));
+        // Two, then nothing more: two once they settle.
+        typing.take(&dot(2.0), None, 3.0);
+        typing.take(&dot(2.0), None, 3.3);
+        assert_eq!(typing.take_dots(), (0, 0), "may still be three");
+        typing.flush_dot(None, 4.2);
+        assert_eq!(typing.take_dots(), (1, 0));
+        // Three as a gesture only, the pen up: two settle as the pen down.
+        typing.set_dots(false, true);
+        typing.pen_up();
+        typing.take(&dot(2.0), None, 5.0);
+        typing.take(&dot(2.0), None, 5.3);
+        typing.flush_dot(None, 6.2);
+        assert!(typing.pen());
     }
 
     #[test]

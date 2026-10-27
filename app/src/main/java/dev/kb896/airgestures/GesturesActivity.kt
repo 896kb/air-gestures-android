@@ -41,15 +41,15 @@ class GesturesActivity : GestureScreen() {
                 addView(band)
             }))
             addView(card("Profiles", profiles))
-            addView(card(null, drawings))
-            addView(card("Sequences", sequences))
-            addView(card(null, devices))
             addView(card("Handwriting", column(gap = 8f).apply {
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
                     text = "Write letters with a finger into the text field in focus; what the gestures do there."
                 })
                 addView(handwriting)
             }))
+            addView(card(null, drawings))
+            addView(card("Sequences", sequences))
+            addView(card(null, devices))
             addView(card("During calls", column(gap = 8f).apply {
                 addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
                     text = "While the phone rings or a call is on, in every profile. Phone calls only; WhatsApp and other app calls can't be answered by another app."

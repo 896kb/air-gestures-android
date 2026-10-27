@@ -556,14 +556,15 @@ impl Connection {
         self.field = on.then(|| {
             let mut field = fieldtext::FieldTyping::new(before, now);
             field.set_popup(popup);
-            field.set_dots(self.writing_layer.dots);
+            field.set_dots(self.writing_layer.two_dots, self.writing_layer.three_dots);
             field
         });
         self.sync_writing();
         bytes
     }
 
-    /// The Handwriting layer: `{"takes": [gesture keys], "pen": [gesture keys], "dials": bool}`.
+    /// The Handwriting layer: `{"takes": [gesture keys], "pen": [gesture keys], "dials": bool,
+    /// "dots": bool, "dots3": bool}` (two and three dots tapped on the surface as gestures).
     /// While the pen is down the field takes `takes` (the others act as usual, dials and sliders
     /// step when `dials`); while it's up only `pen` (what puts it down or turns handwriting
     /// off), and dials step. Until set: every gesture, no dials, the index double tap.
@@ -576,10 +577,11 @@ impl Connection {
             takes: keys("takes"),
             pen: keys("pen"),
             dials: value["dials"].as_bool().unwrap_or(false),
-            dots: value["dots"].as_bool().unwrap_or(false),
+            two_dots: value["dots"].as_bool().unwrap_or(false),
+            three_dots: value["dots3"].as_bool().unwrap_or(false),
         };
         if let Some(field) = self.field.as_mut() {
-            field.set_dots(self.writing_layer.dots);
+            field.set_dots(self.writing_layer.two_dots, self.writing_layer.three_dots);
         }
         self.sync_writing();
         Ok(())
@@ -661,11 +663,13 @@ impl Connection {
         field.flush_dot(words::dictionary().as_deref(), now);
         let choices = field.choices();
         let pen = field.pen();
+        let dots = field.take_dots();
         let out = serde_json::json!({
             "active": true,
             "edits": field.take_edits(),
             "pen": pen,
-            "dots": field.take_dots(),
+            "dots": dots.0,
+            "dots3": dots.1,
             "choosing": field.choosing(),
             "next": field.choosing_next(),
             "suggestions": choices.as_ref().map(|(list, _)| list.clone()),
@@ -1153,12 +1157,13 @@ struct WritingLayer {
     takes: Vec<Gesture>,
     pen: Vec<Gesture>,
     dials: bool,
-    /// Two dots on the surface are a gesture of their own (`@`-less: `field_edits`' `dots`).
-    dots: bool,
+    /// Two and three dots on the surface are gestures of their own (`field_edits`' `dots`, `dots3`).
+    two_dots: bool,
+    three_dots: bool,
 }
 
 impl Default for WritingLayer {
     fn default() -> Self {
-        Self { takes: Gesture::ALL.to_vec(), pen: vec![Gesture::IndexDouble], dials: false, dots: false }
+        Self { takes: Gesture::ALL.to_vec(), pen: vec![Gesture::IndexDouble], dials: false, two_dots: false, three_dots: false }
     }
 }
