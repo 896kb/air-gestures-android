@@ -12,7 +12,7 @@ Right away: the pen is down as the field gets the focus (one buzz). After ..: th
 While the pen is down, what you write is typed and the gestures do what While writing sets. After 8 seconds with nothing written it lifts (two buzzes): nothing more is typed, and your gestures go back to what they do in your profile, except the ones that bring the pen back (Pen down, by default a double tap of your index finger, or Handwriting on/off). Write two dots (..) to put it down again too. Stop writing lifts it at once.
 
 ## While writing
-Gestures › Handwriting sets what each gesture does while the pen is down: As usual (your profile's action), Nothing, or one of the writing actions. By default: swipe left and right move the cursor, swipe up shows word choices, swipe down the edit menu, an index tap selects, an index double tap puts the pen down; everything else does nothing.
+Gestures › Handwriting sets what each gesture does while the pen is down: As usual (your profile's action), Nothing, or one of the writing actions. By default: swipe left and right move the cursor, swipe up shows word choices, swipe down the edit menu, an index tap selects, an index double tap puts the pen down; every other gesture does what it does in your profile.
 
 ## Word choices
 Word choices show the other corrections of the word you're writing (or the last one); right after a space, the likely next words, and the same gesture again turns to the last word's readings. Cursor left and right move through them, Select takes one, the edit menu's gesture cancels. The popup shows them in a row above the text field and leaves the field as it is until you take one; in text puts them into the text itself in place of the word ("there · three · these").

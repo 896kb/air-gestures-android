@@ -53,7 +53,7 @@ object HandwritingLayer {
     private const val DIALS = "write.dials"
     private const val START = "write.start"
 
-    /** Today's gestures in a field; everything else does nothing while writing. */
+    /** Today's gestures in a field; every other gesture keeps its profile's action while writing. */
     val DEFAULTS = mapOf(
         Gesture.SWIPE_LEFT.key to WriteAction.LEFT.id,
         Gesture.SWIPE_RIGHT.key to WriteAction.RIGHT.id,
@@ -63,7 +63,7 @@ object HandwritingLayer {
         Gesture.INDEX_DOUBLE.key to WriteAction.PEN_DOWN.id,
     )
 
-    fun default(gesture: Gesture) = DEFAULTS[gesture.key] ?: NOTHING
+    fun default(gesture: Gesture) = DEFAULTS[gesture.key] ?: AS_USUAL
 
     private fun prefs(context: Context) = context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE)
 

@@ -7,10 +7,10 @@ import org.junit.Test
 class HandwritingLayerTest {
     private fun keys(json: JSONObject, name: String) = json.getJSONArray(name).let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
 
-    @Test fun `the defaults take every gesture with the pen down and only the double tap with it up`() {
+    @Test fun `the defaults take only the writing gestures with the pen down and only the double tap with it up`() {
         val layer = Gesture.entries.associate { it.key to HandwritingLayer.default(it) }
         val json = JSONObject(HandwritingLayer.json(layer, false))
-        assertEquals(Gesture.entries.map { it.key }.toSet(), keys(json, "takes"))
+        assertEquals(setOf("swipe_left", "swipe_right", "swipe_up", "swipe_down", "index_tap", "index_double"), keys(json, "takes"))
         assertEquals(setOf("index_double"), keys(json, "pen"))
         assertEquals(false, json.getBoolean("dials"))
         assertEquals(WriteAction.CHOICES_POPUP.id, HandwritingLayer.default(Gesture.SWIPE_UP))
