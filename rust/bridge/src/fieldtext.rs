@@ -62,6 +62,13 @@ pub struct FieldTyping {
     pen: bool,
     last_confident: f64,
     last_dot: Option<f64>,
+    /// Two dots are a gesture of their own (the Handwriting layer's): with the pen down they
+    /// aren't typed, the first held back till the second or [`WAKE_GAP_S`] (see [`Self::set_dots`]).
+    dots_gesture: bool,
+    /// A first dot held back, and when it came.
+    held_dot: Option<(Written, f64)>,
+    /// Two dots made since the last look ([`Self::take_dots`]).
+    dots: u32,
     /// The last word taken with a space (as shown, and its letters), to choose again later.
     last_word: Option<(String, Vec<crate::words::LetterOdds>)>,
     /// Choosing among the suggestions (a swipe up): shown in place of the word, the current
@@ -258,6 +265,28 @@ impl FieldTyping {
         self.last_dot = None;
     }
 
+    /// Two dots on the surface: [`gesture`] makes them a gesture of their own (counted for
+    /// [`Self::take_dots`]; with the pen up they leave it up, for the app to say), else they
+    /// put the pen down, and with it down they're two full stops.
+    pub fn set_dots(&mut self, gesture: bool) {
+        self.dots_gesture = gesture;
+    }
+
+    /// How many times two dots were made since the last call (as a gesture: see [`Self::set_dots`]).
+    pub fn take_dots(&mut self) -> u32 {
+        std::mem::take(&mut self.dots)
+    }
+
+    /// A first dot held back that no second followed in time: typed after all.
+    pub fn flush_dot(&mut self, words: Option<&Dictionary>, now: f64) {
+        if let Some((dot, at)) = self.held_dot
+            && now - at > WAKE_GAP_S
+        {
+            self.held_dot = None;
+            self.write(&dot, words);
+        }
+    }
+
     /// Lift the pen (Stop writing, or a field that starts with it up): nothing's typed till it's down again.
     pub fn pen_up(&mut self) {
         self.pen = false;
@@ -286,14 +315,33 @@ impl FieldTyping {
         if !self.pen {
             if written.index == PERIOD && written.margin >= WAKE_MARGIN {
                 if self.last_dot.is_some_and(|at| now - at <= WAKE_GAP_S) {
-                    self.pen = true;
-                    self.last_confident = now;
                     self.last_dot = None;
+                    if self.dots_gesture {
+                        self.dots += 1;
+                    } else {
+                        self.pen = true;
+                        self.last_confident = now;
+                    }
                 } else {
                     self.last_dot = Some(now);
                 }
             }
             return false;
+        }
+        // Two dots as a gesture: the first waits for the second; anything else types it first.
+        if self.dots_gesture {
+            if written.index == PERIOD && written.margin >= WAKE_MARGIN {
+                if self.held_dot.take().is_some_and(|(_, at)| now - at <= WAKE_GAP_S) {
+                    self.dots += 1;
+                    self.last_confident = now;
+                    return true;
+                }
+                self.held_dot = Some((*written, now));
+                return true;
+            }
+            if let Some((dot, _)) = self.held_dot.take() {
+                self.write(&dot, words);
+            }
         }
         if written.index == PAUSE {
             // A sure pause inside a word: maybe a space that wasn't written (see `write`).
@@ -632,6 +680,33 @@ mod tests {
         typing.take(&letter('c', 0.95), None, 14.0);
         apply(&mut field, typing.take_edits());
         assert_eq!(field, "Ac");
+    }
+
+    #[test]
+    fn two_dots_as_a_gesture_are_counted_not_typed_and_a_lone_dot_still_types() {
+        let mut typing = FieldTyping::new("", 0.0);
+        typing.set_dots(true);
+        let mut field = String::new();
+        let dot = |margin| Written { index: PERIOD, margin, letters: [0.0; 26] };
+        typing.take(&letter('a', 0.95), None, 1.0);
+        typing.take(&dot(2.0), None, 2.0);
+        typing.take(&dot(2.0), None, 2.5);
+        assert_eq!(typing.take_dots(), 1);
+        // A lone dot waits, then types once no second one came.
+        typing.take(&dot(2.0), None, 3.0);
+        typing.flush_dot(None, 3.5);
+        apply(&mut field, typing.take_edits());
+        assert_eq!(field, "A", "still held");
+        typing.flush_dot(None, 5.0);
+        apply(&mut field, typing.take_edits());
+        assert!(field.starts_with("A."), "{field:?}");
+        // With the pen up they don't put it down: the app says what they do.
+        typing.tick(20.0);
+        assert!(!typing.pen());
+        typing.take(&dot(2.0), None, 21.0);
+        typing.take(&dot(2.0), None, 21.3);
+        assert!(!typing.pen());
+        assert_eq!(typing.take_dots(), 1);
     }
 
     #[test]

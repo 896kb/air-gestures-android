@@ -381,6 +381,24 @@ class WriteService : AccessibilityService() {
         val gesture = Gesture.entries.firstOrNull { it.label.lowercase() == label } ?: return
         // Nothing (or As usual, which the field doesn't take).
         val action = WriteAction.of(HandwritingLayer.load(this)[gesture.key]) ?: return
+        act(service, node, action)
+    }
+
+    /** Two dots on the surface, as a gesture of their own: with the pen up all but Nothing and on/off put it down first. */
+    private fun onDots() {
+        val node = field ?: return
+        val service = BandService.instance ?: return
+        lastWritten = SystemClock.uptimeMillis()
+        val action = WriteAction.of(HandwritingLayer.dots(this)) ?: return
+        if (!pen && action != WriteAction.TOGGLE && action != WriteAction.STOP) {
+            service.fieldPenDown()
+            if (action == WriteAction.PEN_DOWN) return
+        }
+        act(service, node, action)
+    }
+
+    /** Do [action] in the field (a gesture's, or two dots'). */
+    private fun act(service: BandService, node: AccessibilityNodeInfo, action: WriteAction) {
         val open = menu
         when {
             action == WriteAction.PEN_DOWN -> service.fieldPenDown()
@@ -402,7 +420,7 @@ class WriteService : AccessibilityService() {
                     choosing = false
                     popup.hide()
                     // A delete still deletes, once the word is back as it was.
-                    if (action == WriteAction.DELETE_WORD || action == WriteAction.DELETE_ALL) onGesture(label)
+                    if (action == WriteAction.DELETE_WORD || action == WriteAction.DELETE_ALL) act(service, node, action)
                 }
             }
             action == WriteAction.CHOICES_POPUP || action == WriteAction.CHOICES_INLINE -> {
@@ -608,6 +626,7 @@ class WriteService : AccessibilityService() {
             } else if (menu == null) {
                 popup.hide()
             }
+            repeat(answer.optInt("dots")) { onDots() }
             val down = answer.optBoolean("pen")
             if (down != pen) {
                 pen = down

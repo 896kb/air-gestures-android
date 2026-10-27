@@ -109,6 +109,25 @@ class HandwritingActivity : GestureScreen() {
                 }
             })
         }
+        // Two dots tapped on the surface: only the band's handwriting sees them.
+        rows.addView(Cb.label(this, "On the surface"))
+        val dots = HandwritingLayer.dots(this)
+        val dotsAction = WriteAction.of(dots)
+        val dotsLabel = if (dotsAction == WriteAction.PEN_DOWN) "Pen down (else types ..)" else label(dots)
+        rows.addView(gestureRow(dotsAction?.icon ?: R.drawable.ic_minus, "Two dots (..)", dotsLabel, dotsAction == null) {
+            val values = listOf(HandwritingLayer.NOTHING) + WriteAction.entries.map { it.id }
+            choose(
+                "Two dots (..)",
+                values.map { Option(label(it), it == dots, WriteAction.of(it)?.icon ?: R.drawable.ic_minus) },
+                heading = "While writing",
+                note = "Tap twice on the table where you write. Only while handwriting is on: it can't start handwriting. " +
+                    "Set to anything but Pen down, two dots are never typed, and with the pen up they don't put it down " +
+                    "(other than to do what they're set to).",
+            ) { i ->
+                HandwritingLayer.setDots(applicationContext, values[i])
+                render()
+            }
+        })
         rows.addView(Cb.label(this, "Dials and sliders"))
         val dials = HandwritingLayer.dials(this)
         rows.addView(gestureRow(R.drawable.ic_minus, "Pinch and turn, drags as sliders", if (dials) "As usual" else "Nothing", true) {
@@ -122,6 +141,8 @@ class HandwritingActivity : GestureScreen() {
         val text = when {
             HandwritingLayer.start(this) == WriteStart.GESTURE && !toggles ->
                 "No gesture is set to Handwriting on/off, so handwriting never starts: set one above."
+            HandwritingLayer.start(this) == WriteStart.DOTS && HandwritingLayer.dots(this) == HandwritingLayer.NOTHING ->
+                "Two dots are set to Nothing, so the pen never comes down in a field: set them to Pen down."
             HandwritingLayer.start(this) == WriteStart.DOTS && layer.values.none { it == WriteAction.PEN_DOWN.id } ->
                 "Write two dots (..) to put the pen down; no gesture does."
             else -> null

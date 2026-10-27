@@ -556,6 +556,7 @@ impl Connection {
         self.field = on.then(|| {
             let mut field = fieldtext::FieldTyping::new(before, now);
             field.set_popup(popup);
+            field.set_dots(self.writing_layer.dots);
             field
         });
         self.sync_writing();
@@ -571,7 +572,15 @@ impl Connection {
         let keys = |name: &str| -> Vec<Gesture> {
             value[name].as_array().into_iter().flatten().filter_map(|k| k.as_str().and_then(Gesture::from_key)).collect()
         };
-        self.writing_layer = WritingLayer { takes: keys("takes"), pen: keys("pen"), dials: value["dials"].as_bool().unwrap_or(false) };
+        self.writing_layer = WritingLayer {
+            takes: keys("takes"),
+            pen: keys("pen"),
+            dials: value["dials"].as_bool().unwrap_or(false),
+            dots: value["dots"].as_bool().unwrap_or(false),
+        };
+        if let Some(field) = self.field.as_mut() {
+            field.set_dots(self.writing_layer.dots);
+        }
         self.sync_writing();
         Ok(())
     }
@@ -649,12 +658,14 @@ impl Connection {
             return serde_json::json!({"active": false, "edits": edits, "pen": false, "off": self.controls.status().paused}).to_string();
         };
         field.tick(now);
+        field.flush_dot(words::dictionary().as_deref(), now);
         let choices = field.choices();
         let pen = field.pen();
         let out = serde_json::json!({
             "active": true,
             "edits": field.take_edits(),
             "pen": pen,
+            "dots": field.take_dots(),
             "choosing": field.choosing(),
             "next": field.choosing_next(),
             "suggestions": choices.as_ref().map(|(list, _)| list.clone()),
@@ -1142,10 +1153,12 @@ struct WritingLayer {
     takes: Vec<Gesture>,
     pen: Vec<Gesture>,
     dials: bool,
+    /// Two dots on the surface are a gesture of their own (`@`-less: `field_edits`' `dots`).
+    dots: bool,
 }
 
 impl Default for WritingLayer {
     fn default() -> Self {
-        Self { takes: Gesture::ALL.to_vec(), pen: vec![Gesture::IndexDouble], dials: false }
+        Self { takes: Gesture::ALL.to_vec(), pen: vec![Gesture::IndexDouble], dials: false, dots: false }
     }
 }

@@ -22,4 +22,10 @@ class HandwritingLayerTest {
         assertEquals(setOf("middle_tap", "index_tap"), keys(json, "takes"))
         assertEquals(setOf("middle_tap"), keys(json, "pen"))
     }
+
+    @Test fun `two dots are a gesture of their own unless they put the pen down`() {
+        assertEquals(false, JSONObject(HandwritingLayer.json(emptyMap(), false)).getBoolean("dots"))
+        assertEquals(true, JSONObject(HandwritingLayer.json(emptyMap(), false, WriteAction.STOP.id)).getBoolean("dots"))
+        assertEquals(true, JSONObject(HandwritingLayer.json(emptyMap(), false, HandwritingLayer.NOTHING)).getBoolean("dots"))
+    }
 }
