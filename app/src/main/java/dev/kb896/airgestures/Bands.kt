@@ -18,7 +18,7 @@ object Bands {
     /** Band 2's settings: band 1's names with this in front. */
     private const val PREFIX = "band2."
     /** The settings each band has its own of (band 2's under [PREFIX]). */
-    private val OWN = listOf("hand", "paused", "band.address", "ota_expect", "association", "write_in_fields", PICKED, ON)
+    private val OWN = listOf("hand", "paused", "band.address", "ota_expect", "association", "write_in_fields", "connect", PICKED, ON)
     /** Band 2's pick (band 1's is the profile list's own, `profile.current`). */
     const val PICKED = "profile.current"
     /** The profiles a band uses, in its order (none stored: all of them). */

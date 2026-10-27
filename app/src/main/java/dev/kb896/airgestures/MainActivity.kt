@@ -490,17 +490,21 @@ class MainActivity : Screen() {
             requestPermissions(Setup.permissions, PERMISSIONS)
             return
         }
-        if (BandService.instance != null) {
-            BandService.stop(this)
+        // This band's connection only (with two, the other keeps its own).
+        val slot = Bands.selected(this)
+        if (BandService.connected(this, slot)) {
+            BandService.connect(this, slot, false)
         } else if (!Setup.bluetoothOn(this)) {
             askForBluetooth()
         } else {
-            BandService.start(this)
+            BandService.connect(this, slot, true)
         }
+        render(BandService.state.value)
     }
 
     private fun render(state: BandService.State) {
-        val running = BandService.instance != null
+        // This band's connection: the service runs and keeps it.
+        val running = BandService.connected(this)
         val claiming = state.claiming
         if (claiming != navClaiming) {
             navClaiming = claiming

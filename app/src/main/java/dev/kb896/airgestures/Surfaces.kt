@@ -24,7 +24,7 @@ object Surfaces {
     fun status(context: Context): String {
         val state = BandService.state.value
         return when {
-            BandService.instance == null -> "Off"
+            !BandService.connected(context) -> "Off"
             !Setup.bluetoothOn(context) -> "Bluetooth off"
             state.phase == Phase.CONNECTED -> listOfNotNull("Connected", state.battery?.let { "$it %" }).joinToString(" · ")
             else -> "Searching"

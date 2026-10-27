@@ -62,7 +62,12 @@ class Prefs(context: Context, val slot: Int = Bands.selected(context)) {
 
     fun setDial(profile: String, dial: String) = Profiles.update(context) { it.withDial(profile, dial) }
 
-    /** The service should keep the band connected. */
+    /** This band is kept connected while the service runs (its own power button; on until turned off). */
+    var connect: Boolean
+        get() = prefs.getBoolean(own("connect"), true)
+        set(value) = prefs.edit().putBoolean(own("connect"), value).apply()
+
+    /** The service should keep the bands connected. */
     var running: Boolean
         get() = prefs.getBoolean("running", false)
         set(value) = prefs.edit().putBoolean("running", value).apply()

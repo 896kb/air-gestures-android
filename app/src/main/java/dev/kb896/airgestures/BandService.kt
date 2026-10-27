@@ -88,12 +88,13 @@ class BandService : Service() {
     }
 
     /**
-     * A band was added, removed, or got a key: band 1 is always kept (it says when it has no key
-     * yet), band 2 once it's added and has one.
+     * A band was added, removed, got a key, or its power button was pressed: each band whose
+     * connection is on ([Prefs.connect]) is kept, band 1 even without a key (it says it has
+     * none), band 2 once it's added and has one.
      */
     fun bandsChanged() {
         for (slot in 0 until Bands.MAX) {
-            val wanted = slot < Bands.count(this) && (slot == 0 || Identity.present(this, slot))
+            val wanted = slot < Bands.count(this) && (slot == 0 || Identity.present(this, slot)) && Prefs(this, slot).connect
             val band = bands[slot]
             if (wanted && band == null) {
                 bands[slot] = Band(slot).also { if (started) it.link.start() }
@@ -820,9 +821,28 @@ class BandService : Service() {
         var instance: BandService? = null
             private set
 
+        /** Keep the bands connected; with every band's connection off, all of them come on. */
         fun start(context: Context) {
             Prefs(context).running = true
+            if (Bands.slots(context).none { Prefs(context, it).connect }) Bands.slots(context).forEach { Prefs(context, it).connect = true }
             context.startForegroundService(Intent(context, BandService::class.java))
+        }
+
+        /** Whether [slot] is kept connected now (the service runs and its connection is on). */
+        fun connected(context: Context, slot: Int = Bands.selected(context)) = instance != null && Prefs(context, slot).connect
+
+        /**
+         * One band's power button: its connection on (starting the service if need be) or off
+         * (stopping the service once no band is on).
+         */
+        fun connect(context: Context, slot: Int, on: Boolean) {
+            Prefs(context, slot).connect = on
+            when {
+                on && instance == null -> start(context)
+                on -> instance?.bandsChanged()
+                Bands.slots(context).none { Prefs(context, it).connect } -> stop(context)
+                else -> instance?.bandsChanged()
+            }
         }
 
         fun stop(context: Context) {
