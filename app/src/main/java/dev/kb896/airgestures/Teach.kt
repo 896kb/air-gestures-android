@@ -102,11 +102,22 @@ class DragTeach {
     }
 
     private val samples = arrayOfNulls<DoubleArray>(Step.entries.size)
+    /** Drags left out: never read as a drag (nor as another one). */
+    private val skipped = BooleanArray(Step.entries.size)
     private var roll: Double? = null
 
     /** The step the next pinch is for (null: all done). */
-    val current get() = Step.entries.firstOrNull { samples[it.ordinal] == null }
+    val current get() = Step.entries.firstOrNull { samples[it.ordinal] == null && !skipped[it.ordinal] }
     fun done(step: Step) = samples[step.ordinal] != null
+    fun skipped(step: Step) = skipped[step.ordinal]
+
+    /** Leave this drag out (not the turn). True when that completed the set. */
+    fun skip(step: Step): Boolean {
+        if (step == Step.TURN) return false
+        samples[step.ordinal] = null
+        skipped[step.ordinal] = true
+        return current == null
+    }
 
     /** A `@drag-sample`: its direction and the roll it was read in. False when every step had one already. */
     fun sample(direction: DoubleArray, roll: Double): Boolean {
@@ -119,19 +130,21 @@ class DragTeach {
     /** Every step to do again. */
     fun reset() {
         samples.fill(null)
+        skipped.fill(false)
         roll = null
     }
 
     fun redo(step: Step) {
         samples[step.ordinal] = null
+        skipped[step.ordinal] = false
     }
 
-    /** For Bridge.dragPrototypes, once every step has its sample. */
+    /** For Bridge.dragPrototypes, once every step has its sample or was skipped (null). */
     fun json(): String? {
         if (current != null) return null
         val r = roll ?: return null
         return JSONObject().put("roll", r).put("turn", JSONArray(samples[0]!!.toList()))
-            .put("drags", JSONArray((1..6).map { JSONArray(samples[it]!!.toList()) })).toString()
+            .put("drags", JSONArray((1..6).map { i -> samples[i]?.let { JSONArray(it.toList()) } ?: JSONObject.NULL })).toString()
     }
 
     /** The bridge's refusal: the steps to do again (already cleared) and what to say. */

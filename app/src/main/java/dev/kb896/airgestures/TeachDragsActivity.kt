@@ -114,12 +114,12 @@ class TeachDragsActivity : Screen() {
             }))
             return
         }
-        content.addView(note("For this band on your $hand wrist. Pinch thumb and index or middle finger, do the move, let go: one pinch each, in order."))
+        content.addView(note("For this band on your $hand wrist. Pinch thumb and index or middle finger, do the move, let go: one pinch each, in order. Skip a drag you can't do: it's left out, and that move does nothing."))
         if (service == null) content.addView(note("The band's service isn't running: teaching starts when it's back.").apply { setTextColor(Cb.INK_900) })
         val current = teach.current
         content.addView(card(null, column(gap = 4f).apply {
             for (step in DragTeach.Step.entries) {
-                val done = teach.done(step)
+                val done = teach.done(step) || teach.skipped(step)
                 addView(row(gap = 12f).apply {
                     setPadding(0, dpi(8f), 0, dpi(8f))
                     addView(column(gap = 3f).apply {
@@ -133,15 +133,23 @@ class TeachDragsActivity : Screen() {
                     }, weighted())
                     when {
                         done -> {
-                            addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = "Done ✓" })
-                            addView(pill("Redo") {
+                            addView(Cb.text(context, 13f, color = Cb.INK_500).apply { text = if (teach.skipped(step)) "Skipped" else "Done ✓" })
+                            addView(pill(if (teach.skipped(step)) "Teach" else "Redo") {
                                 teach.redo(step)
                                 saved = false
                                 message = null
                                 render()
                             }.first)
                         }
-                        step == current -> addView(Cb.chip(context, Cb.Signal.INFO, "Now"))
+                        step == current -> {
+                            addView(Cb.chip(context, Cb.Signal.INFO, "Now"))
+                            if (step != DragTeach.Step.TURN && !saved) addView(pill("Skip") {
+                                message = null
+                                // Skipping the last one left completes the set: check and save it.
+                                if (teach.skip(step)) teach.json()?.let(::check)
+                                render()
+                            }.first)
+                        }
                     }
                 })
             }

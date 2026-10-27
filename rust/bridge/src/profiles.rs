@@ -196,7 +196,8 @@ struct PalmJson {
 pub(crate) struct PrototypesJson {
     pub roll: f64,
     pub turn: [f64; 3],
-    pub drags: [[f64; 3]; 6],
+    /// `null` for a drag skipped while teaching.
+    pub drags: [Option<[f64; 3]>; 6],
 }
 
 /// What one wrist has on this band.
