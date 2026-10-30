@@ -72,10 +72,12 @@ class Prefs(context: Context, val slot: Int = Bands.selected(context)) {
         get() = prefs.getBoolean("running", false)
         set(value) = prefs.edit().putBoolean("running", value).apply()
 
-    /** The action id in force for [gesture] (the active profile's), or [profile]'s: an [Action]'s id, `app:…` or `tap:…`. */
+    /**
+     * The action id in force for [gesture] (this band's active profile's), or [profile]'s (any
+     * profile, used by this band or not): an [Action]'s id, `app:…` or `tap:…`.
+     */
     fun actionId(gesture: Gesture, profile: String? = null): String {
-        val list = Bands.profiles(context, slot)
-        val chosen = if (profile == null) list.active(Profiles.foreground) else list.profile(profile)
+        val chosen = if (profile == null) Bands.profiles(context, slot).active(Profiles.foreground) else Profiles.load(context).profile(profile)
         return chosen?.map?.get(gesture.key) ?: gesture.default.id
     }
 

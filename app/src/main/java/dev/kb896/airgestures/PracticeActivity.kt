@@ -33,7 +33,7 @@ class PracticeActivity : Screen() {
         at = savedInstanceState?.getInt("step") ?: 0
         val active = Profiles.active(this)
         steps = Lessons.steps(
-            Profiles.load(this).profiles.size,
+            Bands.profiles(this, Bands.selected(this)).profiles.size,
             dial = DialChoice.of(active.dial) != DialChoice.NONE,
             map = Gesture.entries.associate { it.key to (active.map[it.key] ?: it.default.id) },
             band = Profiles.band(this),
@@ -134,7 +134,8 @@ class PracticeActivity : Screen() {
 
     /** What the step's gesture would do now, in words. */
     private fun would(step: Lessons.Step): String {
-        val list = Profiles.load(this)
+        // The selected band's profiles, as the lessons follow that band.
+        val list = Bands.profiles(this, Bands.selected(this))
         val profile = list.active(Profiles.foreground)
         return when (step.done) {
             is Lessons.Done.Gesture, Lessons.Done.Hold -> {
