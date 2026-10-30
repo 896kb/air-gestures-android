@@ -87,14 +87,24 @@ class WriteService : AccessibilityService() {
                 if (node == null) {
                     if (FieldWriting.keyboard(from)) main.postDelayed(::catchFocused, KEYBOARD_SETTLE_MS)
                     // A field waiting for Handwriting on/off whose app went.
-                    else if (waiting != null && !elsewhere(event) && FieldWriting.leaves(from, waitingApp, packageName, from == packageName && activity(event.className))
-                        && Profiles.announced != waitingApp) clearWaiting()
+                    else {
+                        val wait = waiting ?: return
+                        if (elsewhere(event) || !FieldWriting.leaves(from, waitingApp, packageName, from == packageName && activity(event.className))) return
+                        // An announced app (see below): only once its field has lost the focus.
+                        if (Profiles.announced != waitingApp) clearWaiting()
+                        else main.postDelayed({ if (waiting === wait && !stillFocused(wait)) clearWaiting() }, RECHECK_MS)
+                    }
                     return
                 }
                 if (elsewhere(event) || !FieldWriting.leaves(from, app, packageName, from == packageName && activity(event.className))) return
-                // The field's app said it's in front (and says when it leaves): another app's window isn't it leaving.
-                if (from != packageName && app != null && Profiles.announced == app) return
                 val why = if (from == packageName) "a screen of this app came up" else "$from came up"
+                // The field's app said it's in front (and says when it leaves): another app's window
+                // isn't it leaving, unless the field has lost the focus too (the app was killed, or
+                // Home or Recents took the user away without it saying so).
+                if (from != packageName && app != null && Profiles.announced == app) {
+                    main.postDelayed({ if (field === node && !stillFocused(node)) leave(why) }, RECHECK_MS)
+                    return
+                }
                 // A panel or pop-up over the app (Samsung's edge panel comes up with the keyboard)
                 // leaves the field focused: only once it isn't does writing end.
                 if (stillFocused(node)) main.postDelayed({ if (field === node && !stillFocused(node)) leave(why) }, RECHECK_MS)
