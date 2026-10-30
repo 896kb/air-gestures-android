@@ -131,12 +131,11 @@ class MainActivity : Screen() {
                 text = listOfNotNull("You have ${UpdateCheck.version(context)}.", notes).joinToString(" ")
             })
             // The store first; with it on the phone it's the only way. Checked on every render,
-            // so installing it and coming back leaves just its pill. The two pills don't fit
-            // side by side on a phone, so they stack.
+            // so installing it and coming back leaves just its pill. Side by side where they fit.
             val store = storeInstalled()
-            addView(column().apply {
-                addView(row().apply { addView(storePill { if (store) updateInStore() else openUrl(UpdateCheck.STORE_SITE) }) })
-                if (!store) addView(row().apply { addView(pill("Update", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first) })
+            addView(rowOrColumn(gap = 10f).apply {
+                addView(storePill { if (store) updateInStore() else openUrl(UpdateCheck.STORE_SITE) })
+                if (!store) addView(pill("Update", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first)
             })
         }))
     }
@@ -144,7 +143,7 @@ class MainActivity : Screen() {
     private fun storeInstalled() = runCatching { packageManager.getPackageInfo(UpdateCheck.STORE, 0) }.isSuccess
 
     /** The site's store button: the ink pill with the store's icon. */
-    private fun storePill(onClick: () -> Unit) = pill("Update through 896 Store", onClick = onClick).first.apply {
+    private fun storePill(onClick: () -> Unit) = pill("Update via 896 Store", onClick = onClick).first.apply {
         background = NeuDrawable(context, 999f, fill = Cb.INK_900, solid = true, soft = false)
         setTextColor(android.graphics.Color.WHITE)
         val icon = context.getDrawable(R.drawable.store_896)!!.apply { setBounds(0, 0, dpi(18f), dpi(18f)) }

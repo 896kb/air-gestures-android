@@ -28,7 +28,7 @@ fails without one.
   Keys downloaded before move to band 1. The key a band just installed shows right away.
 - Handwriting no longer ends when Samsung's Edge panel or a flip phone's cover screen comes
   up, and ends when its app is gone even if the app didn't say it left.
-- **Update through 896 Store:** when a new version is out, the card at the top of Home
+- **Update via 896 Store:** when a new version is out, the card at the top of Home
   updates through the 896 Store if it's on the phone. Without the store, the card offers to
   get it (store.896.ro) or to download the APK as before.
 

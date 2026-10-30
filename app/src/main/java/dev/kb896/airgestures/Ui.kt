@@ -241,6 +241,25 @@ abstract class Screen : Activity() {
         }
     }
 
+    /** A [row] while its children fit side by side, else a [column] (a narrow phone, large text). */
+    fun rowOrColumn(gap: Float = 0f): LinearLayout = object : LinearLayout(this) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                val shown = (0 until childCount).map(::getChildAt).filter { it.visibility != GONE }
+                val any = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+                val wanted = shown.sumOf { it.measure(any, any); it.measuredWidth } + dpi(gap) * (shown.size - 1).coerceAtLeast(0)
+                orientation = if (wanted <= MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight) HORIZONTAL else VERTICAL
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }.apply {
+        gravity = Gravity.CENTER_VERTICAL
+        if (gap > 0) {
+            showDividers = LinearLayout.SHOW_DIVIDER_MIDDLE
+            dividerDrawable = GradientDrawable().apply { setSize(dpi(gap), dpi(gap)) }
+        }
+    }
+
     fun weighted() = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
 
     fun icon(res: Int, size: Float = 16f, color: Int = Cb.INK_900) = ImageView(this).apply {
