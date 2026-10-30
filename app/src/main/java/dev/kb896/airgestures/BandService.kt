@@ -355,6 +355,8 @@ class BandService : Service() {
         }.let {}
 
         override fun onStatus(status: JSONObject) = main.post {
+            // Firmware keys from before they were kept per band are band 1's.
+            if (slot == 0 && !Firmware.oldKeysMoved(this@BandService)) link.deviceInfo()?.optString("tag")?.takeIf { it.isNotEmpty() }?.let { Firmware.moveOldKeys(this@BandService, it) }
             // Mirrored as the bridge has it (right after a reconnect too); `@controls` says it first.
             val paused = status.optBoolean("paused")
             if (paused != prefs.paused) prefs.paused = paused

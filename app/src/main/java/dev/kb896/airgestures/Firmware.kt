@@ -43,6 +43,35 @@ object Firmware {
             File(dir, "bands").listFiles().orEmpty().firstOrNull { File(it, "response.json").isFile } ?: dir
     }
 
+    /** What a check left at the top of a build's folder before keys were kept per band. */
+    private val OLD_FILES = listOf("response.json", "kek.json", "check.json")
+    private const val OLD_KEYS_MOVED = "firmware.old_keys_moved"
+
+    /**
+     * Before keys were kept per band there was only band 1, so what a check left at the top of
+     * a build's folder ([OLD_FILES]) is band 1's: once its [tag] is known, those files move into
+     * bands/<tag>/ (moved, so there's still one copy of the key), for every build without that
+     * folder yet. Once per install.
+     */
+    fun moveOldKeys(context: Context, tag: String) {
+        if (oldKeysMoved(context)) return
+        downloads(context)?.let { moveOldKeys(it, tag) }
+        context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE).edit().putBoolean(OLD_KEYS_MOVED, true).apply()
+    }
+
+    fun oldKeysMoved(context: Context) =
+        context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE).getBoolean(OLD_KEYS_MOVED, false)
+
+    /** [moveOldKeys] in [downloads] (files/firmware). */
+    fun moveOldKeys(downloads: File, tag: String) {
+        for (dir in downloads.listFiles().orEmpty().filter { it.isDirectory && it.name.all(Char::isDigit) }) {
+            val old = OLD_FILES.map { File(dir, it) }.filter { it.isFile }
+            val band = File(dir, "bands/$tag")
+            if (old.isEmpty() || band.exists() || !band.mkdirs()) continue
+            for (file in old) file.renameTo(File(band, file.name))
+        }
+    }
+
     /** The connected band's folder name for its firmware files (a hash of its serial), or null. */
     fun bandTag(): String? = BandService.instance?.deviceInfo()?.optString("tag")?.takeIf { it.isNotEmpty() }
 
