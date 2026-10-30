@@ -91,7 +91,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
             val found = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!found.lowercase().startsWith("meta band") || device != null || ended) return
             // The other band, in pairing mode too: not this one.
-            if (Bands.slots(context).any { it != slot && Prefs(context, it).bandAddress == result.device.address }) return
+            if (Bands.slots(context).any { it != slot && Bands.address(context, it).equals(result.device.address, ignoreCase = true) }) return
             adapter?.bluetoothLeScanner?.stopScan(this)
             main.removeCallbacks(notFound)
             device = result.device

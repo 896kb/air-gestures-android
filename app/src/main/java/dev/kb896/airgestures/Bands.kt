@@ -18,7 +18,10 @@ object Bands {
     /** Band 2's settings: band 1's names with this in front. */
     private const val PREFIX = "band2."
     /** The settings each band has its own of (band 2's under [PREFIX]). */
-    private val OWN = listOf("hand", "paused", "band.address", "ota_expect", "association", "write_in_fields", "connect", PICKED, ON)
+    private val OWN = listOf(
+        "hand", "paused", "band.address", "ota_expect", "association", "write_in_fields", "connect", PICKED, ON,
+        "battery.level", "battery.charging", "battery.at", "battery.low20", "battery.low10", "battery.charged",
+    )
     /** Band 2's pick (band 1's is the profile list's own, `profile.current`). */
     const val PICKED = "profile.current"
     /** The profiles a band uses, in its order (none stored: all of them). */
@@ -52,6 +55,12 @@ object Bands {
     /** Where a band's owner key and record live: band 1's where they always were. */
     fun dir(context: Context, slot: Int): File =
         if (slot == 0) context.filesDir else File(context.filesDir, "band2").apply { mkdirs() }
+
+    /**
+     * [slot]'s Bluetooth address: as it last connected, else from its band.json (a key imported
+     * from the desktop before it ever connected here); null when neither says.
+     */
+    fun address(context: Context, slot: Int): String? = Prefs(context, slot).bandAddress ?: Identity.bandAddress(context, slot)
 
     /** Band 2, on the other wrist from band 1 and without handwriting; selected. */
     fun add(context: Context) {

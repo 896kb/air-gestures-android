@@ -76,10 +76,9 @@ class BandLink(
             val bands = adapter?.bondedDevices?.filter { it.name?.lowercase()?.startsWith("meta band") == true }.orEmpty()
             val address = prefs.bandAddress ?: Identity.bandAddress(context, slot)
             if (address != null) return bands.firstOrNull { it.address == address }
-            return bands.firstOrNull { band -> Bands.slots(context).none { it != slot && addressOf(it) == band.address } }
+            return bands.firstOrNull { band -> Bands.slots(context).none { it != slot && Bands.address(context, it).equals(band.address, ignoreCase = true) } }
         }
 
-    private fun addressOf(other: Int) = Prefs(context, other).bandAddress ?: Identity.bandAddress(context, other)
 
     fun start() {
         if (wanted) return
@@ -330,7 +329,7 @@ class BandLink(
             val name = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!name.lowercase().startsWith("meta band") || gatt != null) return
             // The other band, in pairing mode: not this one.
-            if (Bands.slots(context).any { it != slot && addressOf(it) == result.device.address }) return
+            if (Bands.slots(context).any { it != slot && Bands.address(context, it).equals(result.device.address, ignoreCase = true) }) return
             adapter?.bluetoothLeScanner?.stopScan(this)
             log("found $name; connecting")
             listener.onPhase(Phase.CONNECTING, name)
