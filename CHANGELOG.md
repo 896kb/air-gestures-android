@@ -4,6 +4,31 @@ Each release's section becomes its GitLab release notes (and what the app's upda
 notification shows). Add a section for the version before tagging it; the release job
 fails without one.
 
+## 0.9.31
+
+- **Two bands at once** (thanks to David Ljung Madison Stellar): Setup › Add a second band
+  puts band 2 on the other wrist, with its own key, wrist, controls, connection,
+  calibrations, firmware and battery alerts. Home has a band switch (the left wrist's band
+  on the left; swipe sideways too). A single-band install is unchanged.
+- **Profiles stay shared:** each band uses all of them, or only the ones ticked under
+  Profiles on this band, in its own order and with its own pick. An app's own profile
+  switches a band only if that band uses it.
+- **The Handwriting layer** (Gestures › Handwriting): handwriting in text fields for one
+  band, starting right away, after writing two dots (..), or on a gesture; and what each
+  gesture does while writing: as usual, nothing, pen down or up, word choices, the edit
+  menu, cursor and word steps, home and end, select, and delete. Gestures go to the field
+  only while the pen is down. Two dots and three dots can be set to any action.
+- **Send everything to automation** (a profile switch): every gesture, both dials, each
+  drag and every drawing goes to automation under its own name, and the profile's own
+  actions come back when it's off. The broadcast also carries `palm` while the hand is
+  calibrated, and `band` (left / right) with two bands.
+- **Teach your drags:** skip a drag you can't make; a move like it then does nothing.
+  "Use the measured ones" is now Revert to defaults.
+- **Firmware keys per band:** Meta wraps each key for one band, so each band keeps its own.
+  Keys downloaded before move to band 1. The key a band just installed shows right away.
+- Handwriting no longer ends when Samsung's Edge panel or a flip phone's cover screen comes
+  up, and ends when its app is gone even if the app didn't say it left.
+
 ## 0.9.27
 
 - **Band vibration** (thanks to Tudor Palasan): the band buzzes for the app. A Band

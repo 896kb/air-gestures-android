@@ -11,12 +11,12 @@ class CreditsActivity : Screen() {
     private class Person(val image: Int, val role: String, val name: String, val work: String, val site: String, val url: String)
 
     private val people = listOf(
-        // Dave's own M-Hacks button, from his site.
+        // Dave's own M-Hacks button, one of the buttons on his site.
         Person(
-            R.drawable.credits_marginalhacks, "Firmware updates and handwriting", "David Ljung Madison Stellar",
-            "Updating the band's firmware from the app, and handwriting: writing letters with the band, " +
-                "typing into text fields, word suggestions and the edit menu.",
-            "MarginalHacks.com", "https://marginalhacks.com",
+            R.drawable.credits_marginalhacks, "Firmware, handwriting and two bands", "David Ljung Madison Stellar",
+            "Updating the band's firmware from the app; handwriting: writing letters with the band, " +
+                "typing into text fields, word suggestions and the edit menu; and two bands at once, one on each wrist.",
+            "GetDave.com", "https://getdave.com/",
         ),
         Person(
             R.drawable.credits_iinsaane, "Band vibration implementation", "Tudor Palasan (iinsaane)",
