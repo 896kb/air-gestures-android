@@ -35,7 +35,7 @@ fn drag_key(drag: Drag) -> &'static str {
     }
 }
 
-/// From `{"roll", "turn": [x,y,z], "drags": [six, in left, right, toward, away, up, down order]}`
+/// From `{"roll", "turn": [x,y,z], "drags": [six, in left, right, toward, away, up, down order; null skipped]}`
 /// (the `@drag-sample` directions and roll): the prototypes as the profiles JSON's
 /// `calibration.<wrist>.drags` keeps them, or `{"error": "no-turn" | "no-drag <drag>" |
 /// "too-alike <drag> <drag>" | "like-the-turn <drag>" | "bad-json"}`. (band-core's `no-roll`,

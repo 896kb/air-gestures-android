@@ -76,10 +76,19 @@ object Setup {
             "Export the key", "Save it for a computer (air-gestures import) or another phone", true, "Export",
             always = true, icon = R.drawable.ic_arrow_down, required = false,
         ) { it.exportKey() })
-        if (ownerKey) add(Step(
-            "Forget the band", "Removes the key, the pairing and the link from this phone", false, "Forget",
+        val two = Bands.two(context)
+        if (ownerKey || two) add(Step(
+            if (two) "Remove this band" else "Forget the band",
+            if (two) "Removes its key, pairing and link from this phone; the other band stays"
+            else "Removes the key, the pairing and the link from this phone",
+            false, if (two) "Remove" else "Forget",
             always = true, icon = R.drawable.ic_link, required = false,
         ) { it.forgetBand() })
+        // A band on each wrist: the second has its own key, wrist, controls and firmware.
+        if (!two && Identity.keyFile(context).exists()) add(Step(
+            "Add a second band", "Wear one on each wrist, each with its own gestures and firmware", true, "Add",
+            always = true, icon = R.drawable.ic_hand, required = false,
+        ) { it.addBand() })
         add(Step(
             "Back up settings", "Profiles, During calls and switches in a file; the key stays apart", true, "Back up",
             always = true, icon = R.drawable.ic_arrow_down, required = false,

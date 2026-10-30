@@ -585,6 +585,44 @@ pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldChooseCancel<'loca
     unsafe { connection(handle) }.field_choose_cancel(now);
 }
 
+/// The Handwriting layer (see `Connection::set_writing_layer`); throws on bad JSON.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setWritingLayer<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    json: JString<'local>,
+) {
+    let result = match env.get_string(&json) {
+        Ok(json) => unsafe { connection(handle) }.set_writing_layer(&String::from(json)),
+        Err(error) => Err(error.to_string()),
+    };
+    if let Err(error) = result {
+        let _ = env.throw_new("java/lang/IllegalArgumentException", error);
+    }
+}
+
+/// Stop writing: the pen goes up.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldPenUp<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) {
+    unsafe { connection(handle) }.field_pen_up();
+}
+
+/// Where the next word choices show: the app's popup, or in the field.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_kb896_airgestures_Bridge_setFieldPopup<'local>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    popup: jboolean,
+) {
+    unsafe { connection(handle) }.set_field_popup(popup != 0);
+}
+
 /// A double tap in a text field: the pen goes down.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_kb896_airgestures_Bridge_fieldPenDown<'local>(

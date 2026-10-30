@@ -15,6 +15,7 @@ class GesturesActivity : GestureScreen() {
     private lateinit var band: LinearLayout
     private lateinit var profiles: LinearLayout
     private lateinit var calls: LinearLayout
+    private lateinit var handwriting: LinearLayout
     private lateinit var sequences: LinearLayout
     private lateinit var drawings: LinearLayout
     private lateinit var devices: LinearLayout
@@ -26,6 +27,7 @@ class GesturesActivity : GestureScreen() {
         band = column()
         profiles = column(gap = 8f)
         calls = column()
+        handwriting = column()
         sequences = column(gap = 8f)
         drawings = column()
         devices = column()
@@ -39,6 +41,12 @@ class GesturesActivity : GestureScreen() {
                 addView(band)
             }))
             addView(card("Profiles", profiles))
+            addView(card("Handwriting", column(gap = 8f).apply {
+                addView(Cb.text(context, 13f, color = Cb.INK_500).apply {
+                    text = "Write letters with a finger into the text field in focus; what the gestures do there."
+                })
+                addView(handwriting)
+            }))
             addView(card(null, drawings))
             addView(card("Sequences", sequences))
             addView(card(null, devices))
@@ -59,7 +67,8 @@ class GesturesActivity : GestureScreen() {
 
     override fun render() {
         val list = Profiles.load(this)
-        val active = list.active(Profiles.foreground)
+        // Each band's profile in force (with two, it says which band).
+        val active = Bands.slots(this).map { Bands.profiles(this, it).active(Profiles.foreground).id }
         // Moving a band control and coming back re-renders (mockup 7: no toast).
         val report = Report.of(this)
         val controls = Profiles.band(this)
@@ -78,7 +87,8 @@ class GesturesActivity : GestureScreen() {
             list.profiles.forEachIndexed { index, profile ->
                 val count = list.apps.values.count { it == profile.id }
                 val detail = listOfNotNull(
-                    "In use".takeIf { profile.id == active.id && list.profiles.size > 1 },
+                    active.withIndex().filter { it.value == profile.id }.map { it.index }.takeIf { it.isNotEmpty() && list.profiles.size > 1 }
+                        ?.let { slots -> if (Bands.two(this@GesturesActivity)) "In use: " + slots.joinToString(", ") { Bands.name(this@GesturesActivity, it) } else "In use" },
                     when (count) {
                         0 -> null
                         1 -> "1 app"
@@ -114,6 +124,7 @@ class GesturesActivity : GestureScreen() {
                         }
                         if (navigate) added.renamed(profile.id, "Navigate") else added
                     }.profiles.last()
+                    Bands.profileAdded(applicationContext, made.id)
                     BandService.instance?.remap()
                     ProfileActivity.open(context, made.id)
                 }
@@ -161,6 +172,14 @@ class GesturesActivity : GestureScreen() {
         })
         devices.removeAllViews()
         devices.addView(homeDevicesRow())
+        handwriting.removeAllViews()
+        val writer = Bands.writer(this)
+        val writing = when {
+            writer == null -> "Off"
+            Bands.two(this) -> "On · ${Bands.name(this, writer)} · starts ${HandwritingLayer.start(this).label.lowercase()}"
+            else -> "On · starts ${HandwritingLayer.start(this).label.lowercase()}"
+        }
+        handwriting.addView(navRow(R.drawable.ic_pencil, "Handwriting", detail = writing) { open<HandwritingActivity>() })
         calls.removeAllViews()
         val prefs = Prefs(this)
         val set = Gesture.entries.count { !it.drag && prefs.callActionId(it) != Mappings.AS_USUAL }

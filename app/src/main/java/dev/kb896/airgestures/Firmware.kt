@@ -14,29 +14,74 @@ object Firmware {
     /** "Build 64" for a known version, else the version number itself. */
     fun name(version: String) = BUILDS[version]?.let { "Build $it" } ?: version
 
-    /** One build Meta offered, as downloaded into files/firmware/<version>: ota.zip, kek.json, response.json. */
-    class Package(val version: String, val dir: File) {
-        private val response = runCatching { JSONObject(File(dir, "response.json").readText()) }.getOrNull()
+    /**
+     * One build Meta offered, as downloaded into files/firmware/<version>: ota.zip (the same for
+     * every band) and, in bands/<tag>/, what Meta gave each band: response.json and kek.json,
+     * the key wrapped for that band alone. [band] is the connected band's tag (see
+     * [bandTag]); without it, or before that band's check, the offer read is any band's.
+     */
+    class Package(val version: String, val dir: File, band: String?) {
+        /** This band's files, when Meta has been asked for them. */
+        private val mine = band?.let { File(dir, "bands/$it") }?.takeIf { File(it, "response.json").isFile }
+        private val response = runCatching { JSONObject(File(mine ?: anyBand(), "response.json").readText()) }.getOrNull()
         /** Meta's build number ("64"), from its offer. */
         val build: String? = response?.let { find(it, "build_number_display_name") }?.toString()
         val size: Long get() = File(dir, "ota.zip").length()
         /** The key (KEK) version the band needs to read this build. */
         val kek: Long? = response?.let { find(it, "kek_id") }?.toString()?.toLongOrNull()
-        val complete: Boolean get() = File(dir, "ota.zip").isFile && File(dir, "kek.json").isFile
+        /** The key for this band, downloaded (another band's can't be used: the band refuses it). */
+        val bandKey: File? = mine?.let { File(it, "kek.json") }?.takeIf { it.isFile }
+        val complete: Boolean get() = File(dir, "ota.zip").isFile && response != null
         /** Meta's release notes as plain text. */
         val notes: String? = response?.let { find(it, "release_notes_cms") as? String }
             ?.replace(Regex("<if-param-isnt-set.*?</if-param-isnt-set>", RegexOption.DOT_MATCHES_ALL), "")
             ?.replace(Regex("<[^>]+>"), " ")?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotEmpty() }
         val title get() = build?.let { "Build $it" } ?: name(version)
+
+        /** Some band's folder with an offer, else the package's own (as kept before keys were per band). */
+        private fun anyBand(): File =
+            File(dir, "bands").listFiles().orEmpty().firstOrNull { File(it, "response.json").isFile } ?: dir
     }
+
+    /** What a check left at the top of a build's folder before keys were kept per band. */
+    private val OLD_FILES = listOf("response.json", "kek.json", "check.json")
+    private const val OLD_KEYS_MOVED = "firmware.old_keys_moved"
+
+    /**
+     * Before keys were kept per band there was only band 1, so what a check left at the top of
+     * a build's folder ([OLD_FILES]) is band 1's: once its [tag] is known, those files move into
+     * bands/<tag>/ (moved, so there's still one copy of the key), for every build without that
+     * folder yet. Once per install.
+     */
+    fun moveOldKeys(context: Context, tag: String) {
+        if (oldKeysMoved(context)) return
+        downloads(context)?.let { moveOldKeys(it, tag) }
+        context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE).edit().putBoolean(OLD_KEYS_MOVED, true).apply()
+    }
+
+    fun oldKeysMoved(context: Context) =
+        context.getSharedPreferences("air-gestures", Context.MODE_PRIVATE).getBoolean(OLD_KEYS_MOVED, false)
+
+    /** [moveOldKeys] in [downloads] (files/firmware). */
+    fun moveOldKeys(downloads: File, tag: String) {
+        for (dir in downloads.listFiles().orEmpty().filter { it.isDirectory && it.name.all(Char::isDigit) }) {
+            val old = OLD_FILES.map { File(dir, it) }.filter { it.isFile }
+            val band = File(dir, "bands/$tag")
+            if (old.isEmpty() || band.exists() || !band.mkdirs()) continue
+            for (file in old) file.renameTo(File(band, file.name))
+        }
+    }
+
+    /** The connected band's folder name for its firmware files (a hash of its serial), or null. */
+    fun bandTag(): String? = BandService.instance?.deviceInfo()?.optString("tag")?.takeIf { it.isNotEmpty() }
 
     fun downloads(context: Context) = context.getExternalFilesDir("firmware")
 
-    /** The downloaded builds, newest first. */
-    fun packages(context: Context): List<Package> =
+    /** The downloaded builds, newest first, read for [band] (see [Package]). */
+    fun packages(context: Context, band: String?): List<Package> =
         downloads(context)?.listFiles().orEmpty()
             .filter { it.isDirectory && it.name.all(Char::isDigit) }
-            .map { Package(it.name, it) }
+            .map { Package(it.name, it, band) }
             .filter { it.complete }
             .sortedByDescending { it.version.toLong() }
 
@@ -56,7 +101,8 @@ object Firmware {
 
     /**
      * The package unzipped for the band (files/ota/<version>): the manifest, the items it
-     * lists, and the key. Only the manifest's own paths are taken out of the zip.
+     * lists, and this band's key (none when it hasn't one: never another band's). Only the
+     * manifest's own paths are taken out of the zip.
      */
     fun unpack(context: Context, pkg: Package): File {
         val target = File(context.getExternalFilesDir("ota"), pkg.version)
@@ -76,7 +122,8 @@ object Firmware {
                 zip.getInputStream(entry).use { input -> out.outputStream().use { input.copyTo(it) } }
             }
         }
-        File(pkg.dir, "kek.json").copyTo(File(target, "kek.json"), overwrite = true)
+        val kek = File(target, "kek.json")
+        pkg.bandKey?.copyTo(kek, overwrite = true) ?: kek.delete()
         return target
     }
 

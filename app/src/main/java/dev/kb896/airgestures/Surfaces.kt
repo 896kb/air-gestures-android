@@ -24,7 +24,7 @@ object Surfaces {
     fun status(context: Context): String {
         val state = BandService.state.value
         return when {
-            BandService.instance == null -> "Off"
+            !BandService.connected(context) -> "Off"
             !Setup.bluetoothOn(context) -> "Bluetooth off"
             state.phase == Phase.CONNECTED -> listOfNotNull("Connected", state.battery?.let { "$it %" }).joinToString(" · ")
             else -> "Searching"
@@ -70,7 +70,7 @@ object Surfaces {
 
     /** Ready to connect without a trip to the app first (and not while a claim holds the band). */
     fun ready(context: Context) =
-        Setup.granted(context) && Setup.bluetoothOn(context) && Identity.present(context) && BandClaim.current == null
+        Setup.granted(context) && Setup.bluetoothOn(context) && Identity.anyPresent(context) && BandClaim.current == null
 }
 
 /** Opens the app from a tile (Android 14 wants a PendingIntent; 13 an Intent). */
@@ -114,14 +114,15 @@ class ControlsTile : TileService() {
 
     override fun onClick() {
         val service = BandService.instance ?: return openApp()
-        service.setPaused(!BandService.state.value.paused)
+        // Every band: off while any is on, else all on.
+        service.setPausedAll(!service.allPaused())
         render()
     }
 
     private fun render() {
         val tile = qsTile ?: return
         val running = BandService.instance != null
-        val paused = BandService.state.value.paused
+        val paused = BandService.instance?.allPaused() ?: BandService.state.value.paused
         tile.state = when {
             !running -> Tile.STATE_UNAVAILABLE
             paused -> Tile.STATE_INACTIVE

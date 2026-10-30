@@ -124,6 +124,59 @@ class MappingsTest {
             Mappings.extras(Mappings.Automation.Step("middle_dial", -1, "Music", null), device = null, steps = -3))
     }
 
+    @Test fun `a profile that sends everything sends every gesture, dial, drag and drawing by its name`() {
+        val all = Mappings.Input(list.withSendAll("p1", true), band, calls, input.drawings, input.calibrations, "left", setOf("Bulb", "Star", "Moon"))
+        val music = org.json.JSONObject(Mappings.profilesJson(all)).getJSONArray("profiles").getJSONObject(0)
+        val map = music.getJSONObject("map")
+        for (gesture in Gesture.entries) assertEquals("automation/Music:${gesture.key}", map.getString(gesture.key))
+        assertEquals(0, music.getJSONObject("palm").length())
+        assertEquals("automation/Music:dial:dial:up", music.getJSONObject("index").getJSONObject("dial").getString("up"))
+        assertEquals("automation/Music:dial:middle_dial:down", music.getJSONObject("middle").getJSONObject("dial").getString("down"))
+        // The middle finger's sliders become its six drag gestures.
+        assertEquals("gestures", music.getJSONObject("middle").getString("drags"))
+        val drawings = music.getJSONObject("drawings")
+        assertEquals(setOf("Bulb", "Star", "Moon"), drawings.keys().asSequence().toSet())
+        assertEquals("automation/Music:drawing:Moon", drawings.getString("Moon"))
+        // Its own mappings are kept, and the other profiles are as they were.
+        assertEquals("media.previous", list.withSendAll("p1", true).profile("p1")!!.map["swipe_up"])
+        assertEquals("nav.next", org.json.JSONObject(Mappings.profilesJson(all)).getJSONArray("profiles").getJSONObject(1).getJSONObject("map").getString("swipe_up"))
+    }
+
+    @Test fun `an overlay goes over every profile, its palm overrides too`() {
+        val over = Mappings.Input(list, band, calls, input.drawings, input.calibrations, "left", overlay = mapOf("index_tap" to WriteAction.TOGGLE.id))
+        val json = org.json.JSONObject(Mappings.profilesJson(over)).getJSONArray("profiles")
+        for (i in 0 until json.length()) assertEquals(WriteAction.TOGGLE.id, json.getJSONObject(i).getJSONObject("map").getString("index_tap"))
+        assertFalse(json.getJSONObject(0).getJSONObject("palm").has("index_tap"))
+    }
+
+    @Test fun `the overlay beats a band control on its gesture, but not Controls on-off`() {
+        val over = Mappings.Input(list, BandControls.standard(), calls, input.drawings, input.calibrations, "left",
+            overlay = mapOf("index_hold" to WriteAction.TOGGLE.id, "middle_hold" to WriteAction.TOGGLE.id))
+        val bandJson = org.json.JSONObject(Mappings.profilesJson(over)).getJSONObject("band")
+        assertTrue(bandJson.isNull("draw") || !bandJson.has("draw"))
+        assertEquals("middle_hold", bandJson.getJSONObject("controls").getString("gesture"))
+    }
+
+    @Test fun `the band's palm goes with gestures and dial steps, an override keeps its own`() {
+        assertEquals(Mappings.Automation.Gesture("index_drag_up", "sideways", "Music"),
+            Mappings.madeWith(Mappings.sent("automation/Music:index_drag_up")!!, "sideways"))
+        assertEquals(Mappings.Automation.Gesture("index_tap", "up", "Music"),
+            Mappings.madeWith(Mappings.sent("automation/Music:index_tap:up")!!, "down"))
+        val step = Mappings.madeWith(Mappings.Automation.Step("dial", +1, "Music"), "up")
+        assertEquals(mapOf("gesture" to "dial", "palm" to "up", "steps" to 2, "profile" to "Music"), Mappings.extras(step, null, steps = 2))
+        assertEquals(Mappings.Automation.Drawing("Star", "Music"), Mappings.madeWith(Mappings.Automation.Drawing("Star", "Music"), "up"))
+        assertEquals(Mappings.Automation.Gesture("index_tap", null), Mappings.madeWith(Mappings.Automation.Gesture("index_tap", null), null))
+    }
+
+    @Test fun `with two bands each says which made it, and a dial's steps gather per band`() {
+        val left = Mappings.madeWith(Mappings.sent("automation/Music:index_tap")!!, "up", "left")
+        assertEquals(mapOf("gesture" to "index_tap", "palm" to "up", "band" to "left", "profile" to "Music"), Mappings.extras(left, null))
+        val drawing = Mappings.madeWith(Mappings.Automation.Drawing("Star", "Music"), "up", "band2")
+        assertEquals(mapOf("gesture" to "drawing", "name" to "Star", "band" to "band2", "profile" to "Music"), Mappings.extras(drawing, null))
+        val step = Mappings.madeWith(Mappings.Automation.Step("dial", +1, "Music"), null, "left") as Mappings.Automation.Step
+        assertFalse(step.key == (Mappings.madeWith(step, null, "right") as Mappings.Automation.Step).key)
+    }
+
     @Test fun `a sequence's automation step sends the sequence's name, its profile and device`() {
         assertEquals(mapOf("gesture" to "sequence", "name" to "Goodnight", "profile" to "Music", "device" to "Curtains"),
             Mappings.extras(Mappings.Automation.Sequence("Goodnight", "Music", "d1"), device = "Curtains"))

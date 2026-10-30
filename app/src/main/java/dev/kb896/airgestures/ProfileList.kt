@@ -32,12 +32,17 @@ data class Profile(
     val middleDrags: Drags = Drags(),
     /** Drawing name → this profile's own action (wins over the shared one). */
     val drawings: Map<String, String> = emptyMap(),
+    /**
+     * Send everything to automation: every gesture, both dials, each drag and every drawing, by
+     * its own name (see [Mappings.profilesJson]); what's stored above is kept for when it's off.
+     */
+    val sendAll: Boolean = false,
 ) {
     fun dialOf(part: Part) = if (part == Part.MIDDLE) middleDial else dial
     fun drags(part: Part) = if (part == Part.MIDDLE) middleDrags else indexDrags
 
     /** Whether [gesture] does something here: its action (its default when never stored) or a palm override's. */
-    fun does(gesture: Gesture) =
+    fun does(gesture: Gesture) = sendAll ||
         (map[gesture.key] ?: gesture.default.id).isNotEmpty() || palm[gesture.key].orEmpty().values.any { it.isNotEmpty() }
 }
 
@@ -56,6 +61,16 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
     fun locked(foreground: String?) = appProfile(foreground) != null
 
     private fun appProfile(foreground: String?) = foreground?.let { profile(apps[it]) }
+
+    /**
+     * The list as a band uses it: the profiles [on] names, in that order (null, or none left: all
+     * of them), [picked] if it's among them (else the first), and the apps whose profile is.
+     */
+    fun forBand(on: List<String>?, picked: String): ProfileList {
+        val mine = on?.mapNotNull(::profile)?.distinct()?.takeIf { it.isNotEmpty() } ?: profiles
+        val ids = mine.map { it.id }.toSet()
+        return ProfileList(mine, picked.takeIf { it in ids } ?: mine.first().id, apps.filterValues { it in ids })
+    }
 
     /** The picked profile [by] places on (+1 next, −1 previous), wrapping round. */
     fun step(by: Int): ProfileList {
@@ -107,6 +122,8 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
         val own = it.palm[gesture].orEmpty() - palm.key
         it.copy(palm = if (own.isEmpty()) it.palm - gesture else it.palm + (gesture to own))
     }
+
+    fun withSendAll(id: String, on: Boolean) = change(id) { it.copy(sendAll = on) }
 
     fun withMiddleDial(id: String, dial: String) = change(id) { it.copy(middleDial = dial) }
 
@@ -179,6 +196,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                 put("middle_dial", profile.middleDial)
                 put("drags", JSONObject().put("index", drags(profile.indexDrags)).put("middle", drags(profile.middleDrags)))
                 put("drawings", JSONObject(profile.drawings))
+                put("send_all", profile.sendAll)
             })
         }
         return list.toString() to JSONObject(apps).toString()
@@ -239,6 +257,7 @@ data class ProfileList(val profiles: List<Profile>, val picked: String, val apps
                     indexDrags = drags(drags?.optJSONObject("index")),
                     middleDrags = drags(drags?.optJSONObject("middle")),
                     drawings = strings(item.optJSONObject("drawings")),
+                    sendAll = item.optBoolean("send_all", false),
                 )
             }
             require(parsed.isNotEmpty()) { "no profiles" }

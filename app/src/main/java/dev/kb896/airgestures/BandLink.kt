@@ -25,7 +25,7 @@ import kotlin.concurrent.thread
 enum class Phase { STOPPED, SEARCHING, CONNECTING, CONNECTED }
 
 /**
- * Keeps one band connected, as the desktop daemon does: read the input-channel
+ * Keeps one band ([slot], see [Bands]) connected, as the desktop daemon does: read the input-channel
  * PSM over GATT, open an L2CAP channel on it and run the band-core session.
  * Once the phone is bonded to the band it reconnects with `autoConnect`, so the
  * Bluetooth stack waits for the band (no pairing mode); before that it scans for
@@ -35,6 +35,7 @@ enum class Phase { STOPPED, SEARCHING, CONNECTING, CONNECTED }
 class BandLink(
     private val context: Context,
     private val listener: Listener,
+    private val slot: Int,
 ) {
     interface Listener {
         fun onPhase(phase: Phase, band: String?)
@@ -46,7 +47,7 @@ class BandLink(
     // Looked up on every use: after Bluetooth is switched off and on, an adapter held
     // from before can keep reporting "off" (seen on HyperOS).
     private val adapter get() = context.getSystemService(BluetoothManager::class.java).adapter
-    private val prefs = Prefs(context)
+    private val prefs = Prefs(context, slot)
     private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
     private var gatt: BluetoothGatt? = null
@@ -66,8 +67,18 @@ class BandLink(
     /** The session of the current attempt reached "connected". */
     @Volatile private var live = false
 
+    /**
+     * This band once the phone is bonded to it: by its address (as it last connected, else as
+     * its record says), else the first Meta band another band here isn't.
+     */
     val bondedBand: BluetoothDevice?
-        get() = adapter?.bondedDevices?.firstOrNull { it.name?.lowercase()?.startsWith("meta band") == true }
+        get() {
+            val bands = adapter?.bondedDevices?.filter { it.name?.lowercase()?.startsWith("meta band") == true }.orEmpty()
+            val address = prefs.bandAddress ?: Identity.bandAddress(context, slot)
+            if (address != null) return bands.firstOrNull { it.address == address }
+            return bands.firstOrNull { band -> Bands.slots(context).none { it != slot && Bands.address(context, it).equals(band.address, ignoreCase = true) } }
+        }
+
 
     fun start() {
         if (wanted) return
@@ -215,6 +226,14 @@ class BandLink(
 
     /** A double tap in a text field: the pen goes down. */
     fun fieldPenDown() = synchronized(lock) { if (handle != 0L) Bridge.fieldPenDown(handle, now()) }
+    /** After the field typing asked before it (a field that starts with the pen up). */
+    fun fieldPenUp() = fieldSends.execute { synchronized(lock) { if (handle != 0L) Bridge.fieldPenUp(handle) } }
+    fun setFieldPopup(popup: Boolean) = synchronized(lock) { if (handle != 0L) Bridge.setFieldPopup(handle, popup) }
+
+    /** The Handwriting layer ([HandwritingLayer.json]); the next connection reads it anyway. */
+    fun setWritingLayer(json: String) = synchronized(lock) {
+        if (handle != 0L) runCatching { Bridge.setWritingLayer(handle, json) }.onFailure { log("handwriting layer: ${it.message}") }
+    }
 
     /** Debug: the band's own handwriting on or off (see Bridge.setBandHandwriting). */
     fun setBandHandwriting(on: Boolean) = debugSend { Bridge.setBandHandwriting(it, on) }
@@ -283,7 +302,7 @@ class BandLink(
         generation++
         main.removeCallbacksAndMessages(null)
         runCatching { adapter?.bluetoothLeScanner?.stopScan(scan) }
-        if (socket != null) closedAt = SystemClock.elapsedRealtime()
+        if (socket != null) closedAt[slot] = SystemClock.elapsedRealtime()
         runCatching { socket?.close() }
         runCatching { gatt?.disconnect() }
         runCatching { gatt?.close() }
@@ -309,6 +328,8 @@ class BandLink(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val name = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!name.lowercase().startsWith("meta band") || gatt != null) return
+            // The other band, in pairing mode: not this one.
+            if (Bands.slots(context).any { it != slot && Bands.address(context, it).equals(result.device.address, ignoreCase = true) }) return
             adapter?.bluetoothLeScanner?.stopScan(this)
             log("found $name; connecting")
             listener.onPhase(Phase.CONNECTING, name)
@@ -371,15 +392,15 @@ class BandLink(
     private fun now() = SystemClock.elapsedRealtimeNanos() / 1e9
 
     private fun openSession(): Boolean {
-        val dir = context.filesDir
+        val dir = Bands.dir(context, slot)
         // A pending key is always newer: the band may have committed a claim whose
         // confirmation was lost (the desktop's rule).
-        val key = Identity.pendingFile(context).takeIf { it.exists() } ?: Identity.keyFile(context)
+        val key = Identity.pendingFile(context, slot).takeIf { it.exists() } ?: Identity.keyFile(context, slot)
         if (!key.exists()) {
             log("no owner key yet: claim the band or import its key")
             return false
         }
-        pending = key == Identity.pendingFile(context)
+        pending = key == Identity.pendingFile(context, slot)
         val guess = File(dir, "band.json").takeIf { it.exists() }
             ?.let { JSONObject(it.readText()).optInt("scheme_guess", 0) } ?: 0
         return try {
@@ -392,6 +413,7 @@ class BandLink(
                 Bridge.setLibrary(handle, Drawings.load(context).toJson())
                 Bridge.setTeaching(handle, teaching)
                 Bridge.setDragTeaching(handle, dragTeaching)
+                runCatching { Bridge.setWritingLayer(handle, HandwritingLayer.json(context)) }
                 prefs.probe.takeIf { it.isNotEmpty() }?.let {
                     Bridge.setProbe(handle, it)
                     log("probing stream flags $it")
@@ -411,7 +433,7 @@ class BandLink(
         }
         // Right after a channel closed, the band refuses a new one (it answers after ~3 s, then
         // closes it): give it a moment first.
-        val settle = closedAt + CHANNEL_SETTLE_MS - SystemClock.elapsedRealtime()
+        val settle = closedAt[slot] + CHANNEL_SETTLE_MS - SystemClock.elapsedRealtime()
         if (settle > 0) SystemClock.sleep(settle)
         val channel = try {
             device.createInsecureL2capChannel(psm).also { it.connect() }
@@ -455,7 +477,7 @@ class BandLink(
         } catch (e: Exception) {
             if (attempt == generation) log("link: ${e.message}")
         }
-        closedAt = SystemClock.elapsedRealtime()
+        closedAt[slot] = SystemClock.elapsedRealtime()
         // Refused before it ever connected: try again soon (the settle wait still applies).
         val again = if (live) 2000L else 500L
         main.post { if (attempt == generation) retry(again) }
@@ -471,7 +493,7 @@ class BandLink(
         if ("connected" in lines.lines()) live = true
         if (pending && "connected" in lines.lines()) {
             pending = false
-            if (Identity.pendingFile(context).renameTo(Identity.keyFile(context))) log("the band accepted the claimed key")
+            if (Identity.pendingFile(context, slot).renameTo(Identity.keyFile(context, slot))) log("the band accepted the claimed key")
         }
         if (actions.isNotEmpty()) listener.onActions(actions.lines())
         synchronized(lock) { publishStatus() }
@@ -523,9 +545,9 @@ class BandLink(
         const val CHANNEL_SETTLE_MS = 2000L
 
         /**
-         * When the last input channel closed ([SystemClock.elapsedRealtime]): for the whole
-         * process, since a restarted service (a new BandLink) meets the same band.
+         * When each band's last input channel closed ([SystemClock.elapsedRealtime]): for the
+         * whole process, since a restarted service (a new BandLink) meets the same band.
          */
-        @Volatile private var closedAt = 0L
+        private val closedAt = LongArray(Bands.MAX)
     }
 }

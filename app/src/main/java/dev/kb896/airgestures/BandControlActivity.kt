@@ -144,7 +144,7 @@ class BandControlActivity : GestureScreen() {
      * unreadable: not shown as a list of nothing).
      */
     private fun choices(palms: Set<Palm>?): List<Report.Choice>? {
-        val json = Bridge.bandChoices(Prefs(this).profilesJson(), builtin.key, palmKeys(palms))
+        val json = Bridge.bandChoices(Prefs(this).profilesJson(all = true), builtin.key, palmKeys(palms))
         Report.choicesError(json)?.let { error ->
             sheet("Can't list the gestures", note("The band's rules couldn't read your settings ($error). Nothing was changed."), "OK", cancel = false) { true }
             return null

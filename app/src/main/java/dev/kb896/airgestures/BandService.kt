@@ -15,24 +15,34 @@ import android.widget.Toast
 import org.json.JSONObject
 
 /**
- * Keeps the band connected in the background (a connected-device foreground
- * service) and runs its gestures. The activity watches it through [state].
+ * Keeps the bands connected in the background (a connected-device foreground service) and runs
+ * their gestures: one [Band] per band this phone keeps ([Bands]). The activities watch the band
+ * the home screen shows through [state], any band through [stateOf].
  */
-class BandService : Service(), BandLink.Listener {
-    private lateinit var link: BandLink
+class BandService : Service() {
     private lateinit var actions: Actions
-    private lateinit var prefs: Prefs
     private lateinit var calls: CallWatch
     private val main = Handler(Looper.getMainLooper())
+    /** Each band kept here, by slot; band 2 only once it's added and has a key. */
+    private val bands = arrayOfNulls<Band>(Bands.MAX)
+    /** The service was started (not only created): new bands connect at once. */
+    private var started = false
+    /** The band whose action runs now: its step detents go to it. */
+    private var acting = 0
+
+    private fun all() = bands.filterNotNull()
+
+    /** The band the home screen shows (its screens act on it), if it's kept here. */
+    private fun shown() = bands.getOrNull(Bands.selected(this))
+
+    private fun band(slot: Int) = bands.getOrNull(slot)
 
     override fun onCreate() {
         super.onCreate()
-        prefs = Prefs(this)
         actions = Actions(this, ::onLog, ::stepDetent)
-        link = BandLink(this, this)
+        selectionChanged(this)
         // Unlocking the phone: the band is likely near and about to be used.
         registerReceiver(unlocked, android.content.IntentFilter(Intent.ACTION_USER_PRESENT))
-        showProfile()
         // A call starting or ending swaps the During calls layer in or out.
         calls = CallWatch(this) { remap() }.also { it.start() }
         // The app's Companion (the CDM link), not this class's companion object.
@@ -46,6 +56,7 @@ class BandService : Service(), BandLink.Listener {
         )
         // The status notification says when controls are off; no separate alerts.
         notifications.deleteNotificationChannel(OLD_ALERTS)
+        bandsChanged()
         instance = this
         main.post(updateCheck)
         Alerts.scheduleReminder(this)
@@ -63,15 +74,38 @@ class BandService : Service(), BandLink.Listener {
         startForeground(NOTIFICATION, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         when (intent?.action) {
             // From the widget: as the power button.
-            ACTION_START -> prefs.running = true
-            ACTION_TOGGLE_CONTROLS -> setPaused(!prefs.paused)
+            ACTION_START -> Prefs(this).running = true
+            // Every band at once: off while any is on, else all on.
+            ACTION_TOGGLE_CONTROLS -> setPausedAll(all().any { !it.prefs.paused })
             ACTION_STOP -> {
                 stop(this)
                 return START_NOT_STICKY
             }
         }
-        link.start()
+        started = true
+        all().forEach { it.link.start() }
         return START_STICKY
+    }
+
+    /**
+     * A band was added, removed, got a key, or its power button was pressed: each band whose
+     * connection is on ([Prefs.connect]) is kept, band 1 even without a key (it says it has
+     * none), band 2 once it's added and has one.
+     */
+    fun bandsChanged() {
+        for (slot in 0 until Bands.MAX) {
+            val wanted = slot < Bands.count(this) && (slot == 0 || Identity.present(this, slot)) && Prefs(this, slot).connect
+            val band = bands[slot]
+            if (wanted && band == null) {
+                bands[slot] = Band(slot).also { if (started) it.link.start() }
+            } else if (!wanted && band != null) {
+                band.link.stop()
+                bands[slot] = null
+                states[slot].update { State() }
+            }
+        }
+        remap()
+        refreshNotification()
     }
 
     override fun onDestroy() {
@@ -80,61 +114,70 @@ class BandService : Service(), BandLink.Listener {
         main.removeCallbacks(idleCheck)
         Alerts.notIdle(this)
         calls.stop()
-        link.stop()
+        all().forEach { it.link.stop() }
         actions.close()
         instance = null
-        state.update { copy(phase = Phase.STOPPED) }
+        for (slot in 0 until Bands.MAX) states[slot].update { copy(phase = Phase.STOPPED) }
         Surfaces.refresh(this)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** From the app (button, tile, widget, notification); the band's own switch comes as `@controls`. */
-    fun setPaused(paused: Boolean) {
-        val changed = paused != state.value.paused
-        prefs.paused = paused
-        link.setPaused(paused)
-        if (changed && state.value.phase == Phase.CONNECTED) link.controlsHaptics(paused)
-        else link.syncControlsHaptics(paused)
-        pausedChanged(paused)
+    /** From the app (button, tile, widget, notification) for one band; the band's own switch comes as `@controls`. */
+    fun setPaused(paused: Boolean, slot: Int = Bands.selected(this)) {
+        val band = band(slot) ?: return
+        val changed = paused != band.state.value.paused
+        band.prefs.paused = paused
+        band.link.setPaused(paused)
+        if (changed && band.connected) band.link.controlsHaptics(paused)
+        else band.link.syncControlsHaptics(paused)
+        band.pausedChanged(paused)
     }
+
+    /** Every band's controls at once (the notification, the tile, the widget). */
+    fun setPausedAll(paused: Boolean) = all().forEach { setPaused(paused, it.slot) }
+
+    /** Whether every band's controls are off (none kept: as stored). */
+    fun allPaused() = all().all { it.prefs.paused }
 
     fun setBandVibration(enabled: Boolean) {
-        prefs.bandVibration = enabled
-        link.setBandVibration(enabled)
+        Prefs(this).bandVibration = enabled
+        all().forEach { it.link.setBandVibration(enabled) }
     }
 
+    /** The band writing into a text field ([Bands.writer]), if it's kept here. */
+    private fun writer() = Bands.writer(this)?.let(::band)
+
     fun typingHaptics(down: Boolean) {
-        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous = !down)
+        val band = writer() ?: return
+        if (band.prefs.bandVibration && band.connected) band.link.profileHaptics(previous = !down)
     }
 
     private fun stepDetent() {
-        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.stepDetent()
+        val band = band(acting) ?: return
+        if (band.prefs.bandVibration && band.connected) band.link.stepDetent()
     }
 
     fun notificationHaptics() = main.post {
-        if (prefs.bandVibration && prefs.notificationVibration && state.value.phase == Phase.CONNECTED && !state.value.otaBusy) {
-            link.notificationHaptics()
+        for (band in all()) {
+            if (band.prefs.bandVibration && band.prefs.notificationVibration && band.connected && !band.state.value.otaBusy) {
+                band.link.notificationHaptics()
+            }
         }
     }
 
-    fun feedbackHaptics(previous: Boolean = false) {
-        if (prefs.bandVibration && state.value.phase == Phase.CONNECTED) link.profileHaptics(previous)
-    }
-
-    /** Record the controls' state; the status notification shows it. */
-    private fun pausedChanged(paused: Boolean) {
-        state.update { copy(paused = paused) }
-        refreshNotification()
-        watchIdle()
-        broadcastStatus()
+    /** A buzz on [slot] (the band the home screen shows unless said). */
+    fun feedbackHaptics(previous: Boolean = false, slot: Int = Bands.selected(this)) {
+        val band = band(slot) ?: return
+        if (band.prefs.bandVibration && band.connected) band.link.profileHaptics(previous)
     }
 
     private val idleCheck = Runnable { if (idleNow()) Alerts.idle(this) }
     private var idleWaiting = false
 
-    private fun idleNow() = state.value.paused && state.value.phase == Phase.CONNECTED
+    /** Every connected band's controls are off (and one is connected). */
+    private fun idleNow() = all().filter { it.connected }.let { on -> on.isNotEmpty() && on.all { it.state.value.paused } }
 
     /** Controls off with the band connected: after [Alerts.IDLE_MS], suggest disconnecting; else take that back. */
     private fun watchIdle() {
@@ -148,242 +191,337 @@ class BandService : Service(), BandLink.Listener {
         }
     }
 
-    /** Send the profiles, the call state and the app in front to the band again (any of them changed). */
-    fun remap() {
-        link.setProfiles(prefs.profilesJson())
-        link.setInCall(CallWatch.inCall)
-        link.setForeground(Profiles.foreground ?: "")
-        showProfile()
-    }
+    /** Send the profiles, the call state and the app in front to every band again (any of them changed). */
+    fun remap() = all().forEach { it.remap() }
 
-    /** The profile's name in the state and the notification, while there's more than one. */
-    private fun showProfile() {
-        val list = Profiles.load(this)
-        val name = list.active(Profiles.foreground).name.takeIf { list.profiles.size > 1 }
-        if (name != state.value.profile) {
-            state.update { copy(profile = name) }
-            refreshNotification()
-        }
-    }
-
-    /** The widget's picker chose a profile: the band gets it, and the user is told. */
+    /** The widget's picker chose a profile for the band the home screen shows: it gets it, and the user is told. */
     fun pick(id: String): String? {
-        if (Profiles.load(this).locked(Profiles.foreground)) return "this app has its own profile"
-        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
-        remap()
-        announce(now)
+        val slot = Bands.selected(this)
+        if (Bands.profiles(this, slot).locked(Profiles.foreground)) return "this app has its own profile"
+        Bands.pick(this, slot, id)
+        val band = band(slot) ?: return null
+        band.remap()
+        band.announce(Bands.profiles(this, slot).active(Profiles.foreground))
         return null
-    }
-
-    /** The band moved to another profile (a gesture with Next or Previous profile): store the pick, then tell the user. */
-    private fun bandSwitched(index: Int, step: Int) {
-        val id = Profiles.load(this).profiles.getOrNull(index)?.id ?: return
-        val now = Profiles.update(this) { it.picking(id) }.active(Profiles.foreground)
-        // Again to the band: a remap sent meanwhile (e.g. a call starting) carried the old pick.
-        remap()
-        announce(now, back = step < 0)
-    }
-
-    /** The band turned the controls on or off (a gesture with Controls on/off). */
-    private fun bandToggled(on: Boolean) {
-        prefs.paused = !on
-        link.controlsHaptics(paused = !on)
-        pausedChanged(!on)
-    }
-
-    /** Another profile is in force: tell the user which. */
-    private fun announce(profile: Profile, back: Boolean = false) {
-        showProfile()
-        Toast.makeText(this, "Profile: ${profile.name}", Toast.LENGTH_SHORT).show()
-        if (Profiles.speak(this)) actions.announce(profile.name)
-        if (Profiles.vibrate(this)) feedbackHaptics(previous = back)
-        onLog("profile: ${profile.name}")
     }
 
     /** Start watching calls, e.g. right after the permission is granted (again is harmless). */
     fun watchCalls() = calls.start()
 
     /** Debug: write a raw ConfigReq (hex) to the band; the answer goes to the log. */
-    fun probeConfig(hex: String) = link.probeConfig(hex)
+    fun probeConfig(hex: String, slot: Int = Bands.selected(this)) = band(slot)?.link?.probeConfig(hex)
 
-    /** Debug: ask the band's update status (read only); the answer goes to the log. */
-    fun otaStatus() = link.otaStatus()
-    fun otaStart(mode: String, dir: String) {
+    /** Ask a band's update status (read only); the answer goes to the log. */
+    fun otaStatus(slot: Int = Bands.selected(this)) = band(slot)?.link?.otaStatus()
+
+    /** One step of a firmware update on [slot] (the firmware screen's band). */
+    fun otaStart(mode: String, dir: String, slot: Int = Bands.selected(this)) {
+        val band = band(slot) ?: return
         // A new start or a cancel ends whatever the last install showed; a cancel leaves nothing to check.
-        state.update { copy(install = null) }
-        if (mode == "cancel") prefs.otaExpect = 0
+        band.state.update { copy(install = null) }
+        if (mode == "cancel") band.prefs.otaExpect = 0
         // What an install would put on the band; checked after its reboot only once the band
         // accepted it (see followInstall), so a dropped or cancelled update leaves nothing to check.
-        installing = if (mode == "install" || mode == "update") {
+        band.installing = if (mode == "install" || mode == "update") {
             val manifest = runCatching { JSONObject(java.io.File(dir, "manifest.json").readText()) }.getOrNull()
             manifest?.optJSONArray("items")?.optJSONObject(0)?.optLong("version")
         } else null
-        link.otaStart(mode, dir)
+        band.link.otaStart(mode, dir)
     }
 
+    /** The writing band's link ([Bands.writer]); null without one kept here. */
+    private fun pen() = writer()?.link
 
-    /** The band's handwriting into the text field in front (see WriteService). */
+    /** The band's handwriting into the text field in front (see WriteService): the band it's on for. */
     /** [before]: the field's text before the cursor, so a sentence's first word gets its capital. */
-    fun setFieldTyping(on: Boolean, before: String = "") = link.setFieldTyping(on, before, prefs.choicesPopup)
-    fun fieldEdits() = link.fieldEdits()
-    fun fieldPenDown() = link.fieldPenDown()
-    fun fieldChoose() = link.fieldChoose()
-    fun fieldChooseStep(forward: Boolean) = link.fieldChooseStep(forward)
-    fun fieldChoosePick() = link.fieldChoosePick()
-    fun fieldChooseCancel() = link.fieldChooseCancel()
+    fun setFieldTyping(on: Boolean, before: String = "") {
+        // Off goes to every band: the switch may have moved to the other one meanwhile.
+        if (!on) all().forEach { it.link.setFieldTyping(false, before, it.prefs.choicesPopup) }
+        else writer()?.let { it.link.setFieldTyping(true, before, it.prefs.choicesPopup) }
+    }
+    fun fieldEdits() = pen()?.fieldEdits()
+    fun fieldPenDown() = pen()?.fieldPenDown()
+    fun fieldPenUp() = pen()?.fieldPenUp()
+    fun setFieldPopup(popup: Boolean) = pen()?.setFieldPopup(popup)
 
-    /** Whether the band's firmware reads handwriting (a `hw_` model); null before it said. */
-    fun bandWrites(): Boolean? = link.deviceInfo()?.takeIf { it.has("handwriting") }?.optBoolean("handwriting")
+    /** The Handwriting layer changed: every band gets it. */
+    fun writingLayerChanged() = HandwritingLayer.json(this).let { json -> all().forEach { it.link.setWritingLayer(json) } }
+    fun fieldChoose() = pen()?.fieldChoose() == true
+    fun fieldChooseStep(forward: Boolean) = pen()?.fieldChooseStep(forward)
+    fun fieldChoosePick() = pen()?.fieldChoosePick()
+    fun fieldChooseCancel() = pen()?.fieldChooseCancel()
+
+    /** Whether a band's firmware reads handwriting (a `hw_` model); null before it said. */
+    fun bandWrites(slot: Int = Bands.selected(this)): Boolean? =
+        band(slot)?.link?.deviceInfo()?.takeIf { it.has("handwriting") }?.optBoolean("handwriting")
 
     /** Debug: the band's own handwriting (see BandLink.setBandHandwriting). */
-    fun setBandHandwriting(on: Boolean) = link.setBandHandwriting(on)
-    fun bandHandwriting(clear: Boolean = false) = link.bandHandwriting(clear)
+    fun setBandHandwriting(on: Boolean, slot: Int = Bands.selected(this)) = band(slot)?.link?.setBandHandwriting(on)
+    fun bandHandwriting(clear: Boolean = false, slot: Int = Bands.selected(this)) = band(slot)?.link?.bandHandwriting(clear)
 
-    /** What the band said about itself (see BandLink.deviceInfo). */
-    fun deviceInfo() = link.deviceInfo()
+    /** What a band said about itself (see BandLink.deviceInfo). */
+    fun deviceInfo(slot: Int = Bands.selected(this)) = band(slot)?.link?.deviceInfo()
 
     private val unlocked = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = nudge()
     }
 
-    /** The band is probably near: connect directly if still waiting for it. */
-    fun nudge() = link.nudge()
+    /** The bands are probably near: connect directly if still waiting for them. */
+    fun nudge() = all().forEach { it.link.nudge() }
 
-    /** Set the band to this wrist now and on every later connection. */
-    fun setHand(hand: String) {
-        prefs.hand = hand
-        link.setProfiles(prefs.profilesJson())
+    /** Set a band to this wrist now and on every later connection. */
+    fun setHand(hand: String, slot: Int = Bands.selected(this)) {
+        // The other band goes on the other wrist; both bands' `band` tags and log marks follow.
+        Bands.setHand(this, slot, hand)
+        remap()
     }
 
-    // BandLink.Listener: called from Bluetooth and link threads.
+    /** One band kept connected: its link, settings and state. */
+    private inner class Band(val slot: Int) : BandLink.Listener {
+        val prefs = Prefs(this@BandService, slot)
+        val link = BandLink(this@BandService, this, slot)
+        val state get() = states[slot]
+        val connected get() = state.value.phase == Phase.CONNECTED
+        /** The firmware an install or update in progress would put on the band. */
+        var installing: Long? = null
+        /** What [broadcastStatus] last sent, so an unchanged state sends nothing. */
+        private var sent: List<Any?>? = null
 
-    override fun onPhase(phase: Phase, band: String?) = main.post {
-        // A disconnect ends an open draw session without a word from band-core: close the pad.
-        if (phase != Phase.CONNECTED) pad.cancelled()
-        state.update {
-            val back = phase == Phase.CONNECTED && install?.stage == "restarting"
-            copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
+        fun remap() {
+            link.setProfiles(prefs.profilesJson())
+            link.setInCall(CallWatch.inCall)
+            link.setForeground(Profiles.foreground ?: "")
+            showProfile()
         }
-        refreshNotification()
-        watchIdle()
-        broadcastStatus()
-    }.let {}
 
-    override fun onStatus(status: JSONObject) = main.post {
-        // Mirrored as the bridge has it (right after a reconnect too); `@controls` says it first.
-        val paused = status.optBoolean("paused")
-        if (paused != prefs.paused) prefs.paused = paused
-        if (paused != state.value.paused) pausedChanged(paused)
-        val before = state.value
-        state.update {
-            copy(
-                paused = paused,
-                battery = if (status.isNull("battery")) null else status.getInt("battery"),
-                charging = status.optBoolean("charging"),
-                hand = status.optString("hand").takeUnless { status.isNull("hand") },
-                lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
-                gestures = status.optLong("gestures"),
-                firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
-                otaStatus = status.optString("ota_status").takeUnless { status.isNull("ota_status") },
-                otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
-                otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
-                otaBusy = status.optBoolean("ota_busy"),
-                otaCancellable = status.optBoolean("ota_cancellable", true),
-                otaItems = status.optJSONArray("ota_items")?.let { items ->
-                    (0 until items.length()).map { i ->
-                        val item = items.getJSONObject(i)
-                        OtaItem(item.getString("name"), item.getLong("size"), item.getLong("sent"), item.getString("stage"))
-                    }
-                }.orEmpty(),
-            )
+        /** The profile's name in the state and the notification, while the band has more than one. */
+        fun showProfile() {
+            val list = Bands.profiles(this@BandService, slot)
+            val name = list.active(Profiles.foreground).name.takeIf { list.profiles.size > 1 }
+            if (name != state.value.profile) {
+                state.update { copy(profile = name) }
+                refreshNotification()
+            }
         }
-        val now = state.value
-        if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
-        if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
-        val level = now.battery
-        if (level != null && (level != before.battery || now.charging != before.charging)) {
-            Alerts.battery(this, now.band, level, now.charging)
+
+        /** Another profile is in force on this band: tell the user which. */
+        fun announce(profile: Profile, back: Boolean = false) {
+            showProfile()
+            val on = if (Bands.two(this@BandService)) " (${Bands.name(this@BandService, slot).lowercase()})" else ""
+            Toast.makeText(this@BandService, "Profile: ${profile.name}$on", Toast.LENGTH_SHORT).show()
+            if (Profiles.speak(this@BandService)) actions.announce(profile.name)
+            if (Profiles.vibrate(this@BandService)) feedbackHaptics(previous = back, slot = slot)
+            onLog("profile: ${profile.name}")
         }
-        refreshNotification()
-        broadcastStatus()
-    }.let {}
 
-    /** What [broadcastStatus] last sent, so an unchanged state sends nothing. */
-    private var sent: List<Any?>? = null
+        /** The band moved to another profile (a gesture with Next or Previous profile): store the pick, then tell the user. */
+        private fun switched(index: Int, step: Int) {
+            val id = Bands.profiles(this@BandService, slot).profiles.getOrNull(index)?.id ?: return
+            Bands.pick(this@BandService, slot, id)
+            // Again to the band: a remap sent meanwhile (e.g. a call starting) carried the old pick.
+            remap()
+            announce(Bands.profiles(this@BandService, slot).active(Profiles.foreground), back = step < 0)
+        }
 
-    /**
-     * Tell the apps that announced themselves how the band is: from their side a flat battery
-     * and a lost connection look the same (the gestures stop). Only those apps, so the band's
-     * state isn't sent to the whole phone. [force]: send even if nothing changed (a new app).
-     */
-    private fun broadcastStatus(force: Boolean = false) {
-        val s = state.value
-        val connected = s.phase == Phase.CONNECTED
-        val now = listOf(s.battery, s.charging, connected, s.paused)
-        if (now == sent && !force) return
-        sent = now
-        for (pkg in prefs.announced) {
-            runCatching {
-                sendBroadcast(
-                    Intent(ACTION_STATUS)
-                        .setPackage(pkg)
-                        .putExtra(EXTRA_BATTERY, s.battery ?: -1)
-                        .putExtra(EXTRA_CHARGING, s.charging)
-                        .putExtra(EXTRA_CONNECTED, connected)
-                        .putExtra(EXTRA_CONTROLS, !s.paused),
+        /** The band turned the controls on or off (a gesture with Controls on/off). */
+        private fun toggled(on: Boolean) {
+            prefs.paused = !on
+            link.controlsHaptics(paused = !on)
+            pausedChanged(!on)
+        }
+
+        /** Record the controls' state; the status notification shows it. */
+        fun pausedChanged(paused: Boolean) {
+            state.update { copy(paused = paused) }
+            refreshNotification()
+            watchIdle()
+            broadcastStatus()
+        }
+
+        // BandLink.Listener: called from Bluetooth and link threads.
+
+        override fun onPhase(phase: Phase, band: String?) = main.post {
+            // A disconnect ends an open draw session without a word from band-core: close the pad.
+            if (phase != Phase.CONNECTED) pad.cancelled()
+            state.update {
+                val back = phase == Phase.CONNECTED && install?.stage == "restarting"
+                copy(phase = phase, band = band ?: this.band, install = if (back) install?.copy(stage = "checking") else install)
+            }
+            // Its wrist may tell it from the other band now: the `band` tags and marks follow.
+            if (phase == Phase.CONNECTED && Bands.two(this@BandService)) this@BandService.remap()
+            refreshNotification()
+            watchIdle()
+            broadcastStatus()
+        }.let {}
+
+        override fun onStatus(status: JSONObject) = main.post {
+            // Firmware keys from before they were kept per band are band 1's.
+            if (slot == 0 && !Firmware.oldKeysMoved(this@BandService)) link.deviceInfo()?.optString("tag")?.takeIf { it.isNotEmpty() }?.let { Firmware.moveOldKeys(this@BandService, it) }
+            // Mirrored as the bridge has it (right after a reconnect too); `@controls` says it first.
+            val paused = status.optBoolean("paused")
+            if (paused != prefs.paused) prefs.paused = paused
+            if (paused != state.value.paused) pausedChanged(paused)
+            val before = state.value
+            state.update {
+                copy(
+                    paused = paused,
+                    battery = if (status.isNull("battery")) null else status.getInt("battery"),
+                    charging = status.optBoolean("charging"),
+                    hand = status.optString("hand").takeUnless { status.isNull("hand") },
+                    lastGesture = status.optString("last_gesture").takeUnless { status.isNull("last_gesture") },
+                    gestures = status.optLong("gestures"),
+                    firmware = status.optString("firmware").takeUnless { status.isNull("firmware") },
+                    otaStatus = status.optString("ota_status").takeUnless { status.isNull("ota_status") },
+                    otaKek = status.optLong("ota_kek").takeUnless { status.isNull("ota_kek") },
+                    otaProgress = status.optString("ota_progress").takeUnless { status.isNull("ota_progress") },
+                    otaBusy = status.optBoolean("ota_busy"),
+                    otaCancellable = status.optBoolean("ota_cancellable", true),
+                    otaItems = status.optJSONArray("ota_items")?.let { items ->
+                        (0 until items.length()).map { i ->
+                            val item = items.getJSONObject(i)
+                            OtaItem(item.getString("name"), item.getLong("size"), item.getLong("sent"), item.getString("stage"))
+                        }
+                    }.orEmpty(),
                 )
             }
+            val now = state.value
+            if (now.otaProgress != before.otaProgress) followInstall(now.otaProgress)
+            if (now.firmware != before.firmware) now.firmware?.let(::checkInstall)
+            val level = now.battery
+            if (level != null && (level != before.battery || now.charging != before.charging)) {
+                Alerts.battery(this@BandService, now.band, level, now.charging, slot)
+            }
+            refreshNotification()
+            broadcastStatus()
+        }.let {}
+
+        /**
+         * Tell the apps that announced themselves how the band is: from their side a flat battery
+         * and a lost connection look the same (the gestures stop). Only those apps, so the band's
+         * state isn't sent to the whole phone. [force]: send even if nothing changed (a new app).
+         * With two bands each sends its own, with a `band` extra ([Bands.tag]).
+         */
+        fun broadcastStatus(force: Boolean = false) {
+            val s = state.value
+            val connected = s.phase == Phase.CONNECTED
+            val now = listOf(s.battery, s.charging, connected, s.paused)
+            if (now == sent && !force) return
+            sent = now
+            for (pkg in prefs.announced) {
+                runCatching {
+                    sendBroadcast(
+                        Intent(ACTION_STATUS)
+                            .setPackage(pkg)
+                            .putExtra(EXTRA_BATTERY, s.battery ?: -1)
+                            .putExtra(EXTRA_CHARGING, s.charging)
+                            .putExtra(EXTRA_CONNECTED, connected)
+                            .putExtra(EXTRA_CONTROLS, !s.paused)
+                            .apply { Bands.tag(this@BandService, slot)?.let { putExtra(EXTRA_BAND, it) } },
+                    )
+                }
+            }
         }
+
+        override fun onActions(actions: List<String>) = main.post {
+            // The palm the next action was made in (`@palm`, just before it).
+            var palm: String? = null
+            for (line in actions) {
+                if (!line.startsWith("@")) {
+                    // In a lesson nothing runs (the bridge sends `@practiced` instead).
+                    if (practice == null) {
+                        acting = slot
+                        this@BandService.actions.run(line, fromBand = true, palm = palm, band = Bands.tag(this@BandService, slot))?.let(::onLog)
+                    }
+                    palm = null
+                    continue
+                }
+                val kind = line.removePrefix("@").substringBefore(' ')
+                val rest = line.substringAfter(' ', "")
+                when (kind) {
+                    // The Activity screen's line: the gesture, its palm and what it did, in the app's words.
+                    "activity" -> ActivityLine.format(
+                        rest,
+                        label = { id -> ActivityLine.label(id, device = { Profiles.devices(this@BandService).get(it)?.name }) { Labels.action(this@BandService, it) } },
+                        profile = { Bands.profiles(this@BandService, slot).profiles.getOrNull(it)?.name },
+                    )?.let(::onLog)
+                    "palm" -> palm = Palm.of(rest)?.key
+                    "gesture" -> practice?.gesture(rest)
+                    "practiced" -> practice?.action(rest)
+                    "field-gesture" -> field?.gesture(rest)
+                    "field" -> if (rest == "off") field?.ended()
+                    "controls" -> toggled(rest == "on")
+                    "profile" -> rest.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }
+                        ?.let { (index, step) -> switched(index, step) }
+                    "held" -> {
+                        Toast.makeText(this@BandService, "This app has its own profile", Toast.LENGTH_SHORT).show()
+                        onLog("profile: this app has its own profile")
+                    }
+                    // In a lesson Draw only shows it's there: the session (a hold can't cancel it) closes again.
+                    "draw-started" -> if (practice != null && drawing == null) link.cancelDrawing() else pad.started()
+                    "pen" -> pad.pen(rest == "down")
+                    "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
+                        val stroke = s.toIntOrNull() ?: return@let
+                        pad.point(stroke, x.toFloatOrNull() ?: return@let, y.toFloatOrNull() ?: return@let)
+                    }
+                    "draw-finished" -> pad.finished(rest)
+                    "drawn" -> pad.drawn(rest)
+                    "not-drawn" -> {
+                        pad.notDrawn()
+                        feedbackHaptics(previous = true, slot = slot)
+                    }
+                    "draw-cancelled" -> pad.cancelled()
+                    "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->
+                        val numbers = w.drop(1).map { it.toDoubleOrNull() ?: return@let }
+                        dragTeaching?.sample(w[0], doubleArrayOf(numbers[0], numbers[1], numbers[2]), numbers[3])
+                    }
+                }
+            }
+        }.let {}
+
+        /**
+         * After an install the band reboots; when it reconnects, say whether it now runs the firmware
+         * that was committed (as Meta AI checks), and ask its update status for the rest (state, ML).
+         */
+        private fun checkInstall(firmware: String) {
+            val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
+            prefs.otaExpect = 0
+            val installed = firmware == expected.toString()
+            onLog(if (installed) "ota: INSTALLED: the band runs $firmware"
+                  else "ota: INSTALL NOT CONFIRMED: the band runs $firmware, not $expected")
+            state.update {
+                val began = install?.since ?: android.os.SystemClock.uptimeMillis()
+                copy(install = Install(expected, if (installed) "installed" else "failed", began, firmware))
+            }
+            // The band reports its version before it accepts requests: ask a moment later.
+            main.postDelayed({ link.otaStatus() }, 3_000)
+        }
+
+        /**
+         * The update's latest line: once the band accepts Install it restarts (the stage shows
+         * that until it's back); a refused or failed update leaves nothing to check afterwards.
+         */
+        private fun followInstall(line: String?) {
+            line ?: return
+            val expected = installing ?: return
+            if (line.startsWith("COMMITTED") || line.startsWith("no answer to Commit")) {
+                installing = null
+                prefs.otaExpect = expected
+                state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
+            }
+        }
+
+        /** A line for the Activity log, marked with the band's L or R when there are two. */
+        override fun onLog(line: String) = main.post {
+            val mark = Bands.mark(this@BandService, slot)
+            this@BandService.onLog(if (mark == null) line else "$mark  $line")
+        }.let {}
     }
 
-    override fun onActions(actions: List<String>) = main.post {
-        for (line in actions) {
-            if (!line.startsWith("@")) {
-                // In a lesson nothing runs (the bridge sends `@practiced` instead).
-                if (practice == null) this.actions.run(line, fromBand = true)?.let(::onLog)
-                continue
-            }
-            val kind = line.removePrefix("@").substringBefore(' ')
-            val rest = line.substringAfter(' ', "")
-            when (kind) {
-                // The Activity screen's line: the gesture, its palm and what it did, in the app's words.
-                "activity" -> ActivityLine.format(
-                    rest,
-                    label = { id -> ActivityLine.label(id, device = { Profiles.devices(this).get(it)?.name }) { Labels.action(this, it) } },
-                    profile = { Profiles.load(this).profiles.getOrNull(it)?.name },
-                )?.let(::onLog)
-                "gesture" -> practice?.gesture(rest)
-                "practiced" -> practice?.action(rest)
-                "field-gesture" -> field?.gesture(rest)
-                "field" -> if (rest == "off") field?.ended()
-                "controls" -> bandToggled(rest == "on")
-                "profile" -> rest.split(' ').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 2 }
-                    ?.let { (index, step) -> bandSwitched(index, step) }
-                "held" -> {
-                    Toast.makeText(this, "This app has its own profile", Toast.LENGTH_SHORT).show()
-                    onLog("profile: this app has its own profile")
-                }
-                // In a lesson Draw only shows it's there: the session (a hold can't cancel it) closes again.
-                "draw-started" -> if (practice != null && drawing == null) link.cancelDrawing() else pad.started()
-                "pen" -> pad.pen(rest == "down")
-                "draw-point" -> rest.split(' ').takeIf { it.size == 3 }?.let { (s, x, y) ->
-                    val stroke = s.toIntOrNull() ?: return@let
-                    pad.point(stroke, x.toFloatOrNull() ?: return@let, y.toFloatOrNull() ?: return@let)
-                }
-                "draw-finished" -> pad.finished(rest)
-                "drawn" -> pad.drawn(rest)
-                "not-drawn" -> {
-                    pad.notDrawn()
-                    feedbackHaptics(previous = true)
-                }
-                "draw-cancelled" -> pad.cancelled()
-                "drag-sample" -> rest.split(' ').takeIf { it.size == 5 }?.let { w ->
-                    val numbers = w.drop(1).map { it.toDoubleOrNull() ?: return@let }
-                    dragTeaching?.sample(w[0], doubleArrayOf(numbers[0], numbers[1], numbers[2]), numbers[3])
-                }
-            }
-        }
-    }.let {}
+    /** A line for the Activity log (the bands' own come marked). */
+    private fun onLog(line: String) {
+        android.util.Log.i("AirGestures", line)
+        log(line)
+    }
 
     /** Run one action as a gesture would (e.g. a sequence's Try it); a failure goes to the log. */
     fun runAction(action: String) = actions.run(action)?.let(::onLog)
@@ -399,19 +537,19 @@ class BandService : Service(), BandLink.Listener {
         private set
 
     /**
-     * Start a lesson: the band's layer goes into practice (gestures are reported, nothing runs,
+     * Start a lesson: every band's layer goes into practice (gestures are reported, nothing runs,
      * the built-ins don't act), whether the controls are on or off.
      */
     fun startPractice(lesson: Practice) {
         // A field being written into would take the lesson's gestures (writing wins over practice).
         WriteService.instance?.lessonStarted()
         practice = lesson
-        link.setPractice(true)
+        all().forEach { it.link.setPractice(true) }
     }
 
     fun endPractice() {
         practice = null
-        link.setPractice(false)
+        all().forEach { it.link.setPractice(false) }
     }
 
     /**
@@ -459,77 +597,49 @@ class BandService : Service(), BandLink.Listener {
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
-    /** Teach a drawing: practice (nothing runs) and teaching (sessions report their strokes). */
+    /**
+     * Teach a drawing on the band the home screen shows: practice everywhere (nothing runs) and
+     * teaching there (its sessions report their strokes).
+     */
     fun startTeachingDrawing(listener: Drawing) {
         drawing = listener
         startPractice(object : Practice { override fun gesture(label: String) = Unit; override fun action(id: String) = Unit })
-        link.setTeaching(true)
+        teacher = Bands.selected(this)
+        band(teacher)?.link?.setTeaching(true)
     }
+    /** The band drawings are taught on. */
+    private var teacher = 0
     /** One try: a draw session the screen opened. */
-    fun drawTry() = link.startDrawing()
+    fun drawTry() = band(teacher)?.link?.startDrawing()
     fun endTeachingDrawing() {
-        link.cancelDrawing()
-        link.setTeaching(false)
+        band(teacher)?.link?.let {
+            it.cancelDrawing()
+            it.setTeaching(false)
+        }
         endPractice()
         drawing = null
     }
+    /** Teach your drags, on the band the home screen shows (its calibration is that band's). */
     fun startDragTeaching(listener: DragTeaching) {
         dragTeaching = listener
-        link.setDragTeaching(true)
+        dragTeacher = Bands.selected(this)
+        band(dragTeacher)?.link?.setDragTeaching(true)
     }
+    private var dragTeacher = 0
     fun endDragTeaching() {
-        link.setDragTeaching(false)
+        band(dragTeacher)?.link?.setDragTeaching(false)
         dragTeaching = null
     }
-    fun cancelDrawing() = link.cancelDrawing()
-    fun palmNow() = link.palmNow()
-    /** The drawings changed: the band matches against the new ones. */
+    fun cancelDrawing() = all().forEach { it.link.cancelDrawing() }
+    /** The palm right now on the band the home screen shows (calibration). */
+    fun palmNow() = shown()?.link?.palmNow()
+    /** The drawings changed: the bands match against the new ones. */
     fun drawingsChanged() {
         val library = Drawings.load(this)
         // Never pruned from an unreadable file: its drawings are only in drawings.broken now.
         if (Drawings.readable(this)) Profiles.pruneDrawingActions(this, library.names.toSet())
-        link.setLibrary(library.toJson())
+        all().forEach { it.link.setLibrary(library.toJson()) }
     }
-
-    /**
-     * After an install the band reboots; when it reconnects, say whether it now runs the firmware
-     * that was committed (as Meta AI checks), and ask its update status for the rest (state, ML).
-     */
-    private fun checkInstall(firmware: String) {
-        val expected = prefs.otaExpect.takeIf { it != 0L } ?: return
-        prefs.otaExpect = 0
-        val installed = firmware == expected.toString()
-        onLog(if (installed) "ota: INSTALLED: the band runs $firmware"
-              else "ota: INSTALL NOT CONFIRMED: the band runs $firmware, not $expected")
-        state.update {
-            val began = install?.since ?: android.os.SystemClock.uptimeMillis()
-            copy(install = Install(expected, if (installed) "installed" else "failed", began, firmware))
-        }
-        // The band reports its version before it accepts requests: ask a moment later.
-        main.postDelayed({ otaStatus() }, 3_000)
-    }
-
-    /**
-     * The update's latest line: once the band accepts Install it restarts (the stage shows
-     * that until it's back); a refused or failed update leaves nothing to check afterwards.
-     */
-    private fun followInstall(line: String?) {
-        line ?: return
-        val expected = installing ?: return
-        if (line.startsWith("COMMITTED") || line.startsWith("no answer to Commit")) {
-            installing = null
-            prefs.otaExpect = expected
-            state.update { copy(install = Install(expected, "restarting", android.os.SystemClock.uptimeMillis())) }
-        }
-    }
-
-    /** The firmware an install or update in progress would put on the band. */
-    private var installing: Long? = null
-
-    override fun onLog(line: String) = main.post {
-        android.util.Log.i("AirGestures", line)
-        state.update { copy(log = (log + line).takeLast(LOG_LINES)) }
-    }.let {}
 
     private fun refreshNotification() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
@@ -537,14 +647,28 @@ class BandService : Service(), BandLink.Listener {
     }
 
     private fun notification(): Notification {
-        val s = state.value
+        val kept = all()
+        val on = kept.filter { it.connected }
         val title = when {
-            s.phase == Phase.CONNECTED && s.paused -> "Controls off"
-            s.phase == Phase.CONNECTED -> "Connected"
-            s.phase == Phase.STOPPED -> "Stopped"
+            on.isNotEmpty() && on.all { it.state.value.paused } -> "Controls off"
+            on.isNotEmpty() && kept.size > 1 && on.size < kept.size -> "1 of 2 bands connected"
+            on.isNotEmpty() -> "Connected"
+            kept.all { it.state.value.phase == Phase.STOPPED } -> "Stopped"
+            kept.size > 1 -> "Looking for the bands"
             else -> "Looking for the band"
         }
-        val text = listOfNotNull(s.band, s.battery?.let { "$it %" }, s.profile).joinToString(" · ")
+        // Each band: its name, battery and profile (with two, the wrist's name and its controls).
+        val text = kept.joinToString("  ·  ") { band ->
+            val s = band.state.value
+            if (kept.size == 1) listOfNotNull(s.band, s.battery?.let { "$it %" }, s.profile).joinToString(" · ")
+            else listOfNotNull(
+                Bands.name(this, band.slot),
+                s.battery?.let { "$it %" },
+                "off".takeIf { s.paused && band.connected },
+                s.profile,
+            ).joinToString(" ")
+        }
+        val paused = kept.isNotEmpty() && kept.all { it.prefs.paused }
         // The launcher's own intent, so the app comes back as it was (not a second Home on top).
         val launch = Intent(this, MainActivity::class.java)
             .setAction(Intent.ACTION_MAIN)
@@ -558,12 +682,12 @@ class BandService : Service(), BandLink.Listener {
             ),
         ).build()
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(if (s.paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
+            .setSmallIcon(if (paused) R.drawable.ic_hand_off else R.drawable.ic_hand)
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(action(if (s.paused) "Turn controls on" else "Turn controls off", ACTION_TOGGLE_CONTROLS, 1))
+            .addAction(action(if (paused) "Turn controls on" else "Turn controls off", ACTION_TOGGLE_CONTROLS, 1))
             .addAction(action("Stop", ACTION_STOP, 2))
             .build()
     }
@@ -624,16 +748,21 @@ class BandService : Service(), BandLink.Listener {
             listener(value)
         }
 
+        /** As [observe], without a first call now. */
+        fun listen(listener: (T) -> Unit) {
+            listeners += listener
+        }
+
         fun remove(listener: (T) -> Unit) {
             listeners -= listener
         }
     }
 
     companion object {
-        /** Pick a profile from outside the service (the widget): through it when it runs, else just stored. */
+        /** Pick a profile from outside the service (the widget) for the band the home screen shows: through it when it runs, else just stored. */
         fun pickProfile(context: Context, id: String) {
             val service = instance
-            if (service != null) service.pick(id) else Profiles.update(context) { it.picking(id) }
+            if (service != null) service.pick(id) else Bands.pick(context, Bands.selected(context), id)
             Surfaces.refresh(context)
         }
 
@@ -652,19 +781,75 @@ class BandService : Service(), BandLink.Listener {
 
         /** The band's state, sent to the apps that have announced themselves. */
         const val ACTION_STATUS = "dev.kb896.airgestures.STATUS"
+        /** Which band it's about, with two ([Bands.tag]). */
+        const val EXTRA_BAND = "band"
         const val EXTRA_BATTERY = "battery"
         const val EXTRA_CHARGING = "charging"
         const val EXTRA_CONNECTED = "connected"
         /** The controls are on (false while the middle hold, a tile or the app turned them off). */
         const val EXTRA_CONTROLS = "controls"
 
+        /**
+         * The band the home screen shows ([Bands.selected]), as [stateOf] has it, with the log and
+         * the claim, which are the app's (not a band's).
+         */
         val state = Observable(State())
+
+        /** Each band's own state, by slot. */
+        private val states: List<Observable<State>> = List(Bands.MAX) { slot -> Observable(State()).also { it.listen { if (slot == shown) mirror() } } }
+
+        fun stateOf(slot: Int) = states[slot.coerceIn(0, Bands.MAX - 1)]
+
+        /** The slot [state] mirrors. */
+        @Volatile private var shown = 0
+        private var lines = emptyList<String>()
+        private var claiming = false
+
+        private fun mirror(): Unit = state.update { states[shown].value.copy(log = lines, claiming = claiming) }
+
+        /** The home screen shows another band (or the bands changed): [state] follows it. On the main thread. */
+        fun selectionChanged(context: Context) {
+            shown = Bands.selected(context)
+            mirror()
+        }
+
+        /** A line for the Activity log. On the main thread. */
+        fun log(line: String) {
+            lines = (lines + line).takeLast(LOG_LINES)
+            mirror()
+        }
+
+        /** A claim is running ([BandClaim]); the service is off meanwhile. */
+        fun setClaiming(on: Boolean) {
+            claiming = on
+            mirror()
+        }
+
         var instance: BandService? = null
             private set
 
+        /** Keep the bands connected; with every band's connection off, all of them come on. */
         fun start(context: Context) {
             Prefs(context).running = true
+            if (Bands.slots(context).none { Prefs(context, it).connect }) Bands.slots(context).forEach { Prefs(context, it).connect = true }
             context.startForegroundService(Intent(context, BandService::class.java))
+        }
+
+        /** Whether [slot] is kept connected now (the service runs and its connection is on). */
+        fun connected(context: Context, slot: Int = Bands.selected(context)) = instance != null && Prefs(context, slot).connect
+
+        /**
+         * One band's power button: its connection on (starting the service if need be) or off
+         * (stopping the service once no band is on).
+         */
+        fun connect(context: Context, slot: Int, on: Boolean) {
+            Prefs(context, slot).connect = on
+            when {
+                on && instance == null -> start(context)
+                on -> instance?.bandsChanged()
+                Bands.slots(context).none { Prefs(context, it).connect } -> stop(context)
+                else -> instance?.bandsChanged()
+            }
         }
 
         fun stop(context: Context) {
@@ -696,27 +881,33 @@ class BandService : Service(), BandLink.Listener {
          * band's state from now on ([ACTION_STATUS]), and once right away.
          */
         fun announce(context: Context, pkg: String?) {
+            val before = Profiles.announced
             front(context) { Profiles.announced = pkg }
+            if (pkg == null && before != null) WriteService.instance?.appLeft(before)
             if (pkg == null) return
             val prefs = Prefs(context)
             val first = pkg !in prefs.announced
             prefs.recordAnnounced(pkg)
-            if (first) instance?.broadcastStatus(force = true)
+            if (first) instance?.all()?.forEach { it.broadcastStatus(force = true) }
         }
 
+        /** Each band whose profile in force changes gets it and says so; the others just hear which app is in front. */
         private fun front(context: Context, change: () -> Unit) {
-            val list = Profiles.load(context)
             val app = Profiles.foreground
-            val before = list.active(app)
+            val lists = Bands.slots(context).map { Bands.profiles(context, it) }
+            val before = lists.map { it.active(app).id }
             change()
-            val after = list.active(Profiles.foreground)
             val service = instance ?: return
-            if (after.id != before.id) {
-                service.remap()
-                service.announce(after)
-            } else if (Profiles.foreground != app) {
-                // The band's layer follows the app in front too (its own profile; whether next and previous may switch).
-                service.link.setForeground(Profiles.foreground ?: "")
+            for (band in service.all()) {
+                val list = lists.getOrNull(band.slot) ?: continue
+                val after = list.active(Profiles.foreground)
+                if (after.id != before[band.slot]) {
+                    band.remap()
+                    band.announce(after)
+                } else if (Profiles.foreground != app) {
+                    // The band's layer follows the app in front too (its own profile; whether next and previous may switch).
+                    band.link.setForeground(Profiles.foreground ?: "")
+                }
             }
         }
 

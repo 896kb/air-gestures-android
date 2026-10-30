@@ -67,8 +67,12 @@ class Actions(
         tts = null
     }
 
-    /** Returns a line for the activity log when the action couldn't run. */
-    fun run(action: String, fromBand: Boolean = false): String? {
+    /**
+     * Returns a line for the activity log when the action couldn't run. [palm]: the position the
+     * band read it in (a [Palm] key; null: none, or uncalibrated) and [band] the band ([Bands.tag]),
+     * which automation sends.
+     */
+    fun run(action: String, fromBand: Boolean = false, palm: String? = null, band: String? = null): String? {
         when (action) {
             "media.play_pause" -> mediaKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
             "media.next" -> mediaKey(KeyEvent.KEYCODE_MEDIA_NEXT)
@@ -94,6 +98,8 @@ class Actions(
             "nav.select" -> return navigate { it.select() }
             "nav.scroll_forward" -> return navigate { it.scroll(forward = true) }.also { if (it == null && fromBand) stepDetent() }
             "nav.scroll_back" -> return navigate { it.scroll(forward = false) }.also { if (it == null && fromBand) stepDetent() }
+            // A text field waiting for it (see WriteService.toggleOverlay).
+            WriteAction.TOGGLE.id -> return WriteService.instance?.toggle() ?: "handwriting needs its accessibility service on"
             else -> {
                 val sent = Mappings.sent(action)
                 return when {
@@ -101,7 +107,7 @@ class Actions(
                     action.startsWith(Tap.PREFIX) -> tap(action)
                     action.startsWith(Strokes.SWIPE) || action.startsWith(Strokes.PATH) -> stroke(action)
                     action.startsWith(Sequences.PREFIX) -> Sequences.started(action).let { (id, profile) -> sequence(id, profile) }
-                    sent != null -> automation(sent).also { if (fromBand && sent is Mappings.Automation.Step) stepDetent() }
+                    sent != null -> automation(Mappings.madeWith(sent, palm, band)).also { if (fromBand && sent is Mappings.Automation.Step) stepDetent() }
                     else -> "unknown action $action"
                 }
             }
@@ -348,7 +354,7 @@ class Actions(
 
     /**
      * For Tasker, MacroDroid, Home Assistant…: what made it ([Mappings.sent]), nothing else:
-     * `gesture=<key>` (plus `palm` for an override), a dial or slider's steps, or
+     * `gesture=<key>` (plus its `palm`), a dial or slider's steps (and `palm`), or
      * `gesture=drawing` with its `name`; each with its `profile`, and `device` when it has one.
      */
     private fun automation(made: Mappings.Automation): String? {

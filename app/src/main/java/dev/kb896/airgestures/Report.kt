@@ -62,7 +62,7 @@ class Report(json: String) {
 
     companion object {
         /** For the stored settings, from band-core. */
-        fun of(context: Context) = Report(runCatching { Bridge.profileReport(Prefs(context).profilesJson()) }.getOrDefault("{}"))
+        fun of(context: Context) = Report(runCatching { Bridge.profileReport(Prefs(context).profilesJson(all = true)) }.getOrDefault("{}"))
 
         /** Bridge.bandChoices' refusal (`bad-json`, `unknown-control`), or null for a list. */
         fun choicesError(json: String): String? = runCatching { JSONObject(json).optString("error").ifEmpty { null } }.getOrNull()

@@ -38,6 +38,10 @@ object Mappings {
         /** "left" / "right" → this band's calibration of that wrist. */
         val calibrations: Map<String, Calibration>,
         val hand: String,
+        /** Every drawing's name: a profile that sends everything sends each one. */
+        val library: Set<String> = emptySet(),
+        /** Gesture key → action id over every profile (Handwriting on/off while a field waits for it), no palm overrides there. */
+        val overlay: Map<String, String> = emptyMap(),
     )
 
     /**
@@ -87,9 +91,11 @@ object Mappings {
     private fun finger(profile: Profile, part: Part): JSONObject {
         val f = part.name.lowercase()
         val drags = profile.drags(part)
+        val dial = if (profile.sendAll) AUTOMATION else profile.dialOf(part)
         return JSONObject().apply {
-            put("dial", dialJson(profile.dialOf(part), if (part == Part.INDEX) "dial" else "${f}_dial", profile.name))
-            put("drags", if (!drags.sliders) "gestures" else JSONObject().put("sliders",
+            put("dial", dialJson(dial, if (part == Part.INDEX) "dial" else "${f}_dial", profile.name))
+            // Sending everything, each drag is a gesture of its own.
+            put("drags", if (!drags.sliders || profile.sendAll) "gestures" else JSONObject().put("sliders",
                 JSONArray(drags.targets.mapIndexed { i, key -> dialJson(key, "${f}_${PAIRS[i]}", profile.name) })))
         }
     }
@@ -110,16 +116,21 @@ object Mappings {
         val profiles = JSONArray()
         for (profile in list.profiles) {
             val map = JSONObject()
-            for (gesture in Gesture.entries) map.put(gesture.key, named(profile.map[gesture.key] ?: gesture.default.id, gesture.key, profile.name))
+            for (gesture in Gesture.entries) {
+                val id = input.overlay[gesture.key] ?: if (profile.sendAll) AUTOMATION else profile.map[gesture.key] ?: gesture.default.id
+                map.put(gesture.key, named(id, gesture.key, profile.name))
+            }
             val palm = JSONObject()
-            for ((key, own) in profile.palm) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at", profile.name) }))
+            // Sending everything there are no overrides: the palm goes with each gesture anyway.
+            if (!profile.sendAll) for ((key, own) in profile.palm) if (key !in input.overlay) palm.put(key, JSONObject(own.mapValues { (at, id) -> named(id, "$key:$at", profile.name) }))
+            val drawings = if (profile.sendAll) input.library.associateWith { AUTOMATION } else drawingsOf(profile, input.drawings)
             profiles.put(JSONObject().apply {
                 put("name", profile.name)
                 put("map", map)
                 put("palm", palm)
                 put("index", finger(profile, Part.INDEX))
                 put("middle", finger(profile, Part.MIDDLE))
-                put("drawings", drawingsJson(drawingsOf(profile, input.drawings), profile.name))
+                put("drawings", drawingsJson(drawings, profile.name))
             })
         }
         val index = { id: String -> list.profiles.indexOfFirst { it.id == id } }
@@ -127,7 +138,10 @@ object Mappings {
             put("hand", input.hand)
             put("picked", index(list.picked).coerceAtLeast(0))
             put("apps", JSONObject(list.apps.mapValues { index(it.value) }.filterValues { it >= 0 }))
-            put("band", input.band.toJson())
+            // The overlay beats the band controls on its gestures too (Controls on/off stays: a way to turn them off).
+            val band = input.band.at.keys.filter { it != Builtin.CONTROLS && input.band[it]?.gesture?.key in input.overlay }
+                .fold(input.band) { controls, builtin -> controls.with(builtin, null) }
+            put("band", band.toJson())
             put("calls", JSONObject(input.calls.filterValues { it != AS_USUAL }.mapValues { (key, id) -> if (id == NOTHING) "-" else named(id, key, CALLS) }))
             put("drawings", drawingsJson(input.drawings, null))
             put("calibration", JSONObject().apply {
@@ -145,19 +159,45 @@ object Mappings {
         abstract val profile: String?
         abstract val device: String?
 
-        /** A gesture; [palm]: the position its override is for. */
-        data class Gesture(val name: String, val palm: String?, override val profile: String? = null, override val device: String? = null) : Automation()
+        /** A gesture; [palm]: the position its override is for, or it was made in; [band]: which band made it (see [madeWith]). */
+        data class Gesture(
+            val name: String,
+            val palm: String?,
+            override val profile: String? = null,
+            override val device: String? = null,
+            val band: String? = null,
+        ) : Automation()
 
         /** A dial or slider step. */
-        data class Step(val name: String, val step: Int, override val profile: String? = null, override val device: String? = null) : Automation() {
-            /** What its steps are gathered by: the dial or slider, the device and the profile. */
+        data class Step(
+            val name: String,
+            val step: Int,
+            override val profile: String? = null,
+            override val device: String? = null,
+            /** The palm at the pinch's press, when the band's calibrated. */
+            val palm: String? = null,
+            val band: String? = null,
+        ) : Automation() {
+            /** What its steps are gathered by: the dial or slider, the device, the profile, the palm and the band. */
             val key get() = copy(step = 0)
         }
 
-        data class Drawing(val name: String, override val profile: String? = null, override val device: String? = null) : Automation()
+        data class Drawing(val name: String, override val profile: String? = null, override val device: String? = null, val band: String? = null) : Automation()
 
         /** A sequence's step: [name] is the sequence's; [profile] null when it wasn't a gesture that started it (Try it). */
         data class Sequence(val name: String, override val profile: String? = null, override val device: String? = null) : Automation()
+    }
+
+    /**
+     * [made] with the palm the band read ([palm]: a [Palm] key, null when uncalibrated) and the
+     * band that made it ([band]: [Bands.tag], null with one band); a drawing has no palm, a
+     * sequence neither, and an override keeps the position it's for.
+     */
+    fun madeWith(made: Automation, palm: String?, band: String? = null): Automation = when (made) {
+        is Automation.Gesture -> made.copy(palm = made.palm ?: palm, band = band)
+        is Automation.Step -> made.copy(palm = palm, band = band)
+        is Automation.Drawing -> made.copy(band = band)
+        is Automation.Sequence -> made
     }
 
     /** What an action name from the bridge sends ([named]), or null when it isn't automation. */
@@ -181,7 +221,8 @@ object Mappings {
 
     /**
      * The broadcast's extras for [made]: `gesture` (a dial or slider's name, `drawing` or `sequence`), then
-     * `palm` (an override), `name` (a drawing's or sequence's), `steps` (a dial or slider's, when given), `profile`,
+     * `palm` (a gesture's or a dial step's: `down`, `sideways` or `up`), `band` (with two: `left`,
+     * `right`, or `band1` / `band2`), `name` (a drawing's or sequence's), `steps` (a dial or slider's, when given), `profile`,
      * and `device` = [device], the device's current name (left out without one).
      */
     fun extras(made: Automation, device: String?, steps: Int? = null): Map<String, Any> = buildMap {
@@ -189,12 +230,18 @@ object Mappings {
             is Automation.Gesture -> {
                 put("gesture", made.name)
                 made.palm?.let { put("palm", it) }
+                made.band?.let { put("band", it) }
             }
             is Automation.Drawing -> {
                 put("gesture", "drawing")
                 put("name", made.name)
+                made.band?.let { put("band", it) }
             }
-            is Automation.Step -> put("gesture", made.name)
+            is Automation.Step -> {
+                put("gesture", made.name)
+                made.palm?.let { put("palm", it) }
+                made.band?.let { put("band", it) }
+            }
             is Automation.Sequence -> {
                 put("gesture", "sequence")
                 put("name", made.name)

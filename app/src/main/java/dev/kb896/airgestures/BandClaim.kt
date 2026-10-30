@@ -36,12 +36,13 @@ import kotlin.concurrent.thread
  * rejection drops it); band.json is written whenever a key was kept, so the next
  * connection tries it ([BandLink] prefers the pending key and confirms it on connect).
  *
- * One claim at a time ([current]); progress goes to [BandService.state]'s log.
- * Permissions are checked by the caller.
+ * One claim at a time ([current]), for one band ([slot]: its key files go in its folder);
+ * progress goes to the Activity log. Permissions are checked by the caller.
  */
 @SuppressLint("MissingPermission")
-class BandClaim private constructor(context: Context, private val session: String) {
+class BandClaim private constructor(context: Context, private val session: String, private val slot: Int) {
     private val context = context.applicationContext
+    private val dir = Bands.dir(context, slot)
     // Looked up on every use: after Bluetooth is switched off and on, an adapter held
     // from before can keep reporting "off" (seen on HyperOS).
     private val adapter get() = context.getSystemService(BluetoothManager::class.java).adapter
@@ -89,6 +90,8 @@ class BandClaim private constructor(context: Context, private val session: Strin
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val found = result.scanRecord?.deviceName ?: result.device.name ?: return
             if (!found.lowercase().startsWith("meta band") || device != null || ended) return
+            // The other band, in pairing mode too: not this one.
+            if (Bands.slots(context).any { it != slot && Bands.address(context, it).equals(result.device.address, ignoreCase = true) }) return
             adapter?.bluetoothLeScanner?.stopScan(this)
             main.removeCallbacks(notFound)
             device = result.device
@@ -174,7 +177,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
     private fun runClaim(device: BluetoothDevice, psm: Int) {
         while (true) {
             try {
-                synchronized(lock) { handle = Bridge.claimOpen(session, context.filesDir.path, guess) }
+                synchronized(lock) { handle = Bridge.claimOpen(session, dir.path, guess) }
             } catch (e: Exception) {
                 return finish("failed: ${e.message}")
             }
@@ -273,7 +276,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
         runCatching { socket?.close() }
         runCatching { gatt?.disconnect() }
         runCatching { gatt?.close() }
-        val pending = File(context.filesDir, "owner.pending.key").exists()
+        val pending = Identity.pendingFile(context, slot).exists()
         device?.takeIf { state == "done" || pending }?.let(::saveBand)
         main.post { ended(state, pending) }
     }
@@ -286,9 +289,11 @@ class BandClaim private constructor(context: Context, private val session: Strin
             .put("address", (bonded ?: device).address)
             .put("name", name)
             .put("scheme_guess", guess)
-        val temp = File(context.filesDir, ".band.json.tmp")
+        val temp = File(dir, ".band.json.tmp")
         temp.writeText(json.toString(2))
-        temp.renameTo(Identity.bandFile(context))
+        temp.renameTo(Identity.bandFile(context, slot))
+        // Connections go to this band from now on (its calibrations are kept by it).
+        Prefs(context, slot).bandAddress = (bonded ?: device).address
     }
 
     private fun line(text: String) = main.post { log(text) }.let {}
@@ -313,7 +318,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
                 if (pending) log("the band may have accepted this phone: its key is kept and the next connection tries it")
             }
         }
-        BandService.state.update { copy(claiming = false) }
+        BandService.setClaiming(false)
     }
 
     companion object {
@@ -324,17 +329,17 @@ class BandClaim private constructor(context: Context, private val session: Strin
         var current: BandClaim? = null
             private set
 
-        /** Start a claim with the stored Meta session (the caller checked there is one). */
+        /** Start a claim of the band the home screen shows, with the stored Meta session (the caller checked there is one). */
         fun start(context: Context, sessionJson: String, picked: BluetoothDevice? = null) {
             if (current != null) return
             // One Bluetooth link at a time: the service must not hold the band.
             BandService.stop(context)
-            BandService.state.update { copy(claiming = true) }
-            current = BandClaim(context, sessionJson).also { it.start(picked) }
+            BandService.setClaiming(true)
+            current = BandClaim(context, sessionJson, Bands.selected(context)).also { it.start(picked) }
         }
 
         fun cancel() = current?.cancel()
 
-        private fun log(line: String) = BandService.state.update { copy(log = (log + line).takeLast(60)) }
+        private fun log(line: String) = BandService.log(line)
     }
 }

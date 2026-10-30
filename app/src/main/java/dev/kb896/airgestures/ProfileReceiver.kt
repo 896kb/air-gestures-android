@@ -10,6 +10,9 @@ import android.content.Intent
  * knows: e.g. it keeps showing on an external screen while the phone is folded and the
  * launcher looks to be in front. It also gets the band's state ([BandService.ACTION_STATUS]).
  *
+ * It may also say how handwriting starts in its text fields (`handwriting`: `on`, `wait` for
+ * "..", `gesture` for Handwriting on/off, or `off`), over the Handwriting layer's setting.
+ *
  * Exported, so anything on the phone can send it. The worst it can do is put one of this
  * app's own profiles in force: it can't read them, make one, or map a gesture to anything.
  */
@@ -17,6 +20,12 @@ class ProfileReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != BandService.ACTION_SET_PROFILE) return
         val pkg = intent.getStringExtra(BandService.EXTRA_PROFILE)?.trim().orEmpty()
+        Profiles.announcedWriting = intent.getStringExtra(EXTRA_HANDWRITING)?.trim()?.lowercase()?.takeIf { pkg.isNotEmpty() && it in MODES }
         BandService.announce(context, pkg.ifEmpty { null })
+    }
+
+    companion object {
+        const val EXTRA_HANDWRITING = "handwriting"
+        private val MODES = setOf("on", "wait", "gesture", "off")
     }
 }

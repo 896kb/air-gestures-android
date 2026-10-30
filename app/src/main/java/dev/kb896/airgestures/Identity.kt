@@ -15,23 +15,33 @@ import java.io.File
  * scheme guess) — the same files the Linux app keeps in ~/.local/state/air-gestures.
  * `owner.pending.key` is a claim from this phone the band may have committed whose
  * confirmation never arrived ([BandClaim]); [BandLink] tries it first and confirms it.
+ * Each band ([Bands]) has its own, in its folder; [slot] is the band the home screen shows
+ * unless said.
  */
 object Identity {
     private const val BUNDLE_FORMAT = "air-gestures-band"
     private const val BUNDLE_VERSION = 1
 
-    fun keyFile(context: Context) = File(context.filesDir, "owner.key")
-    fun pendingFile(context: Context) = File(context.filesDir, "owner.pending.key")
-    fun bandFile(context: Context) = File(context.filesDir, "band.json")
+    fun keyFile(context: Context, slot: Int = Bands.selected(context)) = File(Bands.dir(context, slot), "owner.key")
+    fun pendingFile(context: Context, slot: Int = Bands.selected(context)) = File(Bands.dir(context, slot), "owner.pending.key")
+    fun bandFile(context: Context, slot: Int = Bands.selected(context)) = File(Bands.dir(context, slot), "band.json")
 
-    fun present(context: Context) = keyFile(context).exists() || pendingFile(context).exists()
+    fun present(context: Context, slot: Int = Bands.selected(context)) = keyFile(context, slot).exists() || pendingFile(context, slot).exists()
+
+    /** Any band has a key. */
+    fun anyPresent(context: Context) = Bands.slots(context).any { present(context, it) }
 
     /** Only an unconfirmed claim's key is there. */
-    fun unconfirmed(context: Context) = !keyFile(context).exists() && pendingFile(context).exists()
+    fun unconfirmed(context: Context, slot: Int = Bands.selected(context)) = !keyFile(context, slot).exists() && pendingFile(context, slot).exists()
 
     /** The band's name from band.json, if there is one. */
-    fun bandName(context: Context): String? = runCatching {
-        JSONObject(bandFile(context).readText()).optString("name").ifEmpty { null }
+    fun bandName(context: Context, slot: Int = Bands.selected(context)): String? = runCatching {
+        JSONObject(bandFile(context, slot).readText()).optString("name").ifEmpty { null }
+    }.getOrNull()
+
+    /** The band's Bluetooth address from band.json, if there is one. */
+    fun bandAddress(context: Context, slot: Int): String? = runCatching {
+        JSONObject(bandFile(context, slot).readText()).optString("address").ifEmpty { null }
     }.getOrNull()
 
     /**
@@ -39,14 +49,14 @@ object Identity {
      * share: the confirmed owner key (base64) and band.json. Anyone holding it controls
      * the band. Throws when there's no confirmed key (an unconfirmed claim isn't exported).
      */
-    fun exportBundle(context: Context): ByteArray {
-        val key = keyFile(context).takeIf { it.exists() }?.readBytes()
+    fun exportBundle(context: Context, slot: Int = Bands.selected(context)): ByteArray {
+        val key = keyFile(context, slot).takeIf { it.exists() }?.readBytes()
             ?: throw IllegalStateException("no confirmed owner key on this phone")
         val bundle = JSONObject()
             .put("format", BUNDLE_FORMAT)
             .put("version", BUNDLE_VERSION)
             .put("owner_key", Base64.encodeToString(key, Base64.NO_WRAP))
-        runCatching { JSONObject(bandFile(context).readText()) }.getOrNull()?.let { bundle.put("band", it) }
+        runCatching { JSONObject(bandFile(context, slot).readText()) }.getOrNull()?.let { bundle.put("band", it) }
         return (bundle.toString(2) + "\n").toByteArray()
     }
 
@@ -56,7 +66,7 @@ object Identity {
      * 32 or 97 bytes is the key (checked by opening it in the bridge), other JSON with an
      * address is band.json. Returns what happened, for the activity log.
      */
-    fun import(context: Context, uris: List<Uri>): String {
+    fun import(context: Context, uris: List<Uri>, slot: Int = Bands.selected(context)): String {
         var key: ByteArray? = null
         var band: String? = null
         for (uri in uris) {
@@ -85,10 +95,16 @@ object Identity {
         } catch (e: Exception) {
             return "that isn't a usable owner key: ${e.message}"
         }
-        keyFile(context).writeBytes(owner)
+        // The other band's key is the other band's: not imported twice.
+        val elsewhere = Bands.slots(context).filter { it != slot }.any { other ->
+            keyFile(context, other).takeIf { it.exists() }?.readBytes()?.contentEquals(owner) == true
+        }
+        if (elsewhere) return "that's the other band's owner key"
+        keyFile(context, slot).writeBytes(owner)
         // The imported key is the newer one.
-        pendingFile(context).delete()
-        band?.let { bandFile(context).writeText(it) }
+        pendingFile(context, slot).delete()
+        band?.let { bandFile(context, slot).writeText(it) }
+        BandService.instance?.bandsChanged()
         return if (band != null) "imported the owner key and band" else "imported the owner key"
     }
 
@@ -99,20 +115,32 @@ object Identity {
      * the app (the caller then opens Bluetooth settings).
      */
     @SuppressLint("MissingPermission")
-    fun forget(context: Context): Boolean {
+    fun forget(context: Context, slot: Int = Bands.selected(context)): Boolean {
+        val two = Bands.two(context)
+        val running = BandService.instance != null && two
         BandService.stop(context)
-        keyFile(context).delete()
-        pendingFile(context).delete()
-        bandFile(context).delete()
-        val prefs = Prefs(context)
+        val prefs = Prefs(context, slot)
+        val address = prefs.bandAddress ?: bandAddress(context, slot)
+        keyFile(context, slot).delete()
+        pendingFile(context, slot).delete()
+        bandFile(context, slot).delete()
         if (prefs.associationId >= 0) {
             runCatching {
                 context.getSystemService(CompanionDeviceManager::class.java).disassociate(prefs.associationId)
             }
             prefs.associationId = -1
         }
+        // Two bands: the other one becomes band 1 if need be, and keeps going.
+        if (Bands.two(context)) {
+            Bands.remove(context, slot)
+            if (running) BandService.start(context)
+        } else {
+            prefs.bandAddress = null
+        }
         val adapter = context.getSystemService(BluetoothManager::class.java).adapter
-        val band = adapter?.bondedDevices?.firstOrNull { it.name?.lowercase()?.startsWith("meta band") == true }
+        val band = adapter?.bondedDevices?.firstOrNull { it.address == address }
+            // Without an address, the only band's bond (with two, the other's must stay).
+            ?: adapter?.bondedDevices?.firstOrNull { !two && address == null && it.name?.lowercase()?.startsWith("meta band") == true }
             ?: return false
         // Removing a bond is a hidden API for ordinary apps; many phones still allow it.
         val removed = runCatching { band.javaClass.getMethod("removeBond").invoke(band) as Boolean }.getOrDefault(false)
