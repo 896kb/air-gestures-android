@@ -13,10 +13,11 @@ import java.net.URL
 
 /**
  * Every two hours at most, ask GitLab for the newest release. If it is newer than
- * this build, say so once, in a notification that carries the release notes and
- * opens the APK's permanent address (the same one the site's button uses); the
- * app also shows it at the top of the screen. Nothing is downloaded by the app:
- * the browser does that, and the user installs.
+ * this build, say so once, in a notification that carries the release notes; the
+ * app also shows it at the top of the screen. Both update through the 896 Store
+ * when it's on the phone, else offer to get the store or the APK's permanent
+ * address (the same one the site's button uses). Nothing is downloaded by the
+ * app itself.
  *
  * A dev build compares by its base version: 0.3.9-dev is the work after 0.3.8,
  * so a 0.3.9 release does not nag it, and a 0.4.0 does.
@@ -29,12 +30,19 @@ object UpdateCheck {
     const val EVERY_MS = 2L * 60 * 60 * 1000
     private const val API = "https://gitlab.com/api/v4/projects/86888806/releases?per_page=1"
     const val APK = "https://gitlab.com/896kb/air-gestures-android/-/releases/permalink/latest/downloads/air-gestures.apk"
-    const val RELEASES = "https://gitlab.com/896kb/air-gestures-android/-/releases"
     /** The 896 Store, and the site to get it from. */
     const val STORE = "dev.kb896.store"
     const val STORE_SITE = "https://store.896.ro/"
 
     data class Release(val tag: String, val notes: String)
+
+    fun storeInstalled(context: Context) = runCatching { context.packageManager.getPackageInfo(STORE, 0) }.isSuccess
+
+    /** The store's page for this app, starting the update; a store too old for the link just opens. Null without the store. */
+    fun inStore(context: Context): Intent? {
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/${context.packageName}?update=1")).setPackage(STORE)
+        return if (link.resolveActivity(context.packageManager) != null) link else context.packageManager.getLaunchIntentForPackage(STORE)
+    }
 
     fun version(context: Context): String =
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
@@ -114,20 +122,22 @@ object UpdateCheck {
             NotificationChannel(CHANNEL, "Updates", NotificationManager.IMPORTANCE_DEFAULT)
                 .apply { description = "A new release of this app, once, with its notes." },
         )
-        fun open(url: String, code: Int): PendingIntent = PendingIntent.getActivity(
-            context, code, Intent(Intent.ACTION_VIEW, Uri.parse(url)),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        fun open(intent: Intent, code: Int): PendingIntent = PendingIntent.getActivity(
+            context, code, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        fun open(url: String, code: Int) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)), code)
+        // As the card on Home: the store first, and with it on the phone the only way.
+        val store = inStore(context)?.let { open(it, 3) }
         val version = release.tag.removePrefix("v")
-        val text = plain(release.notes).ifBlank { "Tap to download." }
+        val text = plain(release.notes).ifBlank { "Tap to update." }
         val notification = Notification.Builder(context, CHANNEL)
             .setContentTitle("Air Gestures $version is out, you have ${version(context)}")
             .setContentText(text.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setSmallIcon(R.drawable.ic_hand)
-            .setContentIntent(open(APK, 1))
-            .addAction(Notification.Action.Builder(null, "Download APK", open(APK, 1)).build())
-            .addAction(Notification.Action.Builder(null, "All releases", open(RELEASES, 2)).build())
+            .setContentIntent(store ?: open(STORE_SITE, 2))
+            .addAction(Notification.Action.Builder(null, "Update via 896 Store", store ?: open(STORE_SITE, 2)).build())
+            .apply { if (store == null) addAction(Notification.Action.Builder(null, "Update", open(APK, 1)).build()) }
             .setAutoCancel(true)
             .build()
         manager.notify(NOTIFICATION_ID, notification)

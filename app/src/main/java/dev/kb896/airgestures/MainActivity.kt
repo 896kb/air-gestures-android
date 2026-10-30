@@ -132,15 +132,13 @@ class MainActivity : Screen() {
             })
             // The store first; with it on the phone it's the only way. Checked on every render,
             // so installing it and coming back leaves just its pill. Side by side where they fit.
-            val store = storeInstalled()
+            val store = UpdateCheck.storeInstalled(context)
             addView(rowOrColumn(gap = 10f).apply {
-                addView(storePill { if (store) updateInStore() else openUrl(UpdateCheck.STORE_SITE) })
+                addView(storePill { if (store) UpdateCheck.inStore(context)?.let(::startActivity) else openUrl(UpdateCheck.STORE_SITE) })
                 if (!store) addView(pill("Update", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first)
             })
         }))
     }
-
-    private fun storeInstalled() = runCatching { packageManager.getPackageInfo(UpdateCheck.STORE, 0) }.isSuccess
 
     /** The site's store button: the ink pill with the store's icon. */
     private fun storePill(onClick: () -> Unit) = pill("Update via 896 Store", onClick = onClick).first.apply {
@@ -149,13 +147,6 @@ class MainActivity : Screen() {
         val icon = context.getDrawable(R.drawable.store_896)!!.apply { setBounds(0, 0, dpi(18f), dpi(18f)) }
         setCompoundDrawables(icon, null, null, null)
         compoundDrawablePadding = dpi(8f)
-    }
-
-    /** The store's page for this app, starting the update; a store too old for the link just opens. */
-    private fun updateInStore() {
-        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/$packageName?update=1")).setPackage(UpdateCheck.STORE)
-        val intent = if (link.resolveActivity(packageManager) != null) link else packageManager.getLaunchIntentForPackage(UpdateCheck.STORE)
-        intent?.let(::startActivity)
     }
 
     private fun openUrl(url: String) = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
