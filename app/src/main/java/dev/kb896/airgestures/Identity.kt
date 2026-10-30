@@ -1,6 +1,7 @@
 package dev.kb896.airgestures
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.companion.CompanionDeviceManager
 import android.content.Context
@@ -43,6 +44,40 @@ object Identity {
     fun bandAddress(context: Context, slot: Int): String? = runCatching {
         JSONObject(bandFile(context, slot).readText()).optString("address").ifEmpty { null }
     }.getOrNull()
+
+    /**
+     * The phone's pairings of [slot]'s band, called [name] at [address] (see [bandBonds]); never
+     * the other band's.
+     */
+    @SuppressLint("MissingPermission")
+    fun bonds(context: Context, slot: Int, name: String?, address: String?): List<BluetoothDevice> {
+        val all = context.getSystemService(BluetoothManager::class.java).adapter?.bondedDevices.orEmpty()
+        val others = Bands.slots(context).filter { it != slot }.map { Bands.address(context, it) }
+        val chosen = bandBonds(all.map { it.address to it.name }, name, address, others)
+        return all.filter { it.address in chosen }
+    }
+
+    /**
+     * Which of [bonds] (address to name) are the band called [name] at [address]: that address,
+     * and every pairing of the name. One band can have several: each claim pairs at the private
+     * address the band was heard at, and after a factory reset the older ones hold keys the band
+     * no longer has. Both bands are "Meta Band …", so the name alone could be the other band's
+     * too: one at an address in [others] (theirs) never is. A pairing of this band left under
+     * another name stays; [BandLink] connects by address, so it's only clutter. With neither a
+     * name nor an address, and no other band, every Meta band's.
+     */
+    fun bandBonds(bonds: List<Pair<String, String?>>, name: String?, address: String?, others: List<String?>): List<String> =
+        bonds.filter { (at, called) ->
+            others.none { it.equals(at, ignoreCase = true) } && when {
+                at.equals(address, ignoreCase = true) -> true
+                name != null -> called == name
+                else -> address == null && others.isEmpty() && called?.lowercase()?.startsWith("meta band") == true
+            }
+        }.map { it.first }
+
+    /** Removing a bond is a hidden API for ordinary apps; many phones still allow it. */
+    fun removeBond(device: BluetoothDevice): Boolean =
+        runCatching { device.javaClass.getMethod("removeBond").invoke(device) as Boolean }.getOrDefault(false)
 
     /**
      * `air-gestures-band.json`, the file the Linux app's `air-gestures export`/`import`
@@ -111,16 +146,15 @@ object Identity {
     /**
      * Forget the band on this phone: the service, the key and record, the Bluetooth
      * bond and the companion link. The band keeps its owner; a factory reset (hold its
-     * button about 16 s) clears that. Returns true when the bond couldn't be removed by
+     * button about 16 s) clears that. Returns true when a bond couldn't be removed by
      * the app (the caller then opens Bluetooth settings).
      */
-    @SuppressLint("MissingPermission")
     fun forget(context: Context, slot: Int = Bands.selected(context)): Boolean {
-        val two = Bands.two(context)
-        val running = BandService.instance != null && two
+        val running = BandService.instance != null && Bands.two(context)
         BandService.stop(context)
         val prefs = Prefs(context, slot)
-        val address = prefs.bandAddress ?: bandAddress(context, slot)
+        // Every pairing of this band, not just the first: older claims leave their own.
+        val bonds = bonds(context, slot, bandName(context, slot), Bands.address(context, slot))
         keyFile(context, slot).delete()
         pendingFile(context, slot).delete()
         bandFile(context, slot).delete()
@@ -137,13 +171,6 @@ object Identity {
         } else {
             prefs.bandAddress = null
         }
-        val adapter = context.getSystemService(BluetoothManager::class.java).adapter
-        val band = adapter?.bondedDevices?.firstOrNull { it.address == address }
-            // Without an address, the only band's bond (with two, the other's must stay).
-            ?: adapter?.bondedDevices?.firstOrNull { !two && address == null && it.name?.lowercase()?.startsWith("meta band") == true }
-            ?: return false
-        // Removing a bond is a hidden API for ordinary apps; many phones still allow it.
-        val removed = runCatching { band.javaClass.getMethod("removeBond").invoke(band) as Boolean }.getOrDefault(false)
-        return !removed
+        return bonds.map(::removeBond).any { !it }
     }
 }

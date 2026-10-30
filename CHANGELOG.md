@@ -26,6 +26,10 @@ fails without one.
   "Use the measured ones" is now Revert to defaults.
 - **Firmware keys per band:** Meta wraps each key for one band, so each band keeps its own.
   Keys downloaded before move to band 1. The key a band just installed shows right away.
+- Claiming a band again (after a factory reset, say) removes the phone's old Bluetooth
+  pairings of it first, so it connects instead of failing with "the band disconnected
+  (status 135)" or "(status 147)"; Forget band removes all of them. The other band's pairing
+  is kept.
 - Handwriting no longer ends when Samsung's Edge panel or a flip phone's cover screen comes
   up, and ends when its app is gone even if the app didn't say it left.
 - **Update via 896 Store:** when a new version is out, the card at the top of Home and the

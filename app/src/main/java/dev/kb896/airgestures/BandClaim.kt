@@ -102,8 +102,34 @@ class BandClaim private constructor(context: Context, private val session: Strin
         override fun onScanFailed(errorCode: Int) = finish("failed: the Bluetooth scan failed ($errorCode)")
     }
 
-    /** Pair at the Bluetooth level first, as the desktop does; the channel works without it too. */
+    /**
+     * Drop the phone's old pairings of this band first, as the desktop does: a band in
+     * pairing mode pairs afresh, and one left from before (a factory reset, an earlier
+     * claim at another private address) holds keys the band no longer has. The other
+     * band's pairing stays ([Identity.bandBonds]).
+     */
     private fun bond(device: BluetoothDevice) {
+        val old = Identity.bonds(context, slot, name, null)
+        if (old.isEmpty()) return pair(device)
+        line("removing the phone's old Bluetooth pairing${if (old.size == 1) "" else "s"} of $name")
+        val kept = old.filterNot(Identity::removeBond)
+        if (kept.isNotEmpty()) line("couldn't remove ${kept.size}; if connecting fails, forget $name in Bluetooth settings")
+        afterRemoved(old - kept.toSet(), device, SystemClock.elapsedRealtime())
+    }
+
+    /** Removing takes a moment: pair once [removed] are gone, or after [UNBOND_MS] anyway. */
+    private fun afterRemoved(removed: List<BluetoothDevice>, device: BluetoothDevice, since: Long) {
+        if (ended) return
+        val waiting = removed.any { it.bondState != BluetoothDevice.BOND_NONE }
+        if (waiting && SystemClock.elapsedRealtime() - since < UNBOND_MS) {
+            main.postDelayed({ afterRemoved(removed, device, since) }, 200)
+            return
+        }
+        pair(device)
+    }
+
+    /** Pair at the Bluetooth level first, as the desktop does; the channel works without it too. */
+    private fun pair(device: BluetoothDevice) {
         if (device.bondState == BluetoothDevice.BOND_BONDED) return connect(device)
         line("pairing with $name over Bluetooth")
         val receiver = object : BroadcastReceiver() {
@@ -324,6 +350,7 @@ class BandClaim private constructor(context: Context, private val session: Strin
     companion object {
         private const val SCAN_MS = 20_000L
         private const val BOND_MS = 30_000L
+        private const val UNBOND_MS = 5_000L
 
         /** The claim running now, if any. */
         var current: BandClaim? = null
