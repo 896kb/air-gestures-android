@@ -30,6 +30,9 @@ object UpdateCheck {
     private const val API = "https://gitlab.com/api/v4/projects/86888806/releases?per_page=1"
     const val APK = "https://gitlab.com/896kb/air-gestures-android/-/releases/permalink/latest/downloads/air-gestures.apk"
     const val RELEASES = "https://gitlab.com/896kb/air-gestures-android/-/releases"
+    /** The 896 Store, and the site to get it from. */
+    const val STORE = "dev.kb896.store"
+    const val STORE_SITE = "https://store.896.ro/"
 
     data class Release(val tag: String, val notes: String)
 

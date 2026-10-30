@@ -117,7 +117,7 @@ class MainActivity : Screen() {
 
     private lateinit var update: LinearLayout
 
-    /** A newer release than this build: say so at the top, with its first note line and the download. */
+    /** A newer release than this build: say so at the top, with its first note line and the way to update. */
     private fun renderUpdate() {
         update.removeAllViews()
         val release = UpdateCheck.available(this)
@@ -130,11 +130,33 @@ class MainActivity : Screen() {
             addView(Cb.text(context, 14f, color = Cb.INK_500).apply {
                 text = listOfNotNull("You have ${UpdateCheck.version(context)}.", notes).joinToString(" ")
             })
-            addView(row(gap = 10f).apply {
-                addView(pill("Download APK", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first)
-                addView(pill("All releases") { openUrl(UpdateCheck.RELEASES) }.first)
+            // The store first; with it on the phone it's the only way. Checked on every render,
+            // so installing it and coming back leaves just its pill. The two pills don't fit
+            // side by side on a phone, so they stack.
+            val store = storeInstalled()
+            addView(column().apply {
+                addView(row().apply { addView(storePill { if (store) updateInStore() else openUrl(UpdateCheck.STORE_SITE) }) })
+                if (!store) addView(row().apply { addView(pill("Update", R.drawable.ic_arrow_down) { openUrl(UpdateCheck.APK) }.first) })
             })
         }))
+    }
+
+    private fun storeInstalled() = runCatching { packageManager.getPackageInfo(UpdateCheck.STORE, 0) }.isSuccess
+
+    /** The site's store button: the ink pill with the store's icon. */
+    private fun storePill(onClick: () -> Unit) = pill("Update through 896 Store", onClick = onClick).first.apply {
+        background = NeuDrawable(context, 999f, fill = Cb.INK_900, solid = true, soft = false)
+        setTextColor(android.graphics.Color.WHITE)
+        val icon = context.getDrawable(R.drawable.store_896)!!.apply { setBounds(0, 0, dpi(18f), dpi(18f)) }
+        setCompoundDrawables(icon, null, null, null)
+        compoundDrawablePadding = dpi(8f)
+    }
+
+    /** The store's page for this app, starting the update; a store too old for the link just opens. */
+    private fun updateInStore() {
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("kb896store://app/$packageName?update=1")).setPackage(UpdateCheck.STORE)
+        val intent = if (link.resolveActivity(packageManager) != null) link else packageManager.getLaunchIntentForPackage(UpdateCheck.STORE)
+        intent?.let(::startActivity)
     }
 
     private fun openUrl(url: String) = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
